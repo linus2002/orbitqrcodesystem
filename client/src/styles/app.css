@@ -1,0 +1,670 @@
+/* ==========================================================================
+   QR Shield - shared design system
+   Used by the public verification portal, the login page and the dashboard.
+
+   Colour notes:
+   - The brand blue and the chart series colours come from a palette that was
+     run through a contrast + colour-vision-deficiency validator. Genuine and
+     flagged are BLUE and RED, not green and red: green/red fails deuteranopic
+     separation badly, which would make the trend chart unreadable for roughly
+     1 in 12 men.
+   - Status is never communicated by colour alone. Every status badge and
+     result banner carries an icon and a word as well.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --page: #f5f7fa;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef2f7;
+
+  /* Ink */
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-muted: #6b7a8d;
+  --ink-inverse: #ffffff;
+
+  /* Lines */
+  --line: #e3e9f0;
+  --line-strong: #cbd5e1;
+
+  /* Brand */
+  --brand: #2a78d6;
+  --brand-ink: #1c5cab;
+  --brand-tint: #eaf2fc;
+  --brand-contrast: #ffffff;
+
+  /* Logo */
+  --logo-blue: #1d9fda;
+
+  /* Scrollbars */
+  --scroll-thumb: #cdd5df;
+  --scroll-thumb-hover: #b3bdca;
+
+  /* Tables: solid blue header, faint blue stripe, hairline rules. The header
+     fill is the same blue in both themes - it reads against either page. */
+  --table-head: #1d9fda;
+  --table-stripe: #f6fafd;
+  --table-rule: #eef2f7;
+
+  /* Status - tints for fills, "-ink" steps for text on light surfaces */
+  --good: #0ca30c;
+  --good-ink: #046b04;
+  --good-tint: #e8f7e8;
+
+  --warn: #f0a500;
+  --warn-ink: #92540a;
+  --warn-tint: #fdf3dc;
+
+  --danger: #d03b3b;
+  --danger-ink: #a32424;
+  --danger-tint: #fdecec;
+
+  --info: #2a78d6;
+  --info-ink: #1c5cab;
+  --info-tint: #eaf2fc;
+
+  /* Chart series (validated pair) */
+  --series-genuine: #2a78d6;
+  --series-flagged: #d03b3b;
+  --grid: #e8edf3;
+  --axis: #c3ccd8;
+
+  /* Shape + depth */
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow: 0 2px 4px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.13);
+
+  /*
+   * Poppins is self-hosted (see main.jsx) with a system fallback, so text is
+   * readable before the webfont arrives and stays readable if it never does.
+   *
+   * The mono stack is deliberately NOT Poppins. Codes are serial numbers read
+   * off a printed pack and typed back in; a monospace face keeps the segments
+   * aligned and keeps 0/O and 1/l distinguishable, which matters more here
+   * than typographic consistency.
+   */
+  --sans: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+
+  --header-h: 60px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d1117;
+    --surface: #151b23;
+    --surface-2: #1b232d;
+    --surface-3: #232d3a;
+    --ink: #e6edf3;
+    --ink-2: #a8b7c6;
+    --ink-muted: #8496a8;
+    --line: #253040;
+    --line-strong: #36455a;
+
+    --brand: #3987e5;
+    --brand-ink: #7db4f2;
+    --brand-tint: #14263c;
+
+    --scroll-thumb: #333f4e;
+    --scroll-thumb-hover: #455262;
+    --table-head: #1d9fda;
+    --table-stripe: #19212b;
+    --table-rule: #222c39;
+
+    --good: #23b823;
+    --good-ink: #6fd96f;
+    --good-tint: #102a12;
+    --warn: #f0a500;
+    --warn-ink: #f5c453;
+    --warn-tint: #33260a;
+    --danger: #e05656;
+    --danger-ink: #f08b8b;
+    --danger-tint: #33191a;
+    --info: #3987e5;
+    --info-ink: #7db4f2;
+    --info-tint: #14263c;
+
+    --series-genuine: #3987e5;
+    --series-flagged: #d03b3b;
+    --grid: #232d3a;
+    --axis: #36455a;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* Explicit theme choice wins over the OS setting, both directions. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d1117;
+  --surface: #151b23;
+  --surface-2: #1b232d;
+  --surface-3: #232d3a;
+  --ink: #e6edf3;
+  --ink-2: #a8b7c6;
+  --ink-muted: #8496a8;
+  --line: #253040;
+  --line-strong: #36455a;
+  --brand: #3987e5;
+  --brand-ink: #7db4f2;
+  --brand-tint: #14263c;
+  --scroll-thumb: #333f4e;
+  --scroll-thumb-hover: #455262;
+  --table-head: #1d9fda;
+  --table-stripe: #19212b;
+  --table-rule: #222c39;
+  --good: #23b823;
+  --good-ink: #6fd96f;
+  --good-tint: #102a12;
+  --warn: #f0a500;
+  --warn-ink: #f5c453;
+  --warn-tint: #33260a;
+  --danger: #e05656;
+  --danger-ink: #f08b8b;
+  --danger-tint: #33191a;
+  --info: #3987e5;
+  --info-ink: #7db4f2;
+  --info-tint: #14263c;
+  --series-genuine: #3987e5;
+  --series-flagged: #d03b3b;
+  --grid: #232d3a;
+  --axis: #36455a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+/*
+ * Scrollbars: thin, grey, no stepper arrows, everywhere in the system.
+ *
+ * Set on `*` rather than on `html` alone because every scroll container styles
+ * its own bar - the sidebar, the drawer, the table wrappers - and Chrome does
+ * not inherit `::-webkit-scrollbar` from an ancestor.
+ *
+ * `scrollbar-width`/`scrollbar-color` are the standard properties, honoured by
+ * Firefox and by current Chrome and Safari; the `::-webkit-` block below is
+ * what older WebKit uses, and is also the only way to drop the arrows.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+/* The up/down steppers at each end. */
+*::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 400 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4 { margin: 0; line-height: 1.25; font-weight: 600; letter-spacing: -0.011em; }
+h1 { font-size: 1.75rem; }
+h2 { font-size: 1.3rem; }
+h3 { font-size: 1.05rem; }
+p { margin: 0; }
+a { color: var(--brand-ink); text-underline-offset: 3px; }
+
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+
+/* A single visible focus style everywhere - never remove it. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Visually hidden but available to screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute; left: 8px; top: -60px;
+  background: var(--brand); color: var(--brand-contrast);
+  padding: 10px 16px; border-radius: var(--r);
+  z-index: 200; transition: top 0.15s;
+}
+.skip-link:focus { top: 8px; }
+
+/* --------------------------------------------------------------------------
+   Layout helpers
+   -------------------------------------------------------------------------- */
+
+.wrap { width: 100%; max-width: 1180px; margin-inline: auto; padding-inline: 20px; }
+.wrap-narrow { max-width: 680px; }
+.stack { display: grid; gap: 16px; }
+.stack-sm { display: grid; gap: 8px; }
+.row { display: flex; align-items: center; gap: 12px; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.hidden { display: none !important; }
+
+/* --------------------------------------------------------------------------
+   Brand mark
+   -------------------------------------------------------------------------- */
+
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+.brand svg { width: 28px; height: 28px; flex: none; color: var(--brand); }
+.brand-name { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.02em; }
+.brand-sub { font-size: 0.72rem; color: var(--ink-muted); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+
+/* --------------------------------------------------------------------------
+   Cards
+   -------------------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card-pad { padding: 20px; }
+.card-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.card-head h2, .card-head h3 { font-size: 1rem; font-weight: 600; }
+.card-body { padding: 20px; }
+.card-foot { padding: 14px 20px; border-top: 1px solid var(--line); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+
+/*
+ * A heading that sits above its card instead of inside it - see `TableCard`.
+ * Matches `.card-head` typographically, minus the box: no padding of its own
+ * beyond the small optical inset that lines the text up with the card below.
+ */
+/*
+ * `auto 1fr` so the card, not the heading, absorbs any extra height: side by
+ * side with a plain card in a `.two-up`, the two boxes still line up.
+ */
+.table-section { display: grid; grid-template-rows: auto 1fr; gap: 10px; }
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 0 2px;
+}
+.section-head h2, .section-head h3 { font-size: 1rem; font-weight: 600; }
+
+/* --------------------------------------------------------------------------
+   Buttons
+   -------------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font: 600 0.94rem/1 var(--sans);
+  padding: 11px 18px;
+  border-radius: var(--r);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.14s, border-color 0.14s, transform 0.06s;
+  min-height: 42px;
+}
+.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--line-strong); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-contrast); }
+.btn-primary:hover:not(:disabled) { background: var(--brand-ink); border-color: var(--brand-ink); }
+
+.btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { filter: brightness(0.92); }
+
+.btn-ghost { background: transparent; border-color: transparent; }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-3); }
+
+.btn-lg { font-size: 1.05rem; padding: 15px 24px; min-height: 52px; border-radius: var(--r-lg); }
+.btn-sm { font-size: 0.83rem; padding: 7px 12px; min-height: 34px; }
+.btn-block { width: 100%; }
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn-lg svg { width: 22px; height: 22px; }
+
+/* --------------------------------------------------------------------------
+   Forms
+   -------------------------------------------------------------------------- */
+
+.field { display: grid; gap: 6px; }
+.label { font-size: 0.85rem; font-weight: 600; color: var(--ink-2); }
+.hint { font-size: 0.8rem; color: var(--ink-muted); }
+
+.input, .select, .textarea {
+  width: 100%;
+  font: 400 1rem var(--sans);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  padding: 11px 13px;
+  min-height: 44px;
+}
+.input::placeholder, .textarea::placeholder { color: var(--ink-muted); }
+.input:focus, .select:focus, .textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-tint);
+}
+.input[aria-invalid="true"] { border-color: var(--danger); }
+.textarea { min-height: 110px; resize: vertical; line-height: 1.55; }
+.select { appearance: none; padding-right: 34px; background-image: none; cursor: pointer; }
+
+/* The code entry field: monospace, spaced, uppercase - it is a serial number. */
+.input-code {
+  font-family: var(--mono);
+  font-size: 1.12rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  padding-block: 15px;
+  min-height: 56px;
+}
+
+.field-error { font-size: 0.83rem; color: var(--danger-ink); font-weight: 500; }
+
+/* --------------------------------------------------------------------------
+   Logo lockup
+   -------------------------------------------------------------------------- */
+
+/*
+ * Mark on the left, name over system line on the right. The colour lives in
+ * the mark; the name is plain near-black and the system line takes the brand
+ * blue, so the lockup has one focal point rather than three.
+ *
+ * `--ink` rather than a literal black, so the name inverts with the theme
+ * instead of disappearing into the dark page.
+ */
+.logo { display: inline-flex; align-items: center; gap: 10px; }
+.logo-mark { display: block; width: auto; flex: none; }
+.logo-text { display: flex; flex-direction: column; line-height: 1.05; }
+.logo-name {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.logo-sub {
+  font-weight: 600;
+  color: var(--logo-blue);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Sizes: the mark tracks the cap height of the two lines together. */
+.logo-sm .logo-mark { height: 30px; }
+.logo-sm .logo-name { font-size: 1.05rem; }
+.logo-sm .logo-sub { font-size: 0.56rem; }
+
+.logo-md .logo-mark { height: 38px; }
+.logo-md .logo-name { font-size: 1.35rem; }
+.logo-md .logo-sub { font-size: 0.66rem; }
+
+.logo-lg .logo-mark { height: 48px; }
+.logo-lg .logo-name { font-size: 1.7rem; }
+.logo-lg .logo-sub { font-size: 0.78rem; }
+
+/* --------------------------------------------------------------------------
+   Badges + pills
+   -------------------------------------------------------------------------- */
+
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: 600 0.75rem/1 var(--sans);
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.badge svg { width: 13px; height: 13px; }
+.badge-good { background: var(--good-tint); color: var(--good-ink); border-color: color-mix(in srgb, var(--good) 35%, transparent); }
+.badge-danger { background: var(--danger-tint); color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.badge-warn { background: var(--warn-tint); color: var(--warn-ink); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.badge-info { background: var(--info-tint); color: var(--info-ink); border-color: color-mix(in srgb, var(--info) 35%, transparent); }
+.badge-neutral { background: var(--surface-3); color: var(--ink-2); border-color: var(--line); }
+
+/* --------------------------------------------------------------------------
+   Tables
+   -------------------------------------------------------------------------- */
+
+/*
+ * Solid blue header, zebra-striped body, roomy cells, and the first column set
+ * bold so each row has an obvious anchor to read from.
+ *
+ * `overflow: hidden` on the wrapper is what clips the header fill and the last
+ * row into the rounded corners - the corners are on the wrapper, but the
+ * colour belongs to the cells inside it.
+ */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* A touch tighter than the card it sits in: --r-lg reads as a bubble at the
+     width of a table, where the corner is the only curve on a long straight
+     edge. The card keeps --r-lg, so the two curves still nest. */
+  border-radius: 0 0 var(--r) var(--r);
+}
+/* Square off the bottom when something follows the table inside the card. */
+.table-wrap:has(+ .card-foot),
+.table-wrap:has(+ .pager) { border-radius: 0; }
+/* Rounded all round when the table is the whole card, with no heading above. */
+.card > .table-wrap:first-child { border-radius: var(--r); }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+table.data th {
+  text-align: left;
+  font: 600 0.78rem/1.4 var(--sans);
+  letter-spacing: 0;
+  text-transform: none;
+  color: #fff;
+  background: var(--table-head);
+  padding: 11px 22px;
+  border-bottom: 0;
+  white-space: nowrap;
+  position: sticky; top: 0; z-index: 1;
+}
+table.data td {
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--table-rule);
+  vertical-align: middle;
+  color: var(--ink-2);
+}
+/*
+ * The row's subject, so it carries the weight - semibold, not bold, which is
+ * enough to anchor the row at this text size. And only the subject: a muted
+ * second line inside the same cell stays light, or the whole cell reads as one
+ * heading and the distinction is lost.
+ */
+table.data tbody td:first-child { font-weight: 600; color: var(--ink); }
+table.data tbody td:first-child .text-muted { font-weight: 400; }
+/* Emphasis a cell asks for in its own markup, held to the same weight. */
+table.data strong, table.data b { font-weight: 600; }
+table.data tbody tr:nth-child(even) { background: var(--table-stripe); }
+table.data tbody tr:last-child td { border-bottom: 0; }
+table.data tbody tr:hover { background: var(--brand-tint); }
+table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data td.code { font-family: var(--mono); font-size: 0.76rem; white-space: nowrap; }
+/* The secondary line under a row's subject. */
+table.data td .text-sm { font-size: 0.78rem; }
+
+/*
+ * Status pills in a table cell: bold white text on a solid fill, a step smaller
+ * than a pill elsewhere in the dashboard.
+ *
+ * The fill has to be the deep "-ink" step rather than the brighter --good /
+ * --warn / --danger tokens: white on those measures 2-3:1, while every fill
+ * below clears 6:1. The same fills serve both themes - they are dark enough to
+ * hold white and saturated enough to read against the dark page.
+ */
+table.data .badge {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #fff;
+  border-color: transparent;
+  padding: 3px 8px;
+}
+table.data .badge-good { background: #046b04; }    /* white 8.0:1 */
+table.data .badge-danger { background: #a32424; }  /* white 6.9:1 */
+table.data .badge-warn { background: #92540a; }    /* white 6.1:1 */
+table.data .badge-info { background: #1c5cab; }    /* white 6.6:1 */
+table.data .badge-neutral { background: #4a5a6b; } /* white 6.3:1 */
+
+.empty {
+  padding: 44px 20px;
+  text-align: center;
+  color: var(--ink-muted);
+}
+.empty svg { width: 34px; height: 34px; opacity: 0.4; margin-bottom: 10px; }
+
+/* --------------------------------------------------------------------------
+   Feedback
+   -------------------------------------------------------------------------- */
+
+.alert {
+  display: flex; gap: 11px; align-items: flex-start;
+  padding: 13px 15px;
+  border-radius: var(--r);
+  border: 1px solid transparent;
+  font-size: 0.91rem;
+  line-height: 1.5;
+}
+.alert svg { width: 19px; height: 19px; flex: none; margin-top: 1px; }
+.alert-error { background: var(--danger-tint); color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+.alert-success { background: var(--good-tint); color: var(--good-ink); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+.alert-warn { background: var(--warn-tint); color: var(--warn-ink); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.alert-info { background: var(--info-tint); color: var(--info-ink); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
+
+.spinner {
+  width: 18px; height: 18px; flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --------------------------------------------------------------------------
+   Theme toggle
+   -------------------------------------------------------------------------- */
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--surface-3); color: var(--ink); }
+/* Icon only - no box until you are actually pointing at it. */
+.icon-btn-bare { border-color: transparent; background: none; }
+.icon-btn-bare:hover { background: var(--surface-3); }
+.icon-btn svg { width: 18px; height: 18px; }
+:root[data-theme="dark"] .icon-sun, :root:not([data-theme="light"]) .icon-sun { display: none; }
+:root[data-theme="dark"] .icon-moon, :root:not([data-theme="light"]) .icon-moon { display: block; }
+.icon-moon { display: none; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .icon-sun { display: block; }
+  :root:not([data-theme="dark"]) .icon-moon { display: none; }
+}
+:root[data-theme="light"] .icon-sun { display: block; }
+:root[data-theme="light"] .icon-moon { display: none; }
+
+/* --------------------------------------------------------------------------
+   Plain white page
+   Applied to <body> by the pages that opt into it (the public portal and
+   sign-in) via useBodyClass('page-white').
+
+   Light mode only. In dark mode a white page behind dark cards would both
+   look broken and put light text near white edges, so dark mode keeps its own
+   page colour.
+   -------------------------------------------------------------------------- */
+
+.page-white { background: #ffffff; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .page-white { background: var(--page); }
+}
+:root[data-theme="dark"] .page-white { background: var(--page); }
+
+/* On white, a white card has nothing to separate it from the page, so it
+   needs a more definite edge than the usual hairline. */
+:root:not([data-theme="dark"]) .page-white .card { border-color: var(--line-strong); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .page-white .card { border-color: var(--line); }
+}
+
+/* --------------------------------------------------------------------------
+   Utilities
+   The strict Content-Security-Policy forbids inline style attributes, so any
+   spacing that would otherwise be written inline lives here as a class.
+   -------------------------------------------------------------------------- */
+
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.mt-4 { margin-top: 4px; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.mt-24 { margin-top: 24px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-16 { margin-bottom: 16px; }
+.text-muted { color: var(--ink-muted); }
+.text-sm { font-size: 0.86rem; }
+.text-center { text-align: center; }
+.nowrap { white-space: nowrap; }
+.full-width { width: 100%; }
+
+/* Full-page fallback while a lazy-loaded route chunk downloads. */
+.page-loading {
+  min-height: 60vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  color: var(--ink-muted);
+}

@@ -1,0 +1,202 @@
+/* ==========================================================================
+   Public verification portal.
+   Mobile-first: the overwhelming majority of patients arrive here by pointing
+   a phone camera at a pack, so every target is thumb-sized and the primary
+   action sits above the fold on a small screen.
+   ========================================================================== */
+
+.portal-header {
+  position: sticky; top: 0; z-index: 50;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.portal-header .wrap {
+  height: var(--header-h);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+
+/*
+ * Scoped to the portal. This was a bare `main { ... }` selector, which also
+ * hit the sign-in page's <main> and shrank its grid container by 60px -
+ * leaving a strip of empty page below the image panel. Stylesheets here are
+ * all loaded together into one bundle, so element selectors must be scoped.
+ */
+.portal-main { padding-bottom: 60px; }
+
+/* --- Hero ---------------------------------------------------------------- */
+
+.hero { padding: 36px 0 24px; text-align: center; }
+.hero h1 { font-size: clamp(1.6rem, 5.5vw, 2.2rem); margin-bottom: 10px; }
+.hero p { color: var(--ink-2); max-width: 46ch; margin-inline: auto; font-size: 1.02rem; }
+
+.trust-row {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px;
+  margin-top: 18px; font-size: 0.83rem; color: var(--ink-muted);
+}
+.trust-row span { display: inline-flex; align-items: center; gap: 6px; }
+.trust-row svg { width: 15px; height: 15px; color: var(--good); }
+
+/* --- Check card ---------------------------------------------------------- */
+
+.check-card { padding: 22px; }
+
+.scan-actions { display: grid; gap: 12px; }
+
+.divider {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--ink-muted); font-size: 0.8rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.divider::before, .divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--line);
+}
+
+/* --- Camera scanner ------------------------------------------------------ */
+
+.scanner { display: none; }
+.scanner.active { display: block; }
+
+.scanner-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-height: 420px;
+  background: #000;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.scanner-frame video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* Reticle: a viewfinder that tells the patient where to aim. */
+.reticle {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  pointer-events: none;
+}
+.reticle-box {
+  width: 62%; aspect-ratio: 1;
+  border-radius: 16px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+.scanner-hint {
+  position: absolute; left: 0; right: 0; bottom: 12px;
+  text-align: center; color: #fff; font-size: 0.86rem;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  padding-inline: 16px;
+}
+
+/* --- Result -------------------------------------------------------------- */
+
+.result { margin-top: 20px; }
+.result-card { overflow: hidden; }
+
+.result-banner {
+  padding: 22px 20px;
+  display: flex; gap: 14px; align-items: flex-start;
+  color: #fff;
+}
+.result-banner svg { width: 30px; height: 30px; flex: none; }
+.result-banner h2 { font-size: 1.32rem; color: inherit; letter-spacing: -0.02em; }
+.result-banner p { font-size: 0.94rem; margin-top: 5px; opacity: 0.96; line-height: 1.5; }
+
+.banner-genuine { background: linear-gradient(135deg, #0f8f3f, #0ca30c); }
+.banner-flagged { background: linear-gradient(135deg, #b02a2a, #d03b3b); }
+.banner-invalid { background: linear-gradient(135deg, #8a5a08, #c08312); }
+
+/* Detail rows */
+.detail-list { display: grid; }
+.detail-row {
+  display: grid; grid-template-columns: 130px 1fr; gap: 10px 16px;
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.93rem;
+}
+.detail-row:last-child { border-bottom: 0; }
+.detail-row dt { color: var(--ink-muted); font-size: 0.83rem; font-weight: 600; }
+.detail-row dd { margin: 0; font-weight: 500; }
+.detail-row dd.mono { font-family: var(--mono); font-size: 0.86rem; }
+
+/* Leaflet accordion */
+.leaflet { border-top: 1px solid var(--line); }
+.leaflet-section { border-bottom: 1px solid var(--line); }
+.leaflet-section:last-child { border-bottom: 0; }
+.leaflet-toggle {
+  width: 100%;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 20px;
+  background: none; border: 0;
+  font: 600 0.94rem var(--sans); color: var(--ink);
+  text-align: left; cursor: pointer;
+}
+.leaflet-toggle:hover { background: var(--surface-2); }
+.leaflet-toggle svg { width: 17px; height: 17px; color: var(--ink-muted); transition: transform 0.18s; flex: none; }
+.leaflet-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.leaflet-body {
+  padding: 0 20px 16px;
+  color: var(--ink-2);
+  font-size: 0.93rem;
+  line-height: 1.62;
+}
+
+/* --- Report form --------------------------------------------------------- */
+
+.report-form { display: grid; gap: 14px; }
+
+/* --- SMS / offline help -------------------------------------------------- */
+
+/* --- Two-column body ------------------------------------------------------
+   The check form leads on the left; the supporting notes sit beside it on the
+   right so they are visible without scrolling past the thing people came to
+   do. Below 900px the columns collapse and the notes fall underneath the
+   form - never above it, because on a phone the form must be the first thing
+   in reach.
+   -------------------------------------------------------------------------- */
+
+.portal-wrap { max-width: 1040px; }
+
+.portal-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(270px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+/* The form and its answer stay together in the left column. */
+.portal-primary { min-width: 0; }
+
+.portal-aside {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+}
+
+.help-card { padding: 18px; }
+.help-card h3 { font-size: 0.97rem; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.help-card h3 svg { width: 18px; height: 18px; color: var(--brand); flex: none; }
+.help-card p { font-size: 0.88rem; color: var(--ink-2); line-height: 1.55; }
+.help-card .mono { color: var(--ink); font-weight: 600; }
+
+.portal-footer {
+  border-top: 1px solid var(--line);
+  margin-top: 44px; padding: 24px 0 40px;
+  font-size: 0.84rem; color: var(--ink-muted);
+}
+.portal-footer a { color: var(--ink-2); }
+
+@media (min-width: 640px) {
+  .hero { padding-top: 52px; }
+  .check-card { padding: 28px; }
+}
+
+@media (max-width: 900px) {
+  .portal-layout { grid-template-columns: minmax(0, 1fr); }
+  /* Once the notes are stacked under the form there is room to sit them
+     side by side again, rather than making the page needlessly long. */
+  .portal-aside { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+}

@@ -1,0 +1,165 @@
+/**
+ * Test harness.
+ *
+ * Each suite gets a fresh in-memory database and a real HTTP server on an
+ * ephemeral port, so the tests exercise the actual middleware stack -
+ * security headers, rate limiting, CSRF, the lot - rather than calling service
+ * functions directly and assuming the wiring works.
+ */
+// MUST be first: it sets the test environment before config.js is evaluated.
+import './setup-env.js';
+
+import * as db from '../src/db/index.js';
+import { hashPassword } from '../src/lib/crypto.js';
+import * as serialization from '../src/services/serialization.js';
+
+/** Fresh schema in memory. */
+export function freshDb() {
+  db.close();
+  db.open(':memory:');
+  db.migrate({ silent: true });
+  return db;
+}
+
+/** Minimal but realistic fixture: one product, one released batch with codes. */
+export function seedBasics({ quantity = 40, expiryDays = 700 } = {}) {
+  const expiry = new Date(Date.now() + expiryDays * 86400000).toISOString().slice(0, 10);
+
+  db.run(
+    `INSERT INTO products (sku, name, strength, dosage_form, manufacturer)
+     VALUES ('AMX25', 'Amoxicillin', '250 mg', 'Capsule', 'Northbridge')`
+  );
+  db.run(
+    `INSERT INTO leaflets (product_id, version, sections_json)
+     VALUES (1, '1.0', ?)`,
+    [JSON.stringify([{ heading: 'Dosage', body: 'One capsule three times a day.' }])]
+  );
+  db.run(
+    `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, leaflet_id)
+     VALUES ('AMX25-T1', 1, '2026-09-01', ?, ?, 1)`,
+    [expiry, quantity]
+  );
+
+  serialization.issueCodes(1, {});
+  serialization.transition(1, 'printed', {});
+  serialization.transition(1, 'released', {});
+
+  return {
+    batchId: 1,
+    productId: 1,
+    codes: db.all('SELECT * FROM codes WHERE batch_id = 1 ORDER BY unit_index').map((c) => c.code),
+  };
+}
+
+/** Create a staff account. */
+export function seedUser({ email, password, role = 'admin', name = 'Test User' }) {
+  const { lastInsertRowid } = db.run(
+    `INSERT INTO users (email, full_name, password_hash, role) VALUES (?,?,?,?)`,
+    [email.toLowerCase(), name, hashPassword(password), role]
+  );
+  return lastInsertRowid;
+}
+
+/**
+ * Start the real app on an ephemeral port.
+ * Returns a small client that keeps cookies and the CSRF token, so tests read
+ * the way a browser behaves.
+ */
+export async function startServer() {
+  const { createApp } = await import('../src/server.js');
+  const app = createApp();
+
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const cookies = new Map();
+  let csrf = null;
+
+  function cookieHeader() {
+    return [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+
+  function storeCookies(res) {
+    // Node exposes multiple Set-Cookie headers via getSetCookie().
+    const raw = res.headers.getSetCookie?.() ?? [];
+    for (const line of raw) {
+      const [pair] = line.split(';');
+      const idx = pair.indexOf('=');
+      const name = pair.slice(0, idx).trim();
+      const value = pair.slice(idx + 1).trim();
+      if (value === '' ) cookies.delete(name);
+      else cookies.set(name, value);
+      if (name === 'qrs_csrf') csrf = decodeURIComponent(value);
+    }
+  }
+
+  const client = {
+    base,
+
+    /**
+     * @param {object} [opts]
+     * @param {string} [opts.fromIp] simulate a different device.
+     *   The app trusts X-Forwarded-For only from loopback, which is exactly
+     *   where these tests run, so this is the supported way to make two
+     *   requests look like two different patients.
+     */
+    async request(path, { method = 'GET', body, headers = {}, fromIp } = {}) {
+      const h = { ...headers };
+      if (body !== undefined) h['Content-Type'] = 'application/json';
+      if (cookies.size) h.Cookie = cookieHeader();
+      if (csrf && !['GET', 'HEAD', 'OPTIONS'].includes(method)) h['X-CSRF-Token'] = csrf;
+      if (fromIp) h['X-Forwarded-For'] = fromIp;
+
+      const res = await fetch(`${base}${path}`, {
+        method,
+        headers: h,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      storeCookies(res);
+
+      const type = res.headers.get('content-type') ?? '';
+      const payload = type.includes('application/json') ? await res.json() : await res.text();
+      return { status: res.status, body: payload, headers: res.headers };
+    },
+
+    get: (p, o) => client.request(p, { ...o, method: 'GET' }),
+    post: (p, body, o) => client.request(p, { ...o, method: 'POST', body }),
+    patch: (p, body, o) => client.request(p, { ...o, method: 'PATCH', body }),
+
+    /** Sign in and keep the session for subsequent calls. */
+    async login(email, password) {
+      const res = await client.post('/api/auth/login', { email, password });
+      return res;
+    },
+
+    /** Drop the session without signing out (simulates a fresh browser). */
+    clearCookies() {
+      cookies.clear();
+      csrf = null;
+    },
+
+    /** Send a request deliberately WITHOUT the CSRF header. */
+    async postNoCsrf(path, body) {
+      const h = { 'Content-Type': 'application/json' };
+      if (cookies.size) h.Cookie = cookieHeader();
+      const res = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: h,
+        body: JSON.stringify(body),
+      });
+      return { status: res.status };
+    },
+
+    close: () => new Promise((r) => server.close(r)),
+  };
+
+  return client;
+}
+
+/** Reset the in-process rate limiter between tests. */
+export async function resetRateLimits() {
+  const { store } = await import('../src/lib/ratelimit.js');
+  store.hits.clear();
+}

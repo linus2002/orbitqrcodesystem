@@ -1,0 +1,15 @@
+node_modules/
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+.env
+*.log
+.DS_Store
+Thumbs.db
+coverage/
+dist/
+.vite/
+
+# Local agent tooling state, not part of the app.
+.claude/

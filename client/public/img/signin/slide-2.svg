@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1500" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="g2a" cx="64%" cy="22%" r="92%">
+      <stop offset="0%" stop-color="#d9603a"/><stop offset="38%" stop-color="#8d2f2c"/><stop offset="100%" stop-color="#150707"/>
+    </radialGradient>
+    <radialGradient id="g2b" cx="18%" cy="76%" r="62%">
+      <stop offset="0%" stop-color="#ffb347" stop-opacity=".5"/><stop offset="100%" stop-color="#ffb347" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft2"><feGaussianBlur stdDeviation="54"/></filter>
+  </defs>
+  <rect width="1200" height="1500" fill="url(#g2a)"/>
+  <rect width="1200" height="1500" fill="url(#g2b)"/>
+  <circle cx="300" cy="360" r="250" fill="#ff8a5c" opacity=".26" filter="url(#soft2)"/>
+  <g opacity=".9">
+    <g transform="translate(250 560) rotate(-8)">
+      <rect width="300" height="430" rx="30" fill="#1b0d0c" opacity=".62"/>
+      <rect y="0" width="300" height="86" rx="30" fill="#ff7a4d" opacity=".9"/>
+      <rect y="56" width="300" height="30" fill="#ff7a4d" opacity=".9"/>
+      <rect x="52" y="150" width="196" height="196" rx="18" fill="#f6e9e2" opacity=".2"/>
+    </g>
+    <g transform="translate(560 640) rotate(7)">
+      <rect width="300" height="430" rx="30" fill="#1b0d0c" opacity=".72"/>
+      <rect y="0" width="300" height="86" rx="30" fill="#ffb347" opacity=".85"/>
+      <rect y="56" width="300" height="30" fill="#ffb347" opacity=".85"/>
+      <rect x="52" y="150" width="196" height="196" rx="18" fill="#f6e9e2" opacity=".16"/>
+    </g>
+  </g>
+  <g stroke="#ffd9b0" stroke-width="7" opacity=".5" fill="none">
+    <path d="M150 1180 C 360 1080, 760 1290, 1040 1120"/>
+    <path d="M120 1290 C 340 1200, 780 1380, 1070 1230"/>
+  </g>
+  <rect width="1200" height="1500" fill="#000" opacity=".14"/>
+</svg>
