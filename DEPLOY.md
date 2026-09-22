@@ -1,18 +1,23 @@
 # Deploying Orbit QR Counterfeit System
 
-The server is a single long-running Node process that keeps its data in a
-SQLite file. It needs two things from a host:
+There are two supported shapes, and the database decides which you are in.
 
-1. a **persistent disk** mounted at `/data`, and
-2. **exactly one instance** running.
+| | Vercel | Railway / Render / Fly |
+|---|---|---|
+| Database | Turso (hosted) | SQLite file on a disk |
+| Instances | many, serverless | exactly one |
+| Rate limiting | `rate_hits` table | process memory |
+| Config | `TURSO_DATABASE_URL` | `DB_FILE` + a volume |
 
-Both matter. The database holds every code this installation has issued and
-every scan ever recorded; on an ephemeral filesystem that history disappears
-on each redeploy, and with two instances each gets its own diverging copy.
-This rules out serverless platforms (Vercel, Netlify Functions, Cloudflare
-Workers) unless the data layer is first ported to a hosted database.
+**[Vercel](#vercel) is the quickest to stand up** and needs no container. The
+data layer uses libSQL, which speaks the same SQLite dialect against a hosted
+Turso database, so nothing about the application changes between the two.
 
-A `Dockerfile` is included and works on all three hosts below.
+The single-instance rule for the disk-backed hosts is not a formality: that
+database holds every code issued and every scan recorded, and two instances
+would each get their own diverging copy of it.
+
+A `Dockerfile` is included for the three container hosts below.
 
 ---
 
@@ -40,7 +45,9 @@ will still have in five years.
 | Variable | Value | Notes |
 |---|---|---|
 | `NODE_ENV` | `production` | Turns on secret enforcement and secure cookies |
-| `DB_FILE` | `/data/qrshield.db` | Must be on the mounted disk |
+| `DB_FILE` | `/data/qrshield.db` | Container hosts only; must be on the mounted disk |
+| `TURSO_DATABASE_URL` | `libsql://...` | Vercel only; without it, writes are discarded |
+| `TURSO_AUTH_TOKEN` | the database token | Vercel only |
 | `PUBLIC_BASE_URL` | `https://your-domain` | **Baked into every printed QR code.** Set it to the final domain before printing; it cannot be changed afterwards without orphaning every pack in circulation. |
 | `COOKIE_SECURE` | `true` | All three hosts terminate TLS |
 | `SESSION_SECRET` | *generated* | |
@@ -121,32 +128,82 @@ import('./src/db/index.js').then(async db => {
 
 ---
 
-## Vercel (frontend only)
+## Vercel
 
-[`vercel.json`](vercel.json) is committed so the built SPA deploys correctly:
-it sets the build command and `dist` as the output, adds the catch-all rewrite
-that makes `/login` and `/admin/*` resolve to `index.html`, and re-declares the
-security headers from `src/middleware/security.js` - those are set by Express
-at runtime, so on a static deploy nothing would send them otherwise.
+Everything runs here: the SPA on the CDN, the API as one serverless function
+([`api/index.js`](api/index.js)), the data in Turso.
 
-Note that `vercel.json` rejects any property its schema does not define: a
-`comment` key inside a `rewrites` or `headers` entry fails the deploy with
-`should NOT have additional property`. That is why the explanations live here
-rather than in the file.
+### 1. Create the database
 
-**This deploys the interface, not the system.** There is no Node process on a
-static deploy, so every `/api/*` call returns 404: no sign-in, no code
-verification, no dashboard data. To get a working system with the frontend on
-Vercel, run the API on one of the hosts above and add a rewrite pointing at
-it:
-
-```json
-{ "source": "/api/:path*", "destination": "https://your-api-host/api/:path*" }
+```bash
+npm i -g @tursodatabase/cli
+turso auth signup
+turso db create orbit-qr
+turso db show orbit-qr --url            # -> libsql://orbit-qr-<org>.turso.io
+turso db tokens create orbit-qr         # -> the auth token
 ```
 
-The API host then needs `PUBLIC_BASE_URL` set to the Vercel domain, and the
-session cookie has to be valid for it - see `src/middleware/security.js` for
-the CORS origin allowlist.
+### 2. Apply the schema
+
+Point the local tooling at Turso once, and the migration runs against it:
+
+```bash
+TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... npm run db:migrate
+```
+
+Re-run this after any change to `src/db/schema.sql`; it is idempotent.
+
+### 3. Set the environment variables
+
+In **Project → Settings → Environment Variables**, for Production *and*
+Preview:
+
+| Variable | Value |
+|---|---|
+| `TURSO_DATABASE_URL` | `libsql://orbit-qr-<org>.turso.io` |
+| `TURSO_AUTH_TOKEN` | the token from step 1 |
+| `NODE_ENV` | `production` |
+| `PUBLIC_BASE_URL` | your `https://...vercel.app` domain |
+| `COOKIE_SECURE` | `true` |
+| `SESSION_SECRET` | generated (see above) |
+| `CODE_SECRET` | generated (see above) |
+| `SMS_WEBHOOK_SECRET` | generated (see above) |
+
+`RATELIMIT_STORE` needs no value: it selects the shared SQL store on its own
+whenever `TURSO_DATABASE_URL` is set.
+
+### 4. Deploy
+
+Import the repo and deploy. [`vercel.json`](vercel.json) supplies the build
+command, the output directory, the `/api/*` route to the function, the SPA
+fallback and the security headers.
+
+> Without `TURSO_DATABASE_URL` the function falls back to a local file in an
+> ephemeral filesystem, and **every write is silently discarded** between
+> invocations. The function logs an error at cold start when this happens -
+> check the runtime logs if data seems to vanish.
+
+### Creating the first admin
+
+```bash
+TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... node -e "
+import('./src/db/index.js').then(async db => {
+  const { hashPassword } = await import('./src/lib/crypto.js');
+  db.open();
+  await db.run(
+    'INSERT INTO users (email, full_name, role, password_hash, status) VALUES (?,?,?,?,?)',
+    ['you@example.com', 'Your Name', 'admin', hashPassword('a-strong-password'), 'active']
+  );
+  console.log('admin created');
+});
+"
+```
+
+### Backups
+
+Turso keeps point-in-time restore on its own; `turso db shell orbit-qr .dump`
+takes a copy you hold yourself. The scan history is the audit trail you would
+need after a recall, so do take one.
 
 ---
 
@@ -175,9 +232,14 @@ this; the scan history is the audit trail you would need after a recall.
 
 ## Scaling past one instance
 
-When one box is no longer enough, the constraint is SQLite-on-local-disk, not
-the app. `src/db/index.js` is the only file that talks to the driver — every
-service goes through `db.get/all/run/tx` — so a move to PostgreSQL means
-rewriting that one file plus the column types in `src/db/schema.sql`. The
-in-memory rate limiter in `src/lib/ratelimit.js` would move to Redis at the
-same time, since per-IP counters have to be shared to mean anything.
+On Vercel this is already handled: Turso is shared by every instance, and
+`RATELIMIT_STORE=sql` shares the rate-limit counters through the same
+database.
+
+On a container host, the constraint is SQLite-on-local-disk, not the app.
+`src/db/index.js` is the only file that talks to the driver — every service
+goes through `db.get/all/run/scalar/tx` — so moving to Turso is a matter of
+setting `TURSO_DATABASE_URL`, and moving to PostgreSQL would mean rewriting
+that one file plus the column types in `src/db/schema.sql`. Set
+`RATELIMIT_STORE=sql` at the same time, since per-IP counters have to be
+shared to mean anything.
