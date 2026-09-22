@@ -287,8 +287,9 @@ docs/                    API reference, data model, security notes
 
 ## Configuration
 
-Everything lives in `.env` (see `.env.example` for the annotated list). The
-settings that matter most:
+Everything lives in `.env`, which `npm run setup` generates with freshly
+random secrets. `src/config.js` is the authoritative list of every setting the
+app reads. The ones that matter most:
 
 | Variable | Why it matters |
 |---|---|

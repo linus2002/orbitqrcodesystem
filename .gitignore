@@ -13,3 +13,6 @@ dist/
 
 # Local agent tooling state, not part of the app.
 .claude/
+
+# The .env template lives in scripts/setup.js, which generates real secrets.
+.env.example
