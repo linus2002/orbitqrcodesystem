@@ -101,10 +101,10 @@ function daysUntil(isoDate) {
 }
 
 /** Shape the public leaflet payload. */
-function loadLeaflet(batch) {
+async function loadLeaflet(batch) {
   const leaflet = batch.leaflet_id
-    ? db.get('SELECT * FROM leaflets WHERE id = ?', [batch.leaflet_id])
-    : db.get(
+    ? await db.get('SELECT * FROM leaflets WHERE id = ?', [batch.leaflet_id])
+    : await db.get(
         `SELECT * FROM leaflets WHERE product_id = ? AND language = 'en'
           ORDER BY effective_from DESC LIMIT 1`,
         [batch.product_id]
@@ -124,10 +124,10 @@ function loadLeaflet(batch) {
  * the threshold is crossed. This is the detective control that pairs with the
  * preventive rate limiter.
  */
-function detectGuessing(ipHash, scanId) {
+async function detectGuessing(ipHash, scanId) {
   if (!ipHash) return;
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const attempts = db.scalar(
+  const attempts = await db.scalar(
     `SELECT COUNT(*) FROM scans
       WHERE ip_hash = ? AND created_at >= ?
         AND reason IN ('unknown_code', 'checksum_failed', 'malformed')`,
@@ -136,7 +136,7 @@ function detectGuessing(ipHash, scanId) {
 
   if (attempts >= config.rateLimit.guessAlertThreshold) {
     // Fire once per hour per source rather than on every subsequent attempt.
-    const recent = db.get(
+    const recent = await db.get(
       `SELECT id FROM alerts
         WHERE type = 'guess_attack' AND status IN ('open','investigating')
           AND json_extract(detail_json, '$.ipHash') = ?
@@ -145,7 +145,7 @@ function detectGuessing(ipHash, scanId) {
       [ipHash, since]
     );
     if (!recent) {
-      alerts.raise({
+      await alerts.raise({
         type: 'guess_attack',
         scanId,
         context: { ipHash, attempts, windowHours: 1 },
@@ -165,7 +165,7 @@ function detectGuessing(ipHash, scanId) {
  * @param {string} [ctx.msisdn]    phone number, SMS channel only
  * @returns {object} public-safe result
  */
-export function verify(rawCode, ctx = {}) {
+export async function verify(rawCode, ctx = {}) {
   const { channel = 'web', signature = null, req = null, msisdn = null } = ctx;
 
   const ipHash = pseudonymize(req?.clientIp, config.secrets.session);
@@ -187,7 +187,7 @@ export function verify(rawCode, ctx = {}) {
     // An empty submission is a UI event, not a security event: do not log it.
     let scanId = null;
     if (reason !== REASONS.EMPTY) {
-      scanId = logScan({
+      scanId = await logScan({
         codeText: parsed.code ?? String(rawCode ?? '').slice(0, 64),
         result: 'invalid',
         reason,
@@ -198,7 +198,7 @@ export function verify(rawCode, ctx = {}) {
         geo,
         signatureState: checkSignature(parsed.code ?? '', signature, config.secrets.code),
       });
-      detectGuessing(ipHash, scanId);
+      await detectGuessing(ipHash, scanId);
     }
 
     return publicResult({
@@ -214,7 +214,7 @@ export function verify(rawCode, ctx = {}) {
   const signatureState = checkSignature(code, signature, config.secrets.code);
 
   // --- 2. Registry lookup --------------------------------------------------
-  const row = db.get(
+  const row = await db.get(
     `SELECT c.*,
             b.batch_number, b.mfg_date, b.expiry_date, b.status AS batch_status,
             b.is_test, b.leaflet_id, b.product_id AS batch_product_id, b.recall_reason,
@@ -228,7 +228,7 @@ export function verify(rawCode, ctx = {}) {
   );
 
   if (!row) {
-    const scanId = logScan({
+    const scanId = await logScan({
       codeText: code,
       result: 'flagged',
       reason: REASONS.UNKNOWN_CODE,
@@ -239,12 +239,12 @@ export function verify(rawCode, ctx = {}) {
       geo,
       signatureState,
     });
-    alerts.raise({
+    await alerts.raise({
       type: 'unknown_code',
       scanId,
       context: { code, channel, country: geo.country, signatureState },
     });
-    detectGuessing(ipHash, scanId);
+    await detectGuessing(ipHash, scanId);
 
     return publicResult({
       result: 'flagged',
@@ -280,7 +280,7 @@ export function verify(rawCode, ctx = {}) {
     reason = REASONS.EXPIRED;
   } else if (row.verified_count > 0) {
     // Grace window: the same source re-checking the same pack is one event.
-    const lastSameSource = db.get(
+    const lastSameSource = await db.get(
       `SELECT created_at FROM scans
         WHERE code_id = ? AND result = 'genuine'
           AND ip_hash IS NOT NULL AND ip_hash = ?
@@ -301,8 +301,8 @@ export function verify(rawCode, ctx = {}) {
   }
 
   // --- Persist: scan row, counters and alert, atomically -------------------
-  const scanId = db.tx(() => {
-    const id = logScan({
+  const scanId = await db.tx(async () => {
+    const id = await logScan({
       codeText: code,
       codeId: row.id,
       batchId: row.batch_id,
@@ -321,7 +321,7 @@ export function verify(rawCode, ctx = {}) {
 
     // A grace re-scan must not inflate the counter that defines "duplicate".
     if (reason !== REASONS.OK_REPEAT_SAME_SOURCE) {
-      db.run(
+      await db.run(
         `UPDATE codes
             SET scan_count = scan_count + 1,
                 verified_count = verified_count + CASE WHEN ? = 'genuine' THEN 1 ELSE 0 END,
@@ -337,7 +337,7 @@ export function verify(rawCode, ctx = {}) {
         [result, result, result, result, row.id]
       );
     } else {
-      db.run(
+      await db.run(
         `UPDATE codes SET last_scan_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
         [row.id]
       );
@@ -355,7 +355,7 @@ export function verify(rawCode, ctx = {}) {
   }[reason];
 
   if (alertType) {
-    alerts.raise({
+    await alerts.raise({
       type: alertType,
       codeId: row.id,
       batchId: row.batch_id,
@@ -407,14 +407,14 @@ export function verify(rawCode, ctx = {}) {
     // The leaflet is shown only when the pack is trustworthy. Rendering
     // official dosing information next to a counterfeit warning would be
     // actively dangerous.
-    leaflet: result === 'genuine' ? loadLeaflet(row) : null,
+    leaflet: result === 'genuine' ? await loadLeaflet(row) : null,
     firstVerifiedAt: row.first_scan_at,
     reportable: result !== 'genuine',
   });
 }
 
 /** Insert one scan row. Returns its id. */
-function logScan({
+async function logScan({
   codeText,
   codeId = null,
   batchId = null,
@@ -430,7 +430,7 @@ function logScan({
   signatureState = null,
   isTest = false,
 }) {
-  const { lastInsertRowid } = db.run(
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO scans
        (code_text, code_id, batch_id, product_id, result, reason, channel,
         signature_state, scan_number, ip_hash, msisdn_hash, user_agent,
@@ -475,19 +475,27 @@ function publicResult(payload) {
  * Same decision logic per code, but the response is a compact summary rather
  * than a full patient-facing payload.
  */
-export function verifyBulk(codes, ctx = {}) {
+export async function verifyBulk(codes, ctx = {}) {
   const unique = [...new Set(codes.map((c) => String(c).trim()).filter(Boolean))];
-  const results = unique.map((raw) => {
-    const r = verify(raw, { ...ctx, channel: 'api' });
-    return {
+
+  /*
+   * Checked one at a time rather than with Promise.all: each verification
+   * writes a scan row inside a transaction, and the connection serves a single
+   * transaction at a time. Running them concurrently would have them fighting
+   * over it, and a shipment check is not latency-critical.
+   */
+  const results = [];
+  for (const raw of unique) {
+    const r = await verify(raw, { ...ctx, channel: 'api' });
+    results.push({
       code: r.code ?? raw,
       result: r.result,
       reason: r.reason,
       product: r.product?.name ?? null,
       batch: r.batch?.number ?? null,
       expiryDate: r.batch?.expiryDate ?? null,
-    };
-  });
+    });
+  }
 
   return {
     checked: results.length,

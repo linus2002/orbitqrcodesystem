@@ -15,12 +15,12 @@ import { unauthorized, forbidden } from '../lib/errors.js';
  * Attach `req.user` / `req.session` when the caller presents a valid session.
  * Accepts either the httpOnly cookie (browser) or a Bearer token (API client).
  */
-export function attachUser(req, res, next) {
+export async function attachUser(req, res, next) {
   const bearer = req.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
   const token = req.cookies?.[config.session.cookieName] ?? bearer;
   if (!token) return next();
 
-  const resolved = authService.resolveSession(token);
+  const resolved = await authService.resolveSession(token);
   if (resolved) {
     req.user = resolved.user;
     req.session = resolved.session;

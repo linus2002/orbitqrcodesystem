@@ -12,16 +12,16 @@ import * as db from '../src/db/index.js';
 import { config } from '../src/config.js';
 
 db.open();
-db.migrate();
+await db.migrate();
 
-const tables = db.all(
+const tables = await db.all(
   `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
 );
 
 console.log(`\nDatabase : ${config.db.file}`);
 console.log(`Tables   : ${tables.length}`);
 for (const t of tables) {
-  const n = db.scalar(`SELECT COUNT(*) FROM "${t.name}"`);
+  const n = await db.scalar(`SELECT COUNT(*) FROM "${t.name}"`);
   console.log(`  ${t.name.padEnd(20)} ${String(n).padStart(8)} rows`);
 }
 db.close();

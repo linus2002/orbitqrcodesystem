@@ -50,10 +50,10 @@ const onVerifyLimit = (req) => {
 // ---------------------------------------------------------------------------
 // GET /api/health - liveness probe for the load balancer
 // ---------------------------------------------------------------------------
-router.get('/health', (req, res) => {
+router.get('/health', async (req, res) => {
   let dbOk = true;
   try {
-    db.scalar('SELECT 1');
+    await db.scalar('SELECT 1');
   } catch {
     dbOk = false;
   }
@@ -78,13 +78,13 @@ router.get('/health', (req, res) => {
 router.post(
   '/verify',
   rateLimit({ limiters: [verifyBurst, verifyHourly], onLimit: onVerifyLimit }),
-  (req, res) => {
+  async (req, res) => {
     const { code, signature } = validate(req.body, {
       code: { type: 'string', required: true, max: 64 },
       signature: { type: 'string', max: 32 },
     });
 
-    const result = verification.verify(code, {
+    const result = await verification.verify(code, {
       channel: 'web',
       signature: signature ?? null,
       req,
@@ -100,8 +100,8 @@ router.post(
 router.get(
   '/verify/:code',
   rateLimit({ limiters: [verifyBurst, verifyHourly], onLimit: onVerifyLimit }),
-  (req, res) => {
-    const result = verification.verify(req.params.code, {
+  async (req, res) => {
+    const result = await verification.verify(req.params.code, {
       channel: 'web',
       signature: typeof req.query.s === 'string' ? req.query.s : null,
       req,
@@ -119,13 +119,13 @@ router.get(
  * The field guide's "pharmacist checking a whole shipment on arrival follows
  * the same lookup, batched rather than one code at a time".
  */
-router.post('/verify/bulk', rateLimit({ limiters: [bulkLimiter] }), (req, res) => {
+router.post('/verify/bulk', rateLimit({ limiters: [bulkLimiter] }), async (req, res) => {
   const { codes } = validate(req.body, {
     codes: { type: 'array', required: true, max: 100 },
   });
   if (!codes.length) throw badRequest('Provide at least one code.');
 
-  res.json(verification.verifyBulk(codes, { req }));
+  res.json(await verification.verifyBulk(codes, { req }));
 });
 
 // ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ router.post('/verify/bulk', rateLimit({ limiters: [bulkLimiter] }), (req, res) =
  * a HIGH severity alert, because a human bothering to fill in this form is a
  * stronger signal than most automated ones.
  */
-router.post('/report', rateLimit({ limiters: [reportLimiter] }), (req, res) => {
+router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res) => {
   const data = validate(req.body, {
     code: { type: 'string', max: 64 },
     description: { type: 'string', required: true, min: 10, max: 2000 },
@@ -148,10 +148,10 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), (req, res) => {
   });
 
   const normalized = data.code ? normalizeCode(data.code) : null;
-  const codeRow = normalized ? db.get('SELECT id, batch_id FROM codes WHERE code = ?', [normalized]) : null;
+  const codeRow = normalized ? await db.get('SELECT id, batch_id FROM codes WHERE code = ?', [normalized]) : null;
 
-  const report = db.tx(() => {
-    const { lastInsertRowid } = db.run(
+  const report = await db.tx(async () => {
+    const { lastInsertRowid } = await db.run(
       `INSERT INTO consumer_reports
          (code_text, code_id, scan_id, reporter_name, reporter_contact, purchase_location, description)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -166,7 +166,7 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), (req, res) => {
       ]
     );
 
-    const alert = alerts.raise({
+    const alert = await alerts.raise({
       type: 'consumer_report',
       codeId: codeRow?.id ?? null,
       batchId: codeRow?.batch_id ?? null,
@@ -180,7 +180,7 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), (req, res) => {
     });
 
     if (alert) {
-      db.run('UPDATE consumer_reports SET alert_id = ? WHERE id = ?', [alert.id, lastInsertRowid]);
+      await db.run('UPDATE consumer_reports SET alert_id = ? WHERE id = ?', [alert.id, lastInsertRowid]);
     }
     return lastInsertRowid;
   });
@@ -199,13 +199,13 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /api/product/:sku/leaflet - the public leaflet
 // ---------------------------------------------------------------------------
-router.get('/product/:sku/leaflet', (req, res) => {
-  const product = db.get('SELECT * FROM products WHERE sku = ?', [
+router.get('/product/:sku/leaflet', async (req, res) => {
+  const product = await db.get('SELECT * FROM products WHERE sku = ?', [
     String(req.params.sku).toUpperCase(),
   ]);
   if (!product) throw notFound('Product not found');
 
-  const leaflet = db.get(
+  const leaflet = await db.get(
     `SELECT * FROM leaflets WHERE product_id = ? AND language = ?
       ORDER BY effective_from DESC LIMIT 1`,
     [product.id, String(req.query.lang ?? 'en')]

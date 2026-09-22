@@ -40,7 +40,7 @@ function requireWebhookSecret(req, res, next) {
  * `From` / `Body`, and answers with TwiML when the caller is Twilio so the
  * reply is delivered in the same HTTP round trip.
  */
-router.post('/inbound', requireWebhookSecret, rateLimit({ limiters: [smsLimiter] }), (req, res) => {
+router.post('/inbound', requireWebhookSecret, rateLimit({ limiters: [smsLimiter] }), async (req, res) => {
   const from = req.body?.from ?? req.body?.From;
   const body = req.body?.body ?? req.body?.Body;
 
@@ -48,7 +48,7 @@ router.post('/inbound', requireWebhookSecret, rateLimit({ limiters: [smsLimiter]
     throw badRequest('Both a sender number and a message body are required.');
   }
 
-  const { reply, result } = sms.handleInbound(String(from), String(body), req);
+  const { reply, result } = await sms.handleInbound(String(from), String(body), req);
 
   // Twilio-style synchronous reply.
   if (String(req.query.format) === 'twiml' || req.body?.MessageSid) {

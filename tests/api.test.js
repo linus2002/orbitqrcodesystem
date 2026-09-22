@@ -26,11 +26,11 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  freshDb();
-  codes = seedBasics().codes;
-  seedUser({ ...ADMIN, role: 'admin', name: 'Ada Admin' });
-  seedUser({ ...SECURITY, role: 'security', name: 'Sam Security' });
-  seedUser({ ...REGULATOR, role: 'regulator', name: 'Rita Regulator' });
+  await freshDb();
+  codes = (await seedBasics()).codes;
+  await seedUser({ ...ADMIN, role: 'admin', name: 'Ada Admin' });
+  await seedUser({ ...SECURITY, role: 'security', name: 'Sam Security' });
+  await seedUser({ ...REGULATOR, role: 'regulator', name: 'Rita Regulator' });
   client.clearCookies();
   await resetRateLimits();
 });
@@ -95,8 +95,8 @@ test('a patient report is accepted and returns a reference', async () => {
 
   assert.equal(res.status, 201);
   assert.match(res.body.reference, /^RPT-\d{6}$/);
-  assert.equal(db.scalar('SELECT COUNT(*) FROM consumer_reports'), 1);
-  assert.equal(db.scalar(`SELECT COUNT(*) FROM alerts WHERE type = 'consumer_report'`), 1);
+  assert.equal(await db.scalar('SELECT COUNT(*) FROM consumer_reports'), 1);
+  assert.equal(await db.scalar(`SELECT COUNT(*) FROM alerts WHERE type = 'consumer_report'`), 1);
 });
 
 test('a report needs a real description', async () => {
@@ -319,7 +319,7 @@ test('the SMS webhook verifies a code and replies in plain words', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.result, 'genuine');
   assert.match(res.body.reply, /GENUINE/);
-  assert.equal(db.scalar(`SELECT COUNT(*) FROM scans WHERE channel = 'sms'`), 1);
+  assert.equal(await db.scalar(`SELECT COUNT(*) FROM scans WHERE channel = 'sms'`), 1);
 });
 
 test('the SMS webhook rejects a wrong shared secret', async () => {
@@ -344,7 +344,7 @@ test('phone numbers are never stored in the clear', async () => {
     body: codes[10],
   });
 
-  const rows = db.all('SELECT msisdn_hash FROM sms_log');
+  const rows = await db.all('SELECT msisdn_hash FROM sms_log');
   assert.ok(rows.length > 0);
   for (const r of rows) {
     assert.ok(!String(r.msisdn_hash).includes('2348099999999'), 'the raw number must not be stored');

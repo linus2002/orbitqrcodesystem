@@ -53,7 +53,7 @@ function findChrome() {
 // Tiny CDP client
 // ---------------------------------------------------------------------------
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = async (ms) => new Promise((r) => setTimeout(r, ms));
 
 class Cdp {
   constructor(ws) {
@@ -229,7 +229,7 @@ async function cleanup(code) {
 let target = null;
 for (let i = 0; i < 40; i++) {
   try {
-    const list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
+    const list = (await await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
     target = list.find((t) => t.type === 'page');
     if (target) break;
   } catch { /* not up yet */ }
@@ -333,7 +333,7 @@ try {
   // Sign in through the actual two-step form, not a bare fetch, so the flow
   // itself is covered.
   await cdp.goto(`${APP}/login`, 2000);
-  const setValue = (sel, val) => `(() => {
+  const setValue = async (sel, val) => `(() => {
       const el = document.querySelector(${JSON.stringify(sel)});
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
       setter.call(el, ${JSON.stringify(val)});
@@ -341,7 +341,7 @@ try {
       return JSON.stringify(1);
     })()`;
 
-  await cdp.json(setValue('#email', 'admin@e2e.local'));
+  await cdp.json(await setValue('#email', 'admin@e2e.local'));
   await cdp.json(`(()=>{document.querySelector('.signin-btn').click();return JSON.stringify(1)})()`);
   await sleep(900);
   check(
@@ -353,7 +353,7 @@ try {
     cdp
   );
 
-  await cdp.json(setValue('#password', 'E2ePassword!2026'));
+  await cdp.json(await setValue('#password', 'E2ePassword!2026'));
   await cdp.json(`(()=>{document.querySelector('.signin-btn').click();return JSON.stringify(1)})()`);
   await sleep(2600);
   check(
@@ -558,14 +558,14 @@ await cleanup(failed === 0 ? 0 : 1);
 async function pickCode(base) {
   const db = await import('../src/db/index.js');
   db.open();
-  const genuine = db.get(
+  const genuine = (await db.get(
     `SELECT c.code FROM codes c JOIN batches b ON b.id = c.batch_id
       WHERE c.scan_count = 0 AND b.status = 'distributed' AND b.is_test = 0
         AND b.expiry_date > date('now') LIMIT 1`
-  ).code;
-  const recalled = db.get(
+  )).code;
+  const recalled = (await db.get(
     `SELECT c.code FROM codes c JOIN batches b ON b.id = c.batch_id
       WHERE b.status = 'recalled' LIMIT 1`
-  ).code;
+  )).code;
   return { genuine, recalled, base };
 }

@@ -66,7 +66,7 @@ function escalate(current, repeatCount) {
  * @param {boolean} [params.isTest] scans of sandbox batches never raise alerts
  * @returns {object|null} the alert row, or null when suppressed
  */
-export function raise({ type, context = {}, codeId = null, batchId = null, scanId = null, isTest = false }) {
+export async function raise({ type, context = {}, codeId = null, batchId = null, scanId = null, isTest = false }) {
   const spec = ALERT_SPEC[type];
   if (!spec) throw new Error(`alerts.raise: unknown type "${type}"`);
 
@@ -78,7 +78,7 @@ export function raise({ type, context = {}, codeId = null, batchId = null, scanI
 
   // Fold into an existing open alert for the same code + type, if there is one.
   const existing = codeId
-    ? db.get(
+    ? await db.get(
         `SELECT * FROM alerts
           WHERE type = ? AND code_id = ? AND status IN ('open', 'investigating')
           ORDER BY id DESC LIMIT 1`,
@@ -97,7 +97,7 @@ export function raise({ type, context = {}, codeId = null, batchId = null, scanI
     };
     const severity = escalate(existing.severity, occurrences);
 
-    db.run(
+    await db.run(
       `UPDATE alerts
           SET detail_json = ?, severity = ?, scan_id = COALESCE(?, scan_id),
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -105,11 +105,11 @@ export function raise({ type, context = {}, codeId = null, batchId = null, scanI
       [JSON.stringify(merged), severity, scanId, existing.id]
     );
     logger.info('alert folded', { id: existing.id, type, occurrences, severity });
-    return db.get('SELECT * FROM alerts WHERE id = ?', [existing.id]);
+    return await db.get('SELECT * FROM alerts WHERE id = ?', [existing.id]);
   }
 
   const detail = { ...context, occurrences: 1, firstSeenAt: new Date().toISOString() };
-  const { lastInsertRowid } = db.run(
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO alerts (type, severity, status, title, detail_json, code_id, batch_id, scan_id)
      VALUES (?, ?, 'open', ?, ?, ?, ?, ?)`,
     [type, spec.severity, spec.title(context), JSON.stringify(detail), codeId, batchId, scanId]
@@ -117,7 +117,7 @@ export function raise({ type, context = {}, codeId = null, batchId = null, scanI
 
   logger.warn('alert raised', { id: lastInsertRowid, type, severity: spec.severity });
   notify(type, spec.severity, spec.title(context));
-  return db.get('SELECT * FROM alerts WHERE id = ?', [lastInsertRowid]);
+  return await db.get('SELECT * FROM alerts WHERE id = ?', [lastInsertRowid]);
 }
 
 /**
@@ -134,7 +134,7 @@ function notify(type, severity, title) {
 }
 
 /** Paged, filtered alert queue for the dashboard. */
-export function list({ page, pageSize, status, severity, type, batchId } = {}) {
+export async function list({ page, pageSize, status, severity, type, batchId } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
   const where = [];
   const params = [];
@@ -157,9 +157,9 @@ export function list({ page, pageSize, status, severity, type, batchId } = {}) {
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = db.scalar(`SELECT COUNT(*) FROM alerts a ${clause}`, params);
+  const total = await db.scalar(`SELECT COUNT(*) FROM alerts a ${clause}`, params);
 
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT a.*, c.code AS code, b.batch_number, p.name AS product_name,
             u.full_name AS assignee_name
        FROM alerts a
@@ -184,8 +184,8 @@ export function list({ page, pageSize, status, severity, type, batchId } = {}) {
 }
 
 /** Full detail for one alert, including the scans that produced it. */
-export function getById(id) {
-  const alert = db.get(
+export async function getById(id) {
+  const alert = await db.get(
     `SELECT a.*, c.code, c.scan_count, b.batch_number, b.expiry_date, p.name AS product_name, p.sku
        FROM alerts a
        LEFT JOIN codes c    ON c.id = a.code_id
@@ -197,7 +197,7 @@ export function getById(id) {
   if (!alert) return null;
 
   const relatedScans = alert.code_id
-    ? db.all(
+    ? await db.all(
         `SELECT id, result, reason, channel, country, region, city, created_at
            FROM scans WHERE code_id = ? ORDER BY created_at DESC LIMIT 50`,
         [alert.code_id]
@@ -212,12 +212,12 @@ export function getById(id) {
 }
 
 /** Move an alert through its workflow. Returns the updated row. */
-export function updateStatus(id, { status, assignedTo, note, actor }) {
-  const alert = db.get('SELECT * FROM alerts WHERE id = ?', [id]);
+export async function updateStatus(id, { status, assignedTo, note, actor }) {
+  const alert = await db.get('SELECT * FROM alerts WHERE id = ?', [id]);
   if (!alert) return null;
 
   const resolving = status === 'resolved' || status === 'dismissed';
-  db.run(
+  await db.run(
     `UPDATE alerts
         SET status = COALESCE(?, status),
             assigned_to = COALESCE(?, assigned_to),
@@ -236,12 +236,12 @@ export function updateStatus(id, { status, assignedTo, note, actor }) {
       id,
     ]
   );
-  return db.get('SELECT * FROM alerts WHERE id = ?', [id]);
+  return await db.get('SELECT * FROM alerts WHERE id = ?', [id]);
 }
 
 /** Counts for the dashboard header. */
-export function counts() {
-  const rows = db.all(
+export async function counts() {
+  const rows = await db.all(
     `SELECT status, severity, COUNT(*) AS n FROM alerts GROUP BY status, severity`
   );
   const out = { open: 0, investigating: 0, resolved: 0, dismissed: 0, critical: 0, high: 0 };

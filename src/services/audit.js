@@ -23,9 +23,9 @@ import logger from '../lib/logger.js';
  * @param {object}  [entry.detail]     structured context (avoid secrets)
  * @param {object}  [entry.req]        express request, for ip/user-agent
  */
-export function record({ actor, action, entityType = null, entityId = null, detail = null, req = null }) {
+export async function record({ actor, action, entityType = null, entityId = null, detail = null, req = null }) {
   try {
-    db.run(
+    await db.run(
       `INSERT INTO audit_log (actor_id, actor_email, action, entity_type, entity_id, detail_json, ip, user_agent)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -47,7 +47,7 @@ export function record({ actor, action, entityType = null, entityId = null, deta
 }
 
 /** Paged audit trail for the admin dashboard. */
-export function list({ page, pageSize, action, actorId, entityType, from, to } = {}) {
+export async function list({ page, pageSize, action, actorId, entityType, from, to } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
   const where = [];
   const params = [];
@@ -74,8 +74,8 @@ export function list({ page, pageSize, action, actorId, entityType, from, to } =
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = db.scalar(`SELECT COUNT(*) FROM audit_log ${clause}`, params);
-  const rows = db.all(
+  const total = await db.scalar(`SELECT COUNT(*) FROM audit_log ${clause}`, params);
+  const rows = await db.all(
     `SELECT id, actor_id, actor_email, action, entity_type, entity_id, detail_json, ip, created_at
        FROM audit_log ${clause}
       ORDER BY created_at DESC, id DESC

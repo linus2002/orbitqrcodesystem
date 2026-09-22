@@ -103,9 +103,9 @@ export function createApp() {
 }
 
 /** Start listening. Exported so tests can start an ephemeral server. */
-export function start({ port = config.port } = {}) {
+export async function start({ port = config.port } = {}) {
   db.open();
-  db.migrate({ silent: true });
+  await db.migrate({ silent: true });
 
   const app = createApp();
   const server = app.listen(port, () => {
@@ -116,7 +116,13 @@ export function start({ port = config.port } = {}) {
   });
 
   // Expire old session rows hourly so the table cannot grow without bound.
-  const prune = setInterval(() => authService.pruneSessions(), 3600_000);
+  // Fire-and-forget on a timer, so a failed prune is logged rather than
+  // surfacing as an unhandled rejection that would take the process down.
+  const prune = setInterval(() => {
+    authService
+      .pruneSessions()
+      .catch((err) => logger.error('session prune failed', { error: err.message }));
+  }, 3600_000);
   if (typeof prune.unref === 'function') prune.unref();
 
   const shutdown = (signal) => {
@@ -136,6 +142,6 @@ export function start({ port = config.port } = {}) {
 
 // Start only when run directly, not when imported by a test.
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-if (isDirectRun) start();
+if (isDirectRun) await start();
 
 export default createApp;

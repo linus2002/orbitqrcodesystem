@@ -50,9 +50,9 @@ async function renderToImageData(text, { scale = 4, quiet = 4, errorCorrectionLe
 }
 
 let codes;
-beforeEach(() => {
-  freshDb();
-  codes = seedBasics({ quantity: 12 }).codes;
+beforeEach(async () => {
+  await freshDb();
+  codes = (await seedBasics({ quantity: 12 })).codes;
 });
 
 test('a rendered QR decodes back to exactly the payload that was encoded', async () => {
@@ -77,13 +77,13 @@ test('a scanned QR drives the full verification path to a genuine result', async
   assert.equal(code, codes[1]);
   assert.equal(checkSignature(code, signature, config.secrets.code), 'valid');
 
-  const result = verification.verify(code, {
+  const result = await verification.verify(code, {
     signature,
     req: { clientIp: '198.51.100.1', get: () => null },
   });
 
   assert.equal(result.result, 'genuine');
-  const scanned = (await import('../src/db/index.js')).get(
+  const scanned = await (await import('../src/db/index.js')).get(
     'SELECT signature_state FROM scans ORDER BY id DESC LIMIT 1'
   );
   assert.equal(scanned.signature_state, 'valid', 'the QR signature is recorded as verified');

@@ -44,27 +44,27 @@ const listQuery = (req) => ({
 // Dashboard
 // ===========================================================================
 
-router.get('/overview', requirePermission('dashboard:view'), (req, res) => {
+router.get('/overview', requirePermission('dashboard:view'), async (req, res) => {
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
   res.json({
-    overview: analytics.overview({ days }),
-    trend: analytics.scanTrend({ days: Math.min(days, 30) }),
-    topBatches: analytics.topFlaggedBatches({ days }),
-    geo: analytics.geoBreakdown({ days }),
+    overview: await analytics.overview({ days }),
+    trend: await analytics.scanTrend({ days: Math.min(days, 30) }),
+    topBatches: await analytics.topFlaggedBatches({ days }),
+    geo: await analytics.geoBreakdown({ days }),
   });
 });
 
-router.get('/trend', requirePermission('dashboard:view'), (req, res) => {
+router.get('/trend', requirePermission('dashboard:view'), async (req, res) => {
   const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 90);
-  res.json({ items: analytics.scanTrend({ days }) });
+  res.json({ items: await analytics.scanTrend({ days }) });
 });
 
 // ===========================================================================
 // Products
 // ===========================================================================
 
-router.get('/products', requirePermission('products:read'), (req, res) => {
-  const items = db.all(
+router.get('/products', requirePermission('products:read'), async (req, res) => {
+  const items = await db.all(
     `SELECT p.*,
             (SELECT COUNT(*) FROM batches b WHERE b.product_id = p.id) AS batch_count,
             (SELECT COUNT(*) FROM codes c WHERE c.product_id = p.id)   AS code_count
@@ -73,7 +73,7 @@ router.get('/products', requirePermission('products:read'), (req, res) => {
   res.json({ items, total: items.length });
 });
 
-router.post('/products', requirePermission('products:write'), (req, res) => {
+router.post('/products', requirePermission('products:write'), async (req, res) => {
   const data = validate(req.body, {
     sku: {
       type: 'string',
@@ -93,39 +93,39 @@ router.post('/products', requirePermission('products:write'), (req, res) => {
   });
 
   const sku = data.sku.toUpperCase();
-  if (db.get('SELECT id FROM products WHERE sku = ?', [sku])) {
+  if (await db.get('SELECT id FROM products WHERE sku = ?', [sku])) {
     throw conflict(`A product with SKU ${sku} already exists.`);
   }
 
-  const { lastInsertRowid } = db.run(
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO products (sku, name, generic_name, strength, dosage_form, pack_size, manufacturer, category)
      VALUES (?,?,?,?,?,?,?,?)`,
     [sku, data.name, data.genericName ?? null, data.strength ?? null, data.dosageForm ?? null,
      data.packSize ?? null, data.manufacturer, data.category ?? null]
   );
 
-  audit.record({ actor: req.user, req, action: 'product.create', entityType: 'product', entityId: lastInsertRowid, detail: { sku } });
-  res.status(201).json(db.get('SELECT * FROM products WHERE id = ?', [lastInsertRowid]));
+  await audit.record({ actor: req.user, req, action: 'product.create', entityType: 'product', entityId: lastInsertRowid, detail: { sku } });
+  res.status(201).json(await db.get('SELECT * FROM products WHERE id = ?', [lastInsertRowid]));
 });
 
-router.get('/products/:id', requirePermission('products:read'), (req, res) => {
-  const product = db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
+router.get('/products/:id', requirePermission('products:read'), async (req, res) => {
+  const product = await db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
   if (!product) throw notFound('Product not found');
   res.json({
     ...product,
-    leaflets: db.all(
+    leaflets: await db.all(
       'SELECT id, version, language, effective_from FROM leaflets WHERE product_id = ? ORDER BY effective_from DESC',
       [product.id]
     ),
-    batches: db.all(
+    batches: await db.all(
       'SELECT id, batch_number, status, mfg_date, expiry_date, quantity, is_test FROM batches WHERE product_id = ? ORDER BY created_at DESC',
       [product.id]
     ),
   });
 });
 
-router.patch('/products/:id', requirePermission('products:write'), (req, res) => {
-  const product = db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
+router.patch('/products/:id', requirePermission('products:write'), async (req, res) => {
+  const product = await db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
   if (!product) throw notFound('Product not found');
 
   const data = validate(req.body, {
@@ -141,7 +141,7 @@ router.patch('/products/:id', requirePermission('products:write'), (req, res) =>
 
   // The SKU is intentionally immutable: it is embedded in every code already
   // printed on packs, so changing it would orphan them.
-  db.run(
+  await db.run(
     `UPDATE products SET name = COALESCE(?, name), generic_name = COALESCE(?, generic_name),
             strength = COALESCE(?, strength), dosage_form = COALESCE(?, dosage_form),
             pack_size = COALESCE(?, pack_size), manufacturer = COALESCE(?, manufacturer),
@@ -153,13 +153,13 @@ router.patch('/products/:id', requirePermission('products:write'), (req, res) =>
      product.id]
   );
 
-  audit.record({ actor: req.user, req, action: 'product.update', entityType: 'product', entityId: product.id, detail: data });
-  res.json(db.get('SELECT * FROM products WHERE id = ?', [product.id]));
+  await audit.record({ actor: req.user, req, action: 'product.update', entityType: 'product', entityId: product.id, detail: data });
+  res.json(await db.get('SELECT * FROM products WHERE id = ?', [product.id]));
 });
 
 /** Publish a new leaflet version for a product. */
-router.post('/products/:id/leaflets', requirePermission('products:write'), (req, res) => {
-  const product = db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
+router.post('/products/:id/leaflets', requirePermission('products:write'), async (req, res) => {
+  const product = await db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
   if (!product) throw notFound('Product not found');
 
   const data = validate(req.body, {
@@ -172,20 +172,20 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), (req,
     if (!s?.heading || !s?.body) throw badRequest('Every leaflet section needs a heading and a body.');
   }
 
-  const { lastInsertRowid } = db.run(
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?,?,?,?)`,
     [product.id, data.version, data.language, JSON.stringify(data.sections)]
   );
 
-  audit.record({ actor: req.user, req, action: 'leaflet.publish', entityType: 'leaflet', entityId: lastInsertRowid, detail: { sku: product.sku, version: data.version } });
-  res.status(201).json(db.get('SELECT * FROM leaflets WHERE id = ?', [lastInsertRowid]));
+  await audit.record({ actor: req.user, req, action: 'leaflet.publish', entityType: 'leaflet', entityId: lastInsertRowid, detail: { sku: product.sku, version: data.version } });
+  res.status(201).json(await db.get('SELECT * FROM leaflets WHERE id = ?', [lastInsertRowid]));
 });
 
 // ===========================================================================
 // Batches
 // ===========================================================================
 
-router.get('/batches', requirePermission('batches:read'), (req, res) => {
+router.get('/batches', requirePermission('batches:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
   const where = [];
   const params = [];
@@ -200,8 +200,8 @@ router.get('/batches', requirePermission('batches:read'), (req, res) => {
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = db.scalar(`SELECT COUNT(*) FROM batches b JOIN products p ON p.id = b.product_id ${clause}`, params);
-  const items = db.all(
+  const total = await db.scalar(`SELECT COUNT(*) FROM batches b JOIN products p ON p.id = b.product_id ${clause}`, params);
+  const items = await db.all(
     `SELECT b.*, p.name AS product_name, p.sku,
             (SELECT COUNT(*) FROM codes c WHERE c.batch_id = b.id) AS codes_issued,
             (SELECT COUNT(*) FROM scans s WHERE s.batch_id = b.id AND s.result = 'flagged') AS flagged_scans
@@ -212,7 +212,7 @@ router.get('/batches', requirePermission('batches:read'), (req, res) => {
   res.json({ items, total, ...meta });
 });
 
-router.post('/batches', requirePermission('batches:write'), (req, res) => {
+router.post('/batches', requirePermission('batches:write'), async (req, res) => {
   const data = validate(req.body, {
     productId: { type: 'int', required: true, min: 1 },
     batchNumber: { type: 'string', required: true, max: 40, pattern: /^[A-Za-z0-9-]+$/, patternMessage: 'may contain letters, digits and hyphens only' },
@@ -224,34 +224,34 @@ router.post('/batches', requirePermission('batches:write'), (req, res) => {
     notes: { type: 'string', max: 500 },
   });
 
-  const product = db.get('SELECT * FROM products WHERE id = ?', [data.productId]);
+  const product = await db.get('SELECT * FROM products WHERE id = ?', [data.productId]);
   if (!product) throw badRequest('That product does not exist.');
   if (new Date(data.expiryDate) <= new Date(data.mfgDate)) {
     throw badRequest('The expiry date must be after the manufacturing date.');
   }
-  if (db.get('SELECT id FROM batches WHERE batch_number = ?', [data.batchNumber])) {
+  if (await db.get('SELECT id FROM batches WHERE batch_number = ?', [data.batchNumber])) {
     throw conflict(`Batch ${data.batchNumber} already exists.`);
   }
 
   // Default to the product's newest leaflet, so a batch always has one.
   const leafletId =
     data.leafletId ??
-    db.get('SELECT id FROM leaflets WHERE product_id = ? ORDER BY effective_from DESC LIMIT 1', [product.id])?.id ??
+    await db.get('SELECT id FROM leaflets WHERE product_id = ? ORDER BY effective_from DESC LIMIT 1', [product.id])?.id ??
     null;
 
-  const { lastInsertRowid } = db.run(
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, leaflet_id, notes, created_by)
      VALUES (?,?,?,?,?,?,?,?,?)`,
     [data.batchNumber, product.id, data.mfgDate, data.expiryDate, data.quantity,
      data.isTest ? 1 : 0, leafletId, data.notes ?? null, req.user.id]
   );
 
-  audit.record({ actor: req.user, req, action: 'batch.create', entityType: 'batch', entityId: lastInsertRowid, detail: { batchNumber: data.batchNumber, quantity: data.quantity, isTest: data.isTest } });
-  res.status(201).json(db.get('SELECT * FROM batches WHERE id = ?', [lastInsertRowid]));
+  await audit.record({ actor: req.user, req, action: 'batch.create', entityType: 'batch', entityId: lastInsertRowid, detail: { batchNumber: data.batchNumber, quantity: data.quantity, isTest: data.isTest } });
+  res.status(201).json(await db.get('SELECT * FROM batches WHERE id = ?', [lastInsertRowid]));
 });
 
-router.get('/batches/:id', requirePermission('batches:read'), (req, res) => {
-  const batch = db.get(
+router.get('/batches/:id', requirePermission('batches:read'), async (req, res) => {
+  const batch = await db.get(
     `SELECT b.*, p.name AS product_name, p.sku, p.strength, p.manufacturer
        FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
     [req.params.id]
@@ -260,9 +260,9 @@ router.get('/batches/:id', requirePermission('batches:read'), (req, res) => {
 
   res.json({
     ...batch,
-    stats: serialization.batchStats(batch.id),
-    shipments: db.all('SELECT * FROM shipments WHERE batch_id = ? ORDER BY shipped_at DESC', [batch.id]),
-    openAlerts: db.scalar(
+    stats: await serialization.batchStats(batch.id),
+    shipments: await db.all('SELECT * FROM shipments WHERE batch_id = ? ORDER BY shipped_at DESC', [batch.id]),
+    openAlerts: await db.scalar(
       `SELECT COUNT(*) FROM alerts WHERE batch_id = ? AND status IN ('open','investigating')`,
       [batch.id]
     ),
@@ -270,22 +270,22 @@ router.get('/batches/:id', requirePermission('batches:read'), (req, res) => {
 });
 
 /** Run the serialization engine for a batch. */
-router.post('/batches/:id/issue-codes', requirePermission('batches:write'), (req, res) => {
-  res.status(201).json(serialization.issueCodes(Number(req.params.id), { actor: req.user, req }));
+router.post('/batches/:id/issue-codes', requirePermission('batches:write'), async (req, res) => {
+  res.status(201).json(await serialization.issueCodes(Number(req.params.id), { actor: req.user, req }));
 });
 
 /** Move a batch through its lifecycle. */
-router.post('/batches/:id/transition', requirePermission('batches:write'), (req, res) => {
+router.post('/batches/:id/transition', requirePermission('batches:write'), async (req, res) => {
   const { to, reason } = validate(req.body, {
     to: { type: 'enum', required: true, values: ['printed', 'released', 'distributed', 'recalled', 'closed'] },
     reason: { type: 'string', max: 500 },
   });
-  res.json(serialization.transition(Number(req.params.id), to, { actor: req.user, req, reason: reason ?? null }));
+  res.json(await serialization.transition(Number(req.params.id), to, { actor: req.user, req, reason: reason ?? null }));
 });
 
-router.get('/batches/:id/codes', requirePermission('codes:read'), (req, res) => {
+router.get('/batches/:id/codes', requirePermission('codes:read'), async (req, res) => {
   res.json(
-    serialization.listCodes(Number(req.params.id), {
+    await serialization.listCodes(Number(req.params.id), {
       ...listQuery(req),
       status: req.query.status,
       search: req.query.search,
@@ -294,9 +294,9 @@ router.get('/batches/:id/codes', requirePermission('codes:read'), (req, res) => 
 });
 
 /** CSV hand-off for the packaging line's printer. */
-router.get('/batches/:id/codes.csv', requirePermission('codes:export'), (req, res) => {
-  const { filename, csv } = serialization.exportCsv(Number(req.params.id));
-  audit.record({ actor: req.user, req, action: 'codes.export', entityType: 'batch', entityId: req.params.id });
+router.get('/batches/:id/codes.csv', requirePermission('codes:export'), async (req, res) => {
+  const { filename, csv } = await serialization.exportCsv(Number(req.params.id));
+  await audit.record({ actor: req.user, req, action: 'codes.export', entityType: 'batch', entityId: req.params.id });
   sendCsv(res, filename, csv);
 });
 
@@ -308,7 +308,7 @@ router.get('/batches/:id/codes.csv', requirePermission('codes:export'), (req, re
  * browser. Capped at 60 labels per request to keep the response small.
  */
 router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, res) => {
-  const batch = db.get(
+  const batch = await db.get(
     `SELECT b.*, p.name AS product_name, p.sku, p.strength
        FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
     [req.params.id]
@@ -317,7 +317,7 @@ router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, r
 
   const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 60);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
-  const codes = db.all(
+  const codes = await db.all(
     'SELECT id, code, serial, unit_index FROM codes WHERE batch_id = ? ORDER BY unit_index LIMIT ? OFFSET ?',
     [batch.id, limit, offset]
   );
@@ -336,7 +336,7 @@ router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, r
       expiryDate: batch.expiry_date,
     },
     items,
-    total: db.scalar('SELECT COUNT(*) FROM codes WHERE batch_id = ?', [batch.id]),
+    total: await db.scalar('SELECT COUNT(*) FROM codes WHERE batch_id = ?', [batch.id]),
   });
 });
 
@@ -345,11 +345,11 @@ router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, r
 // ===========================================================================
 
 /** Look up one code and its full scan history - the investigation view. */
-router.get('/codes/lookup', requirePermission('codes:read'), (req, res) => {
+router.get('/codes/lookup', requirePermission('codes:read'), async (req, res) => {
   const code = normalizeCode(String(req.query.code ?? ''));
   if (!code) throw badRequest('Provide a code to look up.');
 
-  const row = db.get(
+  const row = await db.get(
     `SELECT c.*, b.batch_number, b.status AS batch_status, b.expiry_date, b.mfg_date, b.is_test,
             p.name AS product_name, p.sku, p.strength
        FROM codes c JOIN batches b ON b.id = c.batch_id JOIN products p ON p.id = c.product_id
@@ -361,29 +361,29 @@ router.get('/codes/lookup', requirePermission('codes:read'), (req, res) => {
   res.json({
     ...row,
     qrPayload: qrPayload(row.code, config.secrets.code, config.publicBaseUrl),
-    scans: db.all(
+    scans: await db.all(
       `SELECT id, result, reason, channel, scan_number, country, region, city, signature_state, created_at
          FROM scans WHERE code_id = ? ORDER BY created_at DESC LIMIT 100`,
       [row.id]
     ),
-    alerts: db.all('SELECT id, type, severity, status, title, created_at FROM alerts WHERE code_id = ?', [row.id]),
+    alerts: await db.all('SELECT id, type, severity, status, title, created_at FROM alerts WHERE code_id = ?', [row.id]),
   });
 });
 
 /** Withdraw a single code (e.g. a unit destroyed or known stolen). */
-router.post('/codes/:id/void', requirePermission('batches:write'), (req, res) => {
+router.post('/codes/:id/void', requirePermission('batches:write'), async (req, res) => {
   const { reason } = validate(req.body, { reason: { type: 'string', required: true, min: 5, max: 300 } });
-  const code = db.get('SELECT * FROM codes WHERE id = ?', [req.params.id]);
+  const code = await db.get('SELECT * FROM codes WHERE id = ?', [req.params.id]);
   if (!code) throw notFound('Code not found');
 
-  db.run(`UPDATE codes SET status = 'void' WHERE id = ?`, [code.id]);
-  audit.record({ actor: req.user, req, action: 'code.void', entityType: 'code', entityId: code.id, detail: { code: code.code, reason } });
-  res.json({ ok: true, code: db.get('SELECT * FROM codes WHERE id = ?', [code.id]) });
+  await db.run(`UPDATE codes SET status = 'void' WHERE id = ?`, [code.id]);
+  await audit.record({ actor: req.user, req, action: 'code.void', entityType: 'code', entityId: code.id, detail: { code: code.code, reason } });
+  res.json({ ok: true, code: await db.get('SELECT * FROM codes WHERE id = ?', [code.id]) });
 });
 
 /** QR image for a single code, as SVG. */
 router.get('/codes/:id/qr.svg', requirePermission('codes:read'), async (req, res) => {
-  const code = db.get('SELECT code FROM codes WHERE id = ?', [req.params.id]);
+  const code = await db.get('SELECT code FROM codes WHERE id = ?', [req.params.id]);
   if (!code) throw notFound('Code not found');
   res.type('image/svg+xml').send(await serialization.qrSvg(code.code));
 });
@@ -392,9 +392,9 @@ router.get('/codes/:id/qr.svg', requirePermission('codes:read'), async (req, res
 // Scans - security team only (a regulator has no 'scans:read')
 // ===========================================================================
 
-router.get('/scans', requirePermission('scans:read'), (req, res) => {
+router.get('/scans', requirePermission('scans:read'), async (req, res) => {
   res.json(
-    analytics.listScans({
+    await analytics.listScans({
       ...listQuery(req),
       result: req.query.result,
       reason: req.query.reason,
@@ -407,8 +407,8 @@ router.get('/scans', requirePermission('scans:read'), (req, res) => {
   );
 });
 
-router.get('/scans.csv', requirePermission('scans:read'), (req, res) => {
-  const { items } = analytics.listScans({
+router.get('/scans.csv', requirePermission('scans:read'), async (req, res) => {
+  const { items } = await analytics.listScans({
     page: 1,
     pageSize: 5000,
     result: req.query.result,
@@ -416,7 +416,7 @@ router.get('/scans.csv', requirePermission('scans:read'), (req, res) => {
     to: req.query.to,
     includeTest: req.query.includeTest === 'true',
   });
-  audit.record({ actor: req.user, req, action: 'scans.export', detail: { rows: items.length } });
+  await audit.record({ actor: req.user, req, action: 'scans.export', detail: { rows: items.length } });
   sendCsv(res, `scans-${new Date().toISOString().slice(0, 10)}.csv`, analytics.toCsv(items));
 });
 
@@ -424,9 +424,9 @@ router.get('/scans.csv', requirePermission('scans:read'), (req, res) => {
 // Alerts
 // ===========================================================================
 
-router.get('/alerts', requirePermission('alerts:read'), (req, res) => {
+router.get('/alerts', requirePermission('alerts:read'), async (req, res) => {
   res.json(
-    alertService.list({
+    await alertService.list({
       ...listQuery(req),
       status: req.query.status,
       severity: req.query.severity,
@@ -436,17 +436,17 @@ router.get('/alerts', requirePermission('alerts:read'), (req, res) => {
   );
 });
 
-router.get('/alerts/counts', requirePermission('alerts:read'), (req, res) => {
-  res.json(alertService.counts());
+router.get('/alerts/counts', requirePermission('alerts:read'), async (req, res) => {
+  res.json(await alertService.counts());
 });
 
-router.get('/alerts/:id', requirePermission('alerts:read'), (req, res) => {
-  const alert = alertService.getById(Number(req.params.id));
+router.get('/alerts/:id', requirePermission('alerts:read'), async (req, res) => {
+  const alert = await alertService.getById(Number(req.params.id));
   if (!alert) throw notFound('Alert not found');
   res.json(alert);
 });
 
-router.patch('/alerts/:id', requirePermission('alerts:write'), (req, res) => {
+router.patch('/alerts/:id', requirePermission('alerts:write'), async (req, res) => {
   const data = validate(req.body, {
     status: { type: 'enum', values: ['open', 'investigating', 'resolved', 'dismissed'] },
     assignedTo: { type: 'int', min: 1 },
@@ -458,10 +458,10 @@ router.patch('/alerts/:id', requirePermission('alerts:write'), (req, res) => {
     throw badRequest('Please add a note explaining how this alert was resolved.');
   }
 
-  const updated = alertService.updateStatus(Number(req.params.id), { ...data, actor: req.user });
+  const updated = await alertService.updateStatus(Number(req.params.id), { ...data, actor: req.user });
   if (!updated) throw notFound('Alert not found');
 
-  audit.record({ actor: req.user, req, action: `alert.${data.status ?? 'update'}`, entityType: 'alert', entityId: req.params.id, detail: data });
+  await audit.record({ actor: req.user, req, action: `alert.${data.status ?? 'update'}`, entityType: 'alert', entityId: req.params.id, detail: data });
   res.json(updated);
 });
 
@@ -469,15 +469,15 @@ router.patch('/alerts/:id', requirePermission('alerts:write'), (req, res) => {
 // Consumer reports
 // ===========================================================================
 
-router.get('/reports', requirePermission('reports:read'), (req, res) => {
+router.get('/reports', requirePermission('reports:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
   const where = [];
   const params = [];
   if (req.query.status) { where.push('r.status = ?'); params.push(req.query.status); }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const total = db.scalar(`SELECT COUNT(*) FROM consumer_reports r ${clause}`, params);
-  const items = db.all(
+  const total = await db.scalar(`SELECT COUNT(*) FROM consumer_reports r ${clause}`, params);
+  const items = await db.all(
     `SELECT r.*, c.code AS registry_code, b.batch_number, p.name AS product_name
        FROM consumer_reports r
        LEFT JOIN codes c ON c.id = r.code_id
@@ -489,26 +489,26 @@ router.get('/reports', requirePermission('reports:read'), (req, res) => {
   res.json({ items, total, ...meta });
 });
 
-router.patch('/reports/:id', requirePermission('reports:write'), (req, res) => {
+router.patch('/reports/:id', requirePermission('reports:write'), async (req, res) => {
   const { status } = validate(req.body, {
     status: { type: 'enum', required: true, values: ['new', 'reviewing', 'closed'] },
   });
-  const report = db.get('SELECT * FROM consumer_reports WHERE id = ?', [req.params.id]);
+  const report = await db.get('SELECT * FROM consumer_reports WHERE id = ?', [req.params.id]);
   if (!report) throw notFound('Report not found');
 
-  db.run('UPDATE consumer_reports SET status = ? WHERE id = ?', [status, report.id]);
-  audit.record({ actor: req.user, req, action: 'report.update', entityType: 'report', entityId: report.id, detail: { status } });
-  res.json(db.get('SELECT * FROM consumer_reports WHERE id = ?', [report.id]));
+  await db.run('UPDATE consumer_reports SET status = ? WHERE id = ?', [status, report.id]);
+  await audit.record({ actor: req.user, req, action: 'report.update', entityType: 'report', entityId: report.id, detail: { status } });
+  res.json(await db.get('SELECT * FROM consumer_reports WHERE id = ?', [report.id]));
 });
 
 // ===========================================================================
 // Shipments (distribution leg)
 // ===========================================================================
 
-router.get('/shipments', requirePermission('batches:read'), (req, res) => {
+router.get('/shipments', requirePermission('batches:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
-  const total = db.scalar('SELECT COUNT(*) FROM shipments');
-  const items = db.all(
+  const total = await db.scalar('SELECT COUNT(*) FROM shipments');
+  const items = await db.all(
     `SELECT s.*, b.batch_number, p.name AS product_name
        FROM shipments s JOIN batches b ON b.id = s.batch_id JOIN products p ON p.id = b.product_id
       ORDER BY s.shipped_at DESC LIMIT ? OFFSET ?`,
@@ -517,7 +517,7 @@ router.get('/shipments', requirePermission('batches:read'), (req, res) => {
   res.json({ items, total, ...meta });
 });
 
-router.post('/shipments', requirePermission('batches:write'), (req, res) => {
+router.post('/shipments', requirePermission('batches:write'), async (req, res) => {
   const data = validate(req.body, {
     batchId: { type: 'int', required: true, min: 1 },
     reference: { type: 'string', required: true, max: 40 },
@@ -528,75 +528,75 @@ router.post('/shipments', requirePermission('batches:write'), (req, res) => {
     toRegion: { type: 'string', max: 120 },
   });
 
-  const batch = db.get('SELECT * FROM batches WHERE id = ?', [data.batchId]);
+  const batch = await db.get('SELECT * FROM batches WHERE id = ?', [data.batchId]);
   if (!batch) throw badRequest('That batch does not exist.');
   if (!['released', 'distributed'].includes(batch.status)) {
     throw conflict(`Batch ${batch.batch_number} is "${batch.status}" and cannot be shipped until it is released.`);
   }
 
-  const { lastInsertRowid } = db.run(
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO shipments (reference, batch_id, quantity, from_site, to_name, to_type, to_region)
      VALUES (?,?,?,?,?,?,?)`,
     [data.reference, data.batchId, data.quantity, data.fromSite, data.toName, data.toType, data.toRegion ?? null]
   );
 
-  audit.record({ actor: req.user, req, action: 'shipment.create', entityType: 'shipment', entityId: lastInsertRowid, detail: data });
-  res.status(201).json(db.get('SELECT * FROM shipments WHERE id = ?', [lastInsertRowid]));
+  await audit.record({ actor: req.user, req, action: 'shipment.create', entityType: 'shipment', entityId: lastInsertRowid, detail: data });
+  res.status(201).json(await db.get('SELECT * FROM shipments WHERE id = ?', [lastInsertRowid]));
 });
 
-router.patch('/shipments/:id/receive', requirePermission('batches:write'), (req, res) => {
-  const shipment = db.get('SELECT * FROM shipments WHERE id = ?', [req.params.id]);
+router.patch('/shipments/:id/receive', requirePermission('batches:write'), async (req, res) => {
+  const shipment = await db.get('SELECT * FROM shipments WHERE id = ?', [req.params.id]);
   if (!shipment) throw notFound('Shipment not found');
 
-  db.run(
+  await db.run(
     `UPDATE shipments SET status = 'received', received_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
     [shipment.id]
   );
-  audit.record({ actor: req.user, req, action: 'shipment.receive', entityType: 'shipment', entityId: shipment.id });
-  res.json(db.get('SELECT * FROM shipments WHERE id = ?', [shipment.id]));
+  await audit.record({ actor: req.user, req, action: 'shipment.receive', entityType: 'shipment', entityId: shipment.id });
+  res.json(await db.get('SELECT * FROM shipments WHERE id = ?', [shipment.id]));
 });
 
 // ===========================================================================
 // Users (admin only)
 // ===========================================================================
 
-router.get('/users', requirePermission('users:read'), (req, res) => {
-  const items = authService.listUsers();
+router.get('/users', requirePermission('users:read'), async (req, res) => {
+  const items = await authService.listUsers();
   res.json({ items, total: items.length });
 });
 
-router.post('/users', requirePermission('users:write'), (req, res) => {
+router.post('/users', requirePermission('users:write'), async (req, res) => {
   const data = validate(req.body, {
     email: { type: 'email', required: true },
     fullName: { type: 'string', required: true, max: 120 },
     role: { type: 'enum', required: true, values: ['admin', 'security', 'regulator'] },
     password: { type: 'string', required: true, max: 200 },
   });
-  res.status(201).json(authService.createUser(data, { actor: req.user, req }));
+  res.status(201).json(await authService.createUser(data, { actor: req.user, req }));
 });
 
-router.patch('/users/:id', requirePermission('users:write'), (req, res) => {
+router.patch('/users/:id', requirePermission('users:write'), async (req, res) => {
   const data = validate(req.body, {
     fullName: { type: 'string', max: 120 },
     role: { type: 'enum', values: ['admin', 'security', 'regulator'] },
     status: { type: 'enum', values: ['active', 'suspended'] },
   });
-  res.json(authService.updateUser(Number(req.params.id), data, { actor: req.user, req }));
+  res.json(await authService.updateUser(Number(req.params.id), data, { actor: req.user, req }));
 });
 
-router.post('/users/:id/reset-password', requirePermission('users:write'), (req, res) => {
+router.post('/users/:id/reset-password', requirePermission('users:write'), async (req, res) => {
   // The temporary password is returned exactly once and is never stored in
   // plaintext; it must be handed over out of band.
-  res.json(authService.resetPassword(Number(req.params.id), { actor: req.user, req }));
+  res.json(await authService.resetPassword(Number(req.params.id), { actor: req.user, req }));
 });
 
 // ===========================================================================
 // Audit log
 // ===========================================================================
 
-router.get('/audit', requirePermission('audit:read'), (req, res) => {
+router.get('/audit', requirePermission('audit:read'), async (req, res) => {
   res.json(
-    audit.list({
+    await audit.list({
       ...listQuery(req),
       action: req.query.action,
       actorId: req.query.actorId,
@@ -611,13 +611,13 @@ router.get('/audit', requirePermission('audit:read'), (req, res) => {
 // Compliance reporting (the regulator's surface)
 // ===========================================================================
 
-router.get('/compliance', requirePermission('batches:read'), (req, res) => {
-  res.json(analytics.complianceReport({ from: req.query.from, to: req.query.to }));
+router.get('/compliance', requirePermission('batches:read'), async (req, res) => {
+  res.json(await analytics.complianceReport({ from: req.query.from, to: req.query.to }));
 });
 
-router.get('/compliance.csv', requirePermission('batches:read'), (req, res) => {
-  const report = analytics.complianceReport({ from: req.query.from, to: req.query.to });
-  audit.record({ actor: req.user, req, action: 'compliance.export', detail: report.period });
+router.get('/compliance.csv', requirePermission('batches:read'), async (req, res) => {
+  const report = await analytics.complianceReport({ from: req.query.from, to: req.query.to });
+  await audit.record({ actor: req.user, req, action: 'compliance.export', detail: report.period });
   sendCsv(res, `compliance-${report.period.from}-to-${report.period.to}.csv`, analytics.toCsv(report.batches));
 });
 
@@ -625,9 +625,9 @@ router.get('/compliance.csv', requirePermission('batches:read'), (req, res) => {
 // Settings
 // ===========================================================================
 
-router.get('/settings', requirePermission('dashboard:view'), (req, res) => {
+router.get('/settings', requirePermission('dashboard:view'), async (req, res) => {
   res.json({
-    items: db.all('SELECT * FROM settings ORDER BY key'),
+    items: await db.all('SELECT * FROM settings ORDER BY key'),
     runtime: {
       environment: config.env,
       publicBaseUrl: config.publicBaseUrl,
@@ -638,16 +638,16 @@ router.get('/settings', requirePermission('dashboard:view'), (req, res) => {
   });
 });
 
-router.patch('/settings/:key', requirePermission('settings:write'), (req, res) => {
+router.patch('/settings/:key', requirePermission('settings:write'), async (req, res) => {
   const { value } = validate(req.body, { value: { type: 'string', required: true, max: 500 } });
-  db.run(
+  await db.run(
     `INSERT INTO settings (key, value, updated_by, updated_at)
      VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
      ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
     [req.params.key, value, req.user.id]
   );
-  audit.record({ actor: req.user, req, action: 'settings.update', entityType: 'setting', entityId: req.params.key, detail: { value } });
-  res.json(db.get('SELECT * FROM settings WHERE key = ?', [req.params.key]));
+  await audit.record({ actor: req.user, req, action: 'settings.update', entityType: 'setting', entityId: req.params.key, detail: { value } });
+  res.json(await db.get('SELECT * FROM settings WHERE key = ?', [req.params.key]));
 });
 
 export default router;

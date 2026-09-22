@@ -68,7 +68,7 @@ export function composeReply(result) {
  * @param {string} body    raw message text
  * @param {object} [req]
  */
-export function handleInbound(from, body, req = null) {
+export async function handleInbound(from, body, req = null) {
   const msisdnHash = pseudonymize(from, config.secrets.session);
 
   // Tolerate "CHECK <code>" / "VERIFY <code>" prefixes and stray punctuation.
@@ -76,22 +76,24 @@ export function handleInbound(from, body, req = null) {
     .replace(/^\s*(check|verify|qr|shield)\s+/i, '')
     .trim();
 
-  db.run(`INSERT INTO sms_log (direction, msisdn_hash, body, provider) VALUES ('inbound', ?, ?, ?)`, [
+  await db.run(`INSERT INTO sms_log (direction, msisdn_hash, body, provider) VALUES ('inbound', ?, ?, ?)`, [
     msisdnHash,
     cleaned.slice(0, 200),
     config.sms.provider,
   ]);
 
-  const result = verification.verify(cleaned, { channel: 'sms', msisdn: from, req });
+  const result = await verification.verify(cleaned, { channel: 'sms', msisdn: from, req });
   const reply = composeReply(result);
 
-  db.run(
+  await db.run(
     `INSERT INTO sms_log (direction, msisdn_hash, body, scan_id, provider) VALUES ('outbound', ?, ?, ?, ?)`,
     [msisdnHash, reply, result.scanId ?? null, config.sms.provider]
   );
 
   // Fire and forget: the gateway's HTTP response must not wait on delivery.
-  send(from, reply).catch((err) => logger.error('sms send failed', { error: err.message }));
+  // Deliberately not awaited, so `.catch` is what keeps a failed send from
+  // surfacing as an unhandled rejection.
+  await send(from, reply).catch((err) => logger.error('sms send failed', { error: err.message }));
 
   return { reply, result };
 }

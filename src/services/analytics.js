@@ -9,7 +9,7 @@
  *   - a REGULATOR sees aggregate serialization and batch figures ONLY, and
  *     never individual patient scan rows.
  *
- * `complianceReport()` is therefore built from aggregates exclusively - there
+ * `await complianceReport()` is therefore built from aggregates exclusively - there
  * is no code path from it to a scan row.
  *
  * Every query here excludes sandbox/test batches by default, so pilot traffic
@@ -21,11 +21,11 @@ import * as db from '../db/index.js';
 const LIVE_ONLY = 'is_test = 0';
 
 /** Headline numbers for the dashboard. */
-export function overview({ days = 30 } = {}) {
+export async function overview({ days = 30 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const today = new Date(new Date().toDateString()).toISOString();
 
-  const scans = db.get(
+  const scans = await db.get(
     `SELECT COUNT(*) AS total,
             SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
             SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged,
@@ -34,12 +34,12 @@ export function overview({ days = 30 } = {}) {
     [since]
   );
 
-  const todayScans = db.scalar(
+  const todayScans = await db.scalar(
     `SELECT COUNT(*) FROM scans WHERE ${LIVE_ONLY} AND created_at >= ?`,
     [today]
   );
 
-  const codes = db.get(
+  const codes = await db.get(
     `SELECT COUNT(*) AS total,
             SUM(CASE WHEN c.status = 'verified' THEN 1 ELSE 0 END) AS verified,
             SUM(CASE WHEN c.status = 'flagged' THEN 1 ELSE 0 END) AS flagged
@@ -47,14 +47,14 @@ export function overview({ days = 30 } = {}) {
       WHERE b.is_test = 0`
   );
 
-  const batches = db.get(
+  const batches = await db.get(
     `SELECT COUNT(*) AS total,
             SUM(CASE WHEN status IN ('released','distributed') THEN 1 ELSE 0 END) AS active,
             SUM(CASE WHEN status = 'recalled' THEN 1 ELSE 0 END) AS recalled
        FROM batches WHERE is_test = 0`
   );
 
-  const alertCounts = db.get(
+  const alertCounts = await db.get(
     `SELECT SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
             SUM(CASE WHEN status = 'investigating' THEN 1 ELSE 0 END) AS investigating,
             SUM(CASE WHEN status IN ('open','investigating') AND severity IN ('high','critical') THEN 1 ELSE 0 END) AS urgent
@@ -92,7 +92,7 @@ export function overview({ days = 30 } = {}) {
       urgent: alertCounts?.urgent ?? 0,
     },
     reports: {
-      new: db.scalar(`SELECT COUNT(*) FROM consumer_reports WHERE status = 'new'`) ?? 0,
+      new: await db.scalar(`SELECT COUNT(*) FROM consumer_reports WHERE status = 'new'`) ?? 0,
     },
   };
 }
@@ -102,11 +102,11 @@ export function overview({ days = 30 } = {}) {
  * Gaps are filled with zeros so the chart's x-axis stays evenly spaced - a
  * missing day must read as "no scans", not as a shorter week.
  */
-export function scanTrend({ days = 14 } = {}) {
+export async function scanTrend({ days = 14 } = {}) {
   const since = new Date(Date.now() - (days - 1) * 86400000);
   since.setHours(0, 0, 0, 0);
 
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT substr(created_at, 1, 10) AS day,
             SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
             SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged,
@@ -133,9 +133,9 @@ export function scanTrend({ days = 14 } = {}) {
 }
 
 /** Where scans are coming from - drives the "flags clustering" view. */
-export function geoBreakdown({ days = 30, limit = 12 } = {}) {
+export async function geoBreakdown({ days = 30, limit = 12 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
-  return db.all(
+  return await db.all(
     `SELECT COALESCE(country, 'Unknown') AS country,
             COALESCE(region, '') AS region,
             COUNT(*) AS total,
@@ -150,9 +150,9 @@ export function geoBreakdown({ days = 30, limit = 12 } = {}) {
 }
 
 /** Batches ranked by flag rate - the "which product line is being copied" view. */
-export function topFlaggedBatches({ days = 30, limit = 8 } = {}) {
+export async function topFlaggedBatches({ days = 30, limit = 8 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
-  return db.all(
+  return await db.all(
     `SELECT b.id, b.batch_number, b.status, b.expiry_date, p.name AS product_name, p.sku,
             COUNT(s.id) AS scans,
             SUM(CASE WHEN s.result = 'flagged' THEN 1 ELSE 0 END) AS flagged
@@ -172,7 +172,7 @@ export function topFlaggedBatches({ days = 30, limit = 8 } = {}) {
  * Paged scan log. SECURITY-TEAM ONLY (permission 'scans:read').
  * Raw IPs are never returned; `ip_hash` stays server-side.
  */
-export function listScans({ page, pageSize, result, reason, channel, batchId, codeId, from, to, includeTest } = {}) {
+export async function listScans({ page, pageSize, result, reason, channel, batchId, codeId, from, to, includeTest } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
   const where = [];
   const params = [];
@@ -187,9 +187,9 @@ export function listScans({ page, pageSize, result, reason, channel, batchId, co
   if (to) { where.push('s.created_at <= ?'); params.push(to); }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = db.scalar(`SELECT COUNT(*) FROM scans s ${clause}`, params);
+  const total = await db.scalar(`SELECT COUNT(*) FROM scans s ${clause}`, params);
 
-  const items = db.all(
+  const items = await db.all(
     `SELECT s.id, s.code_text, s.result, s.reason, s.channel, s.scan_number,
             s.country, s.region, s.city, s.signature_state, s.is_test, s.created_at,
             b.batch_number, p.name AS product_name, p.sku
@@ -212,12 +212,12 @@ export function listScans({ page, pageSize, result, reason, channel, batchId, co
  * per-location data, so handing it to an external auditor cannot disclose
  * anything about an individual patient.
  */
-export function complianceReport({ from, to } = {}) {
+export async function complianceReport({ from, to } = {}) {
   const start = from ?? new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const end = to ?? new Date().toISOString().slice(0, 10);
   const params = [`${start}T00:00:00.000Z`, `${end}T23:59:59.999Z`];
 
-  const batches = db.all(
+  const batches = await db.all(
     `SELECT b.batch_number, p.sku, p.name AS product_name, p.manufacturer,
             b.mfg_date, b.expiry_date, b.quantity, b.status,
             b.codes_issued_at, b.released_at, b.recalled_at, b.recall_reason,
@@ -228,7 +228,7 @@ export function complianceReport({ from, to } = {}) {
     params
   );
 
-  const totals = db.get(
+  const totals = await db.get(
     `SELECT COUNT(*) AS scans,
             SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
             SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged
@@ -236,7 +236,7 @@ export function complianceReport({ from, to } = {}) {
     params
   );
 
-  const alertSummary = db.all(
+  const alertSummary = await db.all(
     `SELECT type, status, COUNT(*) AS n FROM alerts
       WHERE created_at BETWEEN ? AND ? GROUP BY type, status`,
     params

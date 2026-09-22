@@ -1,15 +1,16 @@
 /**
  * Database access layer.
  *
- * Uses Node's built-in `node:sqlite` (Node 22.5+), so the project has ZERO
- * native build dependencies: `npm install` never needs a C++ toolchain. That
- * is the main reason SQLite is the default here.
+ * Uses libSQL, which speaks SQLite's dialect against three different backends
+ * from one driver: `:memory:` for tests, a local `file:` in development, and a
+ * hosted Turso database in production. That is what lets this run on a
+ * serverless platform, where there is no disk to keep a .db file on.
  *
- * Moving to PostgreSQL later means replacing this one file plus the type
- * names in schema.sql. Nothing above this layer talks to the driver directly;
- * services only ever use `db.get/all/run/tx`.
+ * Every call here is async because a hosted database is a network round trip.
+ * Nothing above this layer talks to the driver directly; services only ever
+ * use `db.get/all/run/scalar/tx`.
  */
-import { DatabaseSync } from 'node:sqlite';
+import { createClient } from '@libsql/client';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,29 +22,29 @@ let handle = null;
 const SCHEMA_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema.sql');
 
 /**
- * Open (or reuse) the database connection.
+ * Turn the configured target into a libSQL URL.
+ *
+ * A Turso URL wins when one is set. Otherwise this is a local file, which the
+ * driver wants as a `file:` URL rather than a bare path.
+ */
+function resolveTarget(file) {
+  if (config.db.url) {
+    return { url: config.db.url, authToken: config.db.authToken || undefined };
+  }
+  if (file === ':memory:') return { url: ':memory:' };
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return { url: `file:${file.replace(/\\/g, '/')}` };
+}
+
+/**
+ * Open (or reuse) the connection.
  *
  * @param {string} [file] override the configured path; ':memory:' for tests.
  */
 export function open(file = config.db.file) {
   if (handle) return handle;
-
-  if (file !== ':memory:') {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-  }
-
-  handle = new DatabaseSync(file);
-
-  // --- Pragmas ------------------------------------------------------------
-  // WAL: readers never block the writer, which matters because the admin
-  // dashboard polls while verification traffic is writing scan rows.
-  if (file !== ':memory:') handle.exec('PRAGMA journal_mode = WAL;');
-  handle.exec('PRAGMA foreign_keys = ON;');
-  handle.exec('PRAGMA busy_timeout = 5000;');
-  // NORMAL is the right durability/throughput trade-off under WAL: a power
-  // loss can cost the last transaction, never the database file's integrity.
-  handle.exec('PRAGMA synchronous = NORMAL;');
-
+  handle = createClient(resolveTarget(file));
   return handle;
 }
 
@@ -61,51 +62,73 @@ export function close() {
       /* already closed */
     }
     handle = null;
+    activeTx = null;
+    txDepth = 0;
   }
 }
 
-/** Apply schema.sql. Safe to run repeatedly - every statement is IF NOT EXISTS. */
-export function migrate({ silent = false } = {}) {
-  const sql = fs.readFileSync(SCHEMA_PATH, 'utf8');
-  const conn = db();
-  conn.exec(sql);
-  conn
-    .prepare(
-      `INSERT INTO schema_meta (key, value) VALUES ('migrated_at', ?)
-       ON CONFLICT (key) DO UPDATE SET value = excluded.value`
-    )
-    .run(new Date().toISOString());
-  if (!silent) console.log('[db] schema applied');
-  return conn;
-}
+/*
+ * The transaction currently in flight, if any.
+ *
+ * libSQL hands back a transaction object that statements must be issued
+ * against, but `tx(fn)` takes a plain callback and the 100-odd call sites
+ * inside those callbacks just call `db.run(...)`. Holding the handle here lets
+ * every helper below route itself, so a transaction stays invisible to callers
+ * - exactly as it was when the driver was synchronous.
+ *
+ * This is safe because a single request owns the connection for the life of
+ * the transaction: `tx` refuses to start a second top-level one concurrently.
+ */
+let activeTx = null;
+let txDepth = 0;
+
+/** Whichever executor statements should go to right now. */
+const executor = () => activeTx ?? db();
 
 // ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
 
 /** Run a statement. Returns `{ changes, lastInsertRowid }` (rowid as Number). */
-export function run(sql, params = []) {
-  const res = db().prepare(sql).run(...params);
+export async function run(sql, params = []) {
+  const res = await executor().execute({ sql, args: params });
   return {
-    changes: Number(res.changes),
-    lastInsertRowid: Number(res.lastInsertRowid),
+    changes: Number(res.rowsAffected ?? 0),
+    lastInsertRowid: res.lastInsertRowid == null ? 0 : Number(res.lastInsertRowid),
   };
 }
 
 /** Fetch a single row, or undefined. */
-export function get(sql, params = []) {
-  return db().prepare(sql).get(...params);
+export async function get(sql, params = []) {
+  const res = await executor().execute({ sql, args: params });
+  return res.rows.length ? { ...res.rows[0] } : undefined;
 }
 
 /** Fetch all matching rows. */
-export function all(sql, params = []) {
-  return db().prepare(sql).all(...params);
+export async function all(sql, params = []) {
+  const res = await executor().execute({ sql, args: params });
+  return res.rows.map((r) => ({ ...r }));
 }
 
 /** Fetch the first column of the first row (for COUNT(*) and friends). */
-export function scalar(sql, params = []) {
-  const row = get(sql, params);
-  return row ? Object.values(row)[0] : undefined;
+export async function scalar(sql, params = []) {
+  const res = await executor().execute({ sql, args: params });
+  if (!res.rows.length) return undefined;
+  return res.rows[0][res.columns[0]];
+}
+
+/** Apply schema.sql. Safe to run repeatedly - every statement is IF NOT EXISTS. */
+export async function migrate({ silent = false } = {}) {
+  const sql = fs.readFileSync(SCHEMA_PATH, 'utf8');
+  const conn = db();
+  await conn.executeMultiple(sql);
+  await run(
+    `INSERT INTO schema_meta (key, value) VALUES ('migrated_at', ?)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    [new Date().toISOString()]
+  );
+  if (!silent) console.log('[db] schema applied');
+  return conn;
 }
 
 /**
@@ -115,26 +138,26 @@ export function scalar(sql, params = []) {
  * Verification uses this so that "log the scan + bump the counter + raise the
  * alert" can never be left half-applied.
  */
-let txDepth = 0;
-export function tx(fn) {
-  const conn = db();
+export async function tx(fn) {
   if (txDepth > 0) return fn(); // already inside a transaction
 
-  conn.exec('BEGIN IMMEDIATE');
+  const transaction = await db().transaction('write');
+  activeTx = transaction;
   txDepth += 1;
   try {
-    const result = fn();
-    conn.exec('COMMIT');
+    const result = await fn();
+    await transaction.commit();
     return result;
   } catch (err) {
     try {
-      conn.exec('ROLLBACK');
+      await transaction.rollback();
     } catch {
       /* connection may already be unwound */
     }
     throw err;
   } finally {
     txDepth -= 1;
+    activeTx = null;
   }
 }
 

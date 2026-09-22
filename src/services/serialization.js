@@ -48,8 +48,8 @@ export function assertTransition(from, to) {
  * Runs in a single transaction so a failure part-way cannot leave a batch with
  * half its codes. Returns a summary plus a small preview of the codes.
  */
-export function issueCodes(batchId, { actor, req } = {}) {
-  const batch = db.get(
+export async function issueCodes(batchId, { actor, req } = {}) {
+  const batch = await db.get(
     `SELECT b.*, p.sku FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
     [batchId]
   );
@@ -68,15 +68,26 @@ export function issueCodes(batchId, { actor, req } = {}) {
   const width = serialWidthFor(batch.quantity);
   const started = Date.now();
 
-  const inserted = db.tx(() => {
-    const stmt = db
-      .db()
-      .prepare(
-        `INSERT INTO codes (code, batch_id, product_id, unit_index, serial, status)
-         VALUES (?, ?, ?, ?, ?, 'issued')`
-      );
+  const inserted = await db.tx(async () => {
+    /*
+     * Inserted in chunks rather than one statement at a time. Every statement
+     * is a network round trip to the database now, and a batch can run to
+     * hundreds of thousands of units - issuing them singly would take minutes
+     * of pure latency. CHUNK is a compromise between round trips and the size
+     * of a single request.
+     */
+    const CHUNK = 500;
+    const SQL = `INSERT INTO codes (code, batch_id, product_id, unit_index, serial, status)
+                 VALUES (?, ?, ?, ?, ?, 'issued')`;
 
     let n = 0;
+    let pending = [];
+    const flush = async () => {
+      if (!pending.length) return;
+      for (const args of pending) await db.run(SQL, args);
+      pending = [];
+    };
+
     for (const { unitIndex, serial, code } of generateBatchCodes({
       sku: batch.sku,
       mfgDate: batch.mfg_date,
@@ -86,11 +97,13 @@ export function issueCodes(batchId, { actor, req } = {}) {
       batchKey: `${batch.batch_number}:${batch.id}`,
       secret: config.secrets.code,
     })) {
-      stmt.run(code, batch.id, batch.product_id, unitIndex, serial);
+      pending.push([code, batch.id, batch.product_id, unitIndex, serial]);
+      if (pending.length >= CHUNK) await flush();
       n += 1;
     }
+    await flush();
 
-    db.run(
+    await db.run(
       `UPDATE batches
           SET status = 'codes_issued', serial_width = ?,
               codes_issued_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
@@ -104,7 +117,7 @@ export function issueCodes(batchId, { actor, req } = {}) {
   const ms = Date.now() - started;
   logger.info('codes issued', { batch: batch.batch_number, count: inserted, ms });
 
-  audit.record({
+  await audit.record({
     actor,
     req,
     action: 'batch.issue_codes',
@@ -119,7 +132,7 @@ export function issueCodes(batchId, { actor, req } = {}) {
     issued: inserted,
     serialWidth: width,
     durationMs: ms,
-    preview: db.all(
+    preview: await db.all(
       'SELECT code, serial, unit_index FROM codes WHERE batch_id = ? ORDER BY unit_index LIMIT 5',
       [batch.id]
     ),
@@ -130,8 +143,8 @@ export function issueCodes(batchId, { actor, req } = {}) {
  * Move a batch to a new lifecycle status, applying the side effects that
  * status implies (e.g. releasing a batch releases its codes for scanning).
  */
-export function transition(batchId, to, { actor, req, reason = null } = {}) {
-  const batch = db.get('SELECT * FROM batches WHERE id = ?', [batchId]);
+export async function transition(batchId, to, { actor, req, reason = null } = {}) {
+  const batch = await db.get('SELECT * FROM batches WHERE id = ?', [batchId]);
   if (!batch) throw notFound('Batch not found');
   assertTransition(batch.status, to);
 
@@ -139,7 +152,7 @@ export function transition(batchId, to, { actor, req, reason = null } = {}) {
     throw badRequest('A recall requires a reason - it is shown to every patient who scans the batch.');
   }
 
-  db.tx(() => {
+  await db.tx(async () => {
     const stamps = {
       printed: 'printed_at',
       released: 'released_at',
@@ -147,7 +160,7 @@ export function transition(batchId, to, { actor, req, reason = null } = {}) {
     };
     const stampCol = stamps[to];
 
-    db.run(
+    await db.run(
       `UPDATE batches
           SET status = ?,
               ${stampCol ? `${stampCol} = strftime('%Y-%m-%dT%H:%M:%fZ','now'),` : ''}
@@ -159,17 +172,17 @@ export function transition(batchId, to, { actor, req, reason = null } = {}) {
 
     // Propagate the states that individual codes care about.
     if (to === 'printed') {
-      db.run(`UPDATE codes SET status = 'printed' WHERE batch_id = ? AND status = 'issued'`, [batchId]);
+      await db.run(`UPDATE codes SET status = 'printed' WHERE batch_id = ? AND status = 'issued'`, [batchId]);
     } else if (to === 'released') {
-      db.run(`UPDATE codes SET status = 'released' WHERE batch_id = ? AND status IN ('issued','printed')`, [batchId]);
+      await db.run(`UPDATE codes SET status = 'released' WHERE batch_id = ? AND status IN ('issued','printed')`, [batchId]);
     } else if (to === 'recalled') {
       // Every not-yet-flagged code in the batch becomes recalled, so any
       // future scan warns the patient immediately.
-      db.run(`UPDATE codes SET status = 'recalled' WHERE batch_id = ? AND status <> 'flagged'`, [batchId]);
+      await db.run(`UPDATE codes SET status = 'recalled' WHERE batch_id = ? AND status <> 'flagged'`, [batchId]);
     }
   });
 
-  audit.record({
+  await audit.record({
     actor,
     req,
     action: `batch.${to}`,
@@ -179,14 +192,14 @@ export function transition(batchId, to, { actor, req, reason = null } = {}) {
   });
 
   logger.info('batch transition', { batch: batch.batch_number, from: batch.status, to });
-  return db.get('SELECT * FROM batches WHERE id = ?', [batchId]);
+  return await db.get('SELECT * FROM batches WHERE id = ?', [batchId]);
 }
 
 /** Per-batch code statistics for the dashboard. */
-export function batchStats(batchId) {
-  const rows = db.all('SELECT status, COUNT(*) AS n FROM codes WHERE batch_id = ? GROUP BY status', [batchId]);
+export async function batchStats(batchId) {
+  const rows = await db.all('SELECT status, COUNT(*) AS n FROM codes WHERE batch_id = ? GROUP BY status', [batchId]);
   const byStatus = Object.fromEntries(rows.map((r) => [r.status, r.n]));
-  const scans = db.get(
+  const scans = await db.get(
     `SELECT COUNT(*) AS total,
             SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
             SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged
@@ -201,7 +214,7 @@ export function batchStats(batchId) {
 }
 
 /** Paged code listing for a batch. */
-export function listCodes(batchId, { page, pageSize, status, search } = {}) {
+export async function listCodes(batchId, { page, pageSize, status, search } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
   const where = ['c.batch_id = ?'];
   const params = [batchId];
@@ -216,8 +229,8 @@ export function listCodes(batchId, { page, pageSize, status, search } = {}) {
   }
 
   const clause = `WHERE ${where.join(' AND ')}`;
-  const total = db.scalar(`SELECT COUNT(*) FROM codes c ${clause}`, params);
-  const items = db.all(
+  const total = await db.scalar(`SELECT COUNT(*) FROM codes c ${clause}`, params);
+  const items = await db.all(
     `SELECT c.id, c.code, c.serial, c.unit_index, c.status, c.scan_count,
             c.first_scan_at, c.last_scan_at
        FROM codes c ${clause}
@@ -255,14 +268,14 @@ export async function qrDataUrl(code) {
  * printer consumes. This is the one artefact QR Shield writes back toward the
  * physical supply chain.
  */
-export function exportCsv(batchId) {
-  const batch = db.get(
+export async function exportCsv(batchId) {
+  const batch = await db.get(
     `SELECT b.*, p.sku, p.name FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
     [batchId]
   );
   if (!batch) throw notFound('Batch not found');
 
-  const rows = db.all('SELECT code, serial, unit_index FROM codes WHERE batch_id = ? ORDER BY unit_index', [batchId]);
+  const rows = await db.all('SELECT code, serial, unit_index FROM codes WHERE batch_id = ? ORDER BY unit_index', [batchId]);
   const header = 'unit_index,code,serial,qr_payload,batch_number,product_sku,mfg_date,expiry_date';
   const lines = rows.map((r) =>
     [

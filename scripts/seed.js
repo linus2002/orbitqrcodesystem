@@ -41,21 +41,21 @@ const daysAgo = (n) => new Date(Date.now() - n * 86400000);
 const ymd = (d) => d.toISOString().slice(0, 10);
 
 db.open();
-db.migrate({ silent: true });
+await db.migrate({ silent: true });
 
 console.log('Seeding QR Shield demonstration data...\n');
 
 // ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
-db.tx(() => {
+await db.tx(async () => {
   for (const t of [
     'sms_log', 'audit_log', 'consumer_reports', 'alerts', 'scans',
     'shipments', 'codes', 'batches', 'leaflets', 'products', 'sessions', 'users', 'settings',
   ]) {
-    db.run(`DELETE FROM "${t}"`);
+    await db.run(`DELETE FROM "${t}"`);
   }
-  db.run(`DELETE FROM sqlite_sequence`);
+  await db.run(`DELETE FROM sqlite_sequence`);
 });
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ const users = [
 
 const userIds = {};
 for (const u of users) {
-  const { lastInsertRowid } = db.run(
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO users (email, full_name, password_hash, role, must_change_pw) VALUES (?,?,?,?,0)`,
     [u.email.toLowerCase(), u.fullName, hashPassword(u.password), u.role]
   );
@@ -133,14 +133,14 @@ const PRODUCTS = [
 const productIds = {};
 const leafletIds = {};
 for (const p of PRODUCTS) {
-  const { lastInsertRowid: pid } = db.run(
+  const { lastInsertRowid: pid } = await db.run(
     `INSERT INTO products (sku, name, generic_name, strength, dosage_form, pack_size, manufacturer, category)
      VALUES (?,?,?,?,?,?,?,?)`,
     [p.sku, p.name, p.genericName, p.strength, p.dosageForm, p.packSize, p.manufacturer, p.category]
   );
   productIds[p.sku] = pid;
 
-  const { lastInsertRowid: lid } = db.run(
+  const { lastInsertRowid: lid } = await db.run(
     `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?,?,?,?)`,
     [pid, '1.0', 'en', JSON.stringify(p.leaflet)]
   );
@@ -162,7 +162,7 @@ const BATCHES = [
 
 const batchIds = {};
 for (const b of BATCHES) {
-  const { lastInsertRowid: bid } = db.run(
+  const { lastInsertRowid: bid } = await db.run(
     `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, leaflet_id, notes, created_by, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [b.number, productIds[b.sku], ymd(b.mfg), ymd(b.expiry), b.qty, b.isTest ? 1 : 0,
@@ -171,20 +171,20 @@ for (const b of BATCHES) {
   batchIds[b.number] = bid;
 
   // Run the real serialization engine, then walk the real lifecycle.
-  serialization.issueCodes(bid, { actor: { id: userIds.admin, email: users[0].email } });
+  await serialization.issueCodes(bid, { actor: { id: userIds.admin, email: users[0].email } });
 
   const path = ['printed', 'released', 'distributed', 'recalled'];
   for (const step of path) {
-    const current = db.get('SELECT status FROM batches WHERE id = ?', [bid]).status;
+    const current = (await db.get('SELECT status FROM batches WHERE id = ?', [bid])).status;
     if (current === b.target) break;
     if (step === 'recalled' && b.target !== 'recalled') break;
-    serialization.transition(bid, step, {
+    await serialization.transition(bid, step, {
       actor: { id: userIds.admin, email: users[0].email },
       reason: step === 'recalled' ? b.recallReason : null,
     });
   }
 }
-const totalCodes = db.scalar('SELECT COUNT(*) FROM codes');
+const totalCodes = await db.scalar('SELECT COUNT(*) FROM codes');
 console.log(`  batches    : ${BATCHES.length}`);
 console.log(`  codes      : ${totalCodes.toLocaleString()} serialized`);
 
@@ -204,7 +204,7 @@ for (const b of BATCHES.filter((x) => ['distributed', 'recalled'].includes(x.tar
   for (let i = 0; i < 3; i++) {
     const dest = PHARMACIES[(shipmentNo + i) % PHARMACIES.length];
     const shippedAt = daysAgo(between(5, 30));
-    db.run(
+    await db.run(
       `INSERT INTO shipments (reference, batch_id, quantity, from_site, to_name, to_type, to_region, status, shipped_at, received_at)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
       [
@@ -216,7 +216,7 @@ for (const b of BATCHES.filter((x) => ['distributed', 'recalled'].includes(x.tar
     );
   }
 }
-console.log(`  shipments  : ${db.scalar('SELECT COUNT(*) FROM shipments')}`);
+console.log(`  shipments  : ${await db.scalar('SELECT COUNT(*) FROM shipments')}`);
 
 // ---------------------------------------------------------------------------
 // Scan history
@@ -234,24 +234,22 @@ const LOCATIONS = [
   { country: 'GH', region: 'Greater Accra', city: 'Accra' },
 ];
 
-const insertScan = db.db().prepare(
-  `INSERT INTO scans (code_text, code_id, batch_id, product_id, result, reason, channel,
+const INSERT_SCAN = `INSERT INTO scans (code_text, code_id, batch_id, product_id, result, reason, channel,
                       signature_state, scan_number, ip_hash, user_agent, country, region, city, is_test, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-);
+   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
 
 /** Record a backdated scan and keep the code's counters in step. */
-function historicScan({ code, result, reason, daysBack, channel = 'web', location, ipSeed, scanNumber = 1 }) {
+async function historicScan({ code, result, reason, daysBack, channel = 'web', location, ipSeed, scanNumber = 1 }) {
   const when = new Date(daysAgo(daysBack).getTime() + between(0, 86399) * 1000);
   const loc = location ?? pick(LOCATIONS);
-  insertScan.run(
+  await db.run(INSERT_SCAN, [
     code.code, code.id, code.batch_id, code.product_id, result, reason, channel,
     channel === 'sms' ? null : 'valid', scanNumber,
     pseudonymize(`seed-${ipSeed ?? between(1, 5000)}`, config.secrets.session),
     channel === 'sms' ? null : 'Mozilla/5.0 (Linux; Android 13) Mobile Safari/537.36',
-    loc.country, loc.region, loc.city, code.is_test ?? 0, iso(when)
-  );
-  db.run(
+    loc.country, loc.region, loc.city, code.is_test ?? 0, iso(when),
+  ]);
+  await db.run(
     `UPDATE codes SET scan_count = scan_count + 1,
             verified_count = verified_count + ?,
             first_scan_at = COALESCE(first_scan_at, ?),
@@ -265,7 +263,7 @@ function historicScan({ code, result, reason, daysBack, channel = 'web', locatio
   return { when, loc };
 }
 
-const codesOf = (batchNumber, limit, offset = 0) =>
+const codesOf = async (batchNumber, limit, offset = 0) =>
   db.all(
     `SELECT c.*, b.is_test FROM codes c JOIN batches b ON b.id = c.batch_id
       WHERE c.batch_id = ? ORDER BY c.unit_index LIMIT ? OFFSET ?`,
@@ -275,10 +273,10 @@ const codesOf = (batchNumber, limit, offset = 0) =>
 // --- Normal, healthy traffic ------------------------------------------------
 let genuineCount = 0;
 for (const bn of ['AMX25-2608A', 'PCM50-2609A', 'ART20-2607A']) {
-  const sample = codesOf(bn, 140);
+  const sample = await codesOf(bn, 140);
   for (const code of sample) {
     if (rnd() > 0.72) continue; // not every unit gets checked
-    historicScan({
+    await historicScan({
       code,
       result: 'genuine',
       reason: 'ok',
@@ -292,13 +290,13 @@ for (const bn of ['AMX25-2608A', 'PCM50-2609A', 'ART20-2607A']) {
 // --- Counterfeit cluster on the antimalarial line ---------------------------
 // A single cloned pack scanned repeatedly from several cities is the classic
 // signature of a copied QR code, and is what the dashboard must surface.
-const clonedCodes = codesOf('ART20-2607A', 6, 300);
+const clonedCodes = await codesOf('ART20-2607A', 6, 300);
 let duplicateCount = 0;
 for (const code of clonedCodes) {
-  historicScan({ code, result: 'genuine', reason: 'ok', daysBack: between(20, 28), scanNumber: 1 });
+  await historicScan({ code, result: 'genuine', reason: 'ok', daysBack: between(20, 28), scanNumber: 1 });
   const copies = between(3, 7);
   for (let i = 0; i < copies; i++) {
-    historicScan({
+    await historicScan({
       code,
       result: 'flagged',
       reason: 'duplicate_scan',
@@ -314,35 +312,37 @@ for (const code of clonedCodes) {
 let unknownCount = 0;
 for (let i = 0; i < 24; i++) {
   const when = daysAgo(between(0, 25));
-  insertScan.run(
+  await db.run(INSERT_SCAN, [
     `ART20-${String(between(240101, 260931))}-${String(between(10000, 99999))}-${pick(['K7', 'M2', 'Q9', 'B4'])}`,
     null, null, null, 'flagged', 'unknown_code', 'web', 'absent', null,
     pseudonymize(`seed-unknown-${between(1, 40)}`, config.secrets.session),
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Mobile/15E148',
     ...Object.values(pick(LOCATIONS)), 0, iso(when)
-  );
+  
+  ]);
   unknownCount++;
 }
 
 // --- A code-guessing burst from one source ----------------------------------
 const attackerIp = pseudonymize('seed-attacker-1', config.secrets.session);
 for (let i = 0; i < 26; i++) {
-  insertScan.run(
+  await db.run(INSERT_SCAN, [
     `ART20-260712-${String(between(10000, 99999))}-${pick(['A1', 'ZZ', '7K'])}`,
     null, null, null, 'invalid', 'checksum_failed', 'api', 'absent', null,
     attackerIp, 'python-requests/2.31.0', 'RU', null, null, 0,
     iso(new Date(daysAgo(3).getTime() + i * 45000))
-  );
+  
+  ]);
 }
 
-console.log(`  scans      : ${db.scalar('SELECT COUNT(*) FROM scans')} (${genuineCount} genuine, ${duplicateCount} duplicates, ${unknownCount} unknown)`);
+console.log(`  scans      : ${await db.scalar('SELECT COUNT(*) FROM scans')} (${genuineCount} genuine, ${duplicateCount} duplicates, ${unknownCount} unknown)`);
 
 // ---------------------------------------------------------------------------
 // Alerts derived from that history
 // ---------------------------------------------------------------------------
-function alertFor(codeRow, type, severity, title, detail, status, daysBack) {
+async function alertFor(codeRow, type, severity, title, detail, status, daysBack) {
   const when = iso(daysAgo(daysBack));
-  db.run(
+  await db.run(
     `INSERT INTO alerts (type, severity, status, title, detail_json, code_id, batch_id, resolution_note, resolved_by, resolved_at, created_at, updated_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
@@ -357,8 +357,8 @@ function alertFor(codeRow, type, severity, title, detail, status, daysBack) {
 }
 
 for (const [i, code] of clonedCodes.entries()) {
-  const occurrences = db.scalar(`SELECT COUNT(*) FROM scans WHERE code_id = ? AND result = 'flagged'`, [code.id]);
-  alertFor(
+  const occurrences = await db.scalar(`SELECT COUNT(*) FROM scans WHERE code_id = ? AND result = 'flagged'`, [code.id]);
+  await alertFor(
     code, 'duplicate_scan',
     occurrences >= 6 ? 'critical' : 'high',
     `Duplicate scan on ${code.code} (${occurrences} repeats)`,
@@ -368,24 +368,24 @@ for (const [i, code] of clonedCodes.entries()) {
   );
 }
 
-alertFor(null, 'guess_attack', 'high',
+await alertFor(null, 'guess_attack', 'high',
   'Possible code-guessing: 26 failed lookups from one source',
   { ipHash: attackerIp, attempts: 26, windowHours: 1, userAgent: 'python-requests/2.31.0' },
   'open', 3);
 
-const recalledCode = codesOf('INS10-2606A', 1)[0];
-alertFor(recalledCode, 'recalled_scan', 'critical',
+const recalledCode = (await codesOf('INS10-2606A', 1))[0];
+await alertFor(recalledCode, 'recalled_scan', 'critical',
   'Recalled batch INS10-2606A scanned by a patient',
   { batchNumber: 'INS10-2606A', product: 'Insulin Glargine', code: recalledCode.code },
   'investigating', 2);
 
-const expiredCode = codesOf('ART20-2412B', 1)[0];
-alertFor(expiredCode, 'expired_scan', 'low',
+const expiredCode = (await codesOf('ART20-2412B', 1))[0];
+await alertFor(expiredCode, 'expired_scan', 'low',
   'Expired product scanned (batch ART20-2412B)',
   { batchNumber: 'ART20-2412B', expiryDate: ymd(daysAgo(25)) },
   'open', 1);
 
-console.log(`  alerts     : ${db.scalar('SELECT COUNT(*) FROM alerts')}`);
+console.log(`  alerts     : ${await db.scalar('SELECT COUNT(*) FROM alerts')}`);
 
 // ---------------------------------------------------------------------------
 // Consumer reports
@@ -418,8 +418,8 @@ const REPORTS = [
 ];
 
 for (const r of REPORTS) {
-  const codeRow = r.code ? db.get('SELECT id FROM codes WHERE code = ?', [r.code]) : null;
-  db.run(
+  const codeRow = r.code ? await db.get('SELECT id FROM codes WHERE code = ?', [r.code]) : null;
+  await db.run(
     `INSERT INTO consumer_reports (code_text, code_id, reporter_name, reporter_contact, purchase_location, description, status, created_at)
      VALUES (?,?,?,?,?,?,?,?)`,
     [r.code, codeRow?.id ?? null, r.name, r.contact, r.location, r.description, r.status, iso(daysAgo(between(1, 10)))]
@@ -436,15 +436,15 @@ for (const s of [
   ['support.phone', '+234 800 QRSHIELD', 'Contact number shown to patients on a flagged result.'],
   ['support.sms_shortcode', '32123', 'Shortcode patients text a code to when offline.'],
 ]) {
-  db.run('INSERT INTO settings (key, value, description) VALUES (?,?,?)', s);
+  await db.run('INSERT INTO settings (key, value, description) VALUES (?,?,?)', s);
 }
 
 // ---------------------------------------------------------------------------
 // One live verification through the real code path, so the demo has a
 // "just now" event and the full pipeline is proven end to end by the seed.
 // ---------------------------------------------------------------------------
-const liveCode = codesOf('AMX25-2608A', 1, 900)[0];
-const liveResult = verification.verify(liveCode.code, {
+const liveCode = (await codesOf('AMX25-2608A', 1, 900))[0];
+const liveResult = await verification.verify(liveCode.code, {
   channel: 'web',
   req: { clientIp: '203.0.113.42', get: () => null },
 });
@@ -464,11 +464,11 @@ for (const u of users) {
 console.log('-'.repeat(62));
 console.log('\n  Try these codes on the public portal at http://localhost:3000\n');
 const samples = [
-  ['GENUINE (unused)', codesOf('AMX25-2608A', 1, 1100)[0].code],
-  ['GENUINE (unused)', codesOf('PCM50-2609A', 1, 800)[0].code],
+  ['GENUINE (unused)', (await codesOf('AMX25-2608A', 1, 1100))[0].code],
+  ['GENUINE (unused)', (await codesOf('PCM50-2609A', 1, 800))[0].code],
   ['FLAGGED - already verified elsewhere', clonedCodes[0].code],
-  ['FLAGGED - batch recalled', codesOf('INS10-2606A', 1, 10)[0].code],
-  ['FLAGGED - past expiry', codesOf('ART20-2412B', 1, 10)[0].code],
+  ['FLAGGED - batch recalled', (await codesOf('INS10-2606A', 1, 10))[0].code],
+  ['FLAGGED - past expiry', (await codesOf('ART20-2412B', 1, 10))[0].code],
   ['INVALID - not a real code', 'AMX25-260921-00483-K7'],
 ];
 for (const [label, code] of samples) {

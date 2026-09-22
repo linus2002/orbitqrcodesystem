@@ -41,13 +41,13 @@ router.post(
     limiters: [loginLimiter],
     keyFn: (req) => `${req.clientIp}|${String(req.body?.email ?? '').toLowerCase()}`,
   }),
-  (req, res) => {
+  async (req, res) => {
     const { email, password } = validate(req.body, {
       email: { type: 'email', required: true },
       password: { type: 'string', required: true, max: 200 },
     });
 
-    const { user, token, csrfToken, expiresAt } = authService.login(email, password, req);
+    const { user, token, csrfToken, expiresAt } = await authService.login(email, password, req);
     const maxAge = config.session.ttlHours * 3600 * 1000;
 
     res.cookie(config.session.cookieName, token, cookieOptions(maxAge));
@@ -66,8 +66,8 @@ router.post(
 // ---------------------------------------------------------------------------
 // POST /api/auth/logout
 // ---------------------------------------------------------------------------
-router.post('/logout', requireAuth, requireCsrf, (req, res) => {
-  authService.logout(req.session.id, { actor: req.user, req });
+router.post('/logout', requireAuth, requireCsrf, async (req, res) => {
+  await authService.logout(req.session.id, { actor: req.user, req });
   res.clearCookie(config.session.cookieName, cookieOptions());
   res.clearCookie(config.session.csrfCookieName, { ...cookieOptions(), httpOnly: false });
   res.json({ ok: true });
@@ -87,13 +87,13 @@ router.get('/me', requireAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /api/auth/change-password
 // ---------------------------------------------------------------------------
-router.post('/change-password', requireAuth, requireCsrf, (req, res) => {
+router.post('/change-password', requireAuth, requireCsrf, async (req, res) => {
   const { currentPassword, newPassword } = validate(req.body, {
     currentPassword: { type: 'string', required: true, max: 200 },
     newPassword: { type: 'string', required: true, max: 200 },
   });
 
-  authService.changePassword(req.user.id, currentPassword, newPassword, {
+  await authService.changePassword(req.user.id, currentPassword, newPassword, {
     req,
     currentSessionId: req.session.id,
   });
@@ -104,9 +104,9 @@ router.post('/change-password', requireAuth, requireCsrf, (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /api/auth/sessions - where am I signed in
 // ---------------------------------------------------------------------------
-router.get('/sessions', requireAuth, (req, res) => {
+router.get('/sessions', requireAuth, async (req, res) => {
   res.json({
-    items: authService.listSessions(req.user.id).map((s) => ({
+    items: (await authService.listSessions(req.user.id)).map((s) => ({
       ...s,
       current: s.id === req.session.id,
     })),

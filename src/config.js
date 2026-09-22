@@ -60,8 +60,16 @@ export const config = {
   port: int('PORT', 3000),
   publicBaseUrl: str('PUBLIC_BASE_URL', `http://localhost:${int('PORT', 3000)}`).replace(/\/+$/, ''),
 
+  /*
+   * One driver (libSQL) serves both shapes: a local file in development, a
+   * hosted Turso database in production. Serverless hosting has no persistent
+   * filesystem, so TURSO_DATABASE_URL is what makes a deploy durable - without
+   * it the app silently falls back to a file that the platform will discard.
+   */
   db: {
     file: path.resolve(ROOT, str('DB_FILE', './data/qrshield.db')),
+    url: str('TURSO_DATABASE_URL', ''),
+    authToken: str('TURSO_AUTH_TOKEN', ''),
   },
 
   secrets: {

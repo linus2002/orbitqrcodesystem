@@ -14,46 +14,46 @@ import { hashPassword } from '../src/lib/crypto.js';
 import * as serialization from '../src/services/serialization.js';
 
 /** Fresh schema in memory. */
-export function freshDb() {
+export async function freshDb() {
   db.close();
   db.open(':memory:');
-  db.migrate({ silent: true });
+  await db.migrate({ silent: true });
   return db;
 }
 
 /** Minimal but realistic fixture: one product, one released batch with codes. */
-export function seedBasics({ quantity = 40, expiryDays = 700 } = {}) {
+export async function seedBasics({ quantity = 40, expiryDays = 700 } = {}) {
   const expiry = new Date(Date.now() + expiryDays * 86400000).toISOString().slice(0, 10);
 
-  db.run(
+  await db.run(
     `INSERT INTO products (sku, name, strength, dosage_form, manufacturer)
      VALUES ('AMX25', 'Amoxicillin', '250 mg', 'Capsule', 'Northbridge')`
   );
-  db.run(
+  await db.run(
     `INSERT INTO leaflets (product_id, version, sections_json)
      VALUES (1, '1.0', ?)`,
     [JSON.stringify([{ heading: 'Dosage', body: 'One capsule three times a day.' }])]
   );
-  db.run(
+  await db.run(
     `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, leaflet_id)
      VALUES ('AMX25-T1', 1, '2026-09-01', ?, ?, 1)`,
     [expiry, quantity]
   );
 
-  serialization.issueCodes(1, {});
-  serialization.transition(1, 'printed', {});
-  serialization.transition(1, 'released', {});
+  await serialization.issueCodes(1, {});
+  await serialization.transition(1, 'printed', {});
+  await serialization.transition(1, 'released', {});
 
   return {
     batchId: 1,
     productId: 1,
-    codes: db.all('SELECT * FROM codes WHERE batch_id = 1 ORDER BY unit_index').map((c) => c.code),
+    codes: (await db.all('SELECT * FROM codes WHERE batch_id = 1 ORDER BY unit_index')).map((c) => c.code),
   };
 }
 
 /** Create a staff account. */
-export function seedUser({ email, password, role = 'admin', name = 'Test User' }) {
-  const { lastInsertRowid } = db.run(
+export async function seedUser({ email, password, role = 'admin', name = 'Test User' }) {
+  const { lastInsertRowid } = await db.run(
     `INSERT INTO users (email, full_name, password_hash, role) VALUES (?,?,?,?)`,
     [email.toLowerCase(), name, hashPassword(password), role]
   );
