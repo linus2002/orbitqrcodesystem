@@ -177,6 +177,52 @@ export async function tx(fn) {
 }
 
 /**
+ * Empty every table and restart identity counters. TESTS ONLY.
+ *
+ * With SQLite the equivalent is simply opening a new `:memory:` database, so
+ * this exists for the Postgres path, where the tests share one real server.
+ *
+ * Guarded by an explicit opt-in: `npm test` with a production DATABASE_URL
+ * still in the shell would otherwise erase that database, and the shape of
+ * that accident - one stray environment variable - is far too easy.
+ */
+export async function resetForTests() {
+  if (!config.db.postgresUrl) return;
+  if (process.env.ALLOW_DESTRUCTIVE_TEST_DB !== '1') {
+    throw new Error(
+      'Refusing to wipe a Postgres database. Tests truncate every table, so ' +
+        'set ALLOW_DESTRUCTIVE_TEST_DB=1 only when DATABASE_URL points at a ' +
+        'throwaway database.'
+    );
+  }
+  const names = await tables();
+  if (!names.length) return;
+  const list = names.map((n) => `"${n}"`).join(', ');
+  await run(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+}
+
+/**
+ * Every table in the database, for migration reporting.
+ *
+ * The two engines keep their catalogue in different places - sqlite_master
+ * versus information_schema - and this is the only query in the codebase that
+ * has to know which engine it is talking to.
+ */
+export async function tables() {
+  const rows = config.db.postgresUrl
+    ? await all(
+        `SELECT table_name AS name FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+          ORDER BY table_name`
+      )
+    : await all(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+      );
+  return rows.map((r) => r.name);
+}
+
+/**
  * Build a `LIMIT/OFFSET` clause plus a total count, the pattern every admin
  * list endpoint uses. Keeps pagination consistent across the whole API.
  */
@@ -186,4 +232,4 @@ export function paginate({ page = 1, pageSize = 25, maxPageSize = 200 } = {}) {
   return { limit: size, offset: (p - 1) * size, page: p, pageSize: size };
 }
 
-export default { open, db, close, migrate, run, get, all, scalar, tx, paginate };
+export default { open, db, close, migrate, run, get, all, scalar, tx, tables, resetForTests, paginate };

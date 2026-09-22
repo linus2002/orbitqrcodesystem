@@ -10,11 +10,23 @@
 import './setup-env.js';
 
 import * as db from '../src/db/index.js';
+import { config } from '../src/config.js';
 import { hashPassword } from '../src/lib/crypto.js';
 import * as serialization from '../src/services/serialization.js';
 
-/** Fresh schema in memory. */
+/**
+ * A clean database for one test.
+ *
+ * On SQLite that means a brand new in-memory one. On Postgres the server is
+ * shared, so the schema is applied once and every table emptied instead.
+ */
 export async function freshDb() {
+  if (config.db.postgresUrl) {
+    db.open();
+    await db.migrate({ silent: true });
+    await db.resetForTests();
+    return db;
+  }
   await db.close();
   db.open(':memory:');
   await db.migrate({ silent: true });
