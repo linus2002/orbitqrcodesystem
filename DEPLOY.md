@@ -189,22 +189,19 @@ Redeploy after setting the variables; they only apply to a new build.
 
 ### 5. Create the first admin
 
-The database is empty, so sign-in fails until an account exists:
+A fresh deployment has an empty users table and there is no sign-up, so
+sign-in fails until an account exists:
 
 ```bash
-DATABASE_URL='postgresql://...' node -e "
-import('./src/db/index.js').then(async db => {
-  const { hashPassword } = await import('./src/lib/crypto.js');
-  db.open();
-  await db.run(
-    'INSERT INTO users (email, full_name, role, password_hash, status) VALUES (?,?,?,?,?)',
-    ['you@example.com', 'Your Name', 'admin', hashPassword('a-strong-password'), 'active']
-  );
-  console.log('admin created');
-  await db.close();
-});
-"
+DATABASE_URL='postgresql://...' npm run user:create --   --email you@example.com --name "Your Name" --password "a-strong-password"
 ```
+
+The password must be at least 12 characters with an uppercase letter and a
+digit; the script reports exactly what is missing if it is not. `--role`
+takes `admin` (the default), `security` or `regulator`.
+
+This goes through the same `createUser()` the dashboard uses, so the strength
+rules, the role check and the audit entry all apply.
 
 > Do not run `npm run db:seed` against Supabase. It clears the demo tables
 > first, and its three accounts have passwords published in this repository.
