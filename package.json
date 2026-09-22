@@ -9,6 +9,7 @@
   },
   "main": "src/server.js",
   "scripts": {
+    "prestart": "node scripts/migrate.js",
     "start": "node src/server.js",
     "build": "vite build",
     "dev": "node scripts/dev.js",

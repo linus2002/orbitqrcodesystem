@@ -1,0 +1,21 @@
+# Never let a local secret or database into an image.
+.env
+.env.*
+data/
+
+node_modules/
+dist/
+.git/
+.gitignore
+.claude/
+.vite/
+
+# Not needed to build or run the server.
+docs/
+tests/
+README.md
+DEPLOY.md
+.prettierrc
+*.log
+Dockerfile
+.dockerignore

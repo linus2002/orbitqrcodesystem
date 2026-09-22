@@ -1,0 +1,45 @@
+# Render blueprint. Create the service with New > Blueprint and point it at
+# this repository; Render reads this file and provisions everything below.
+#
+# IMPORTANT: numInstances stays at 1. The database is a SQLite file on the
+# attached disk, which one instance owns. A second instance would get its own
+# disk and its own divergent copy of the codes and scan log.
+services:
+  - type: web
+    name: orbit-qr
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # The free plan has no persistent disk, so a paid plan is required here.
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /api/health
+
+    disk:
+      name: orbit-data
+      mountPath: /data
+      sizeGB: 1
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_FILE
+        value: /data/qrshield.db
+      # Session cookies over HTTPS only. Render terminates TLS for us.
+      - key: COOKIE_SECURE
+        value: "true"
+
+      # Set this to the service's own https URL once Render assigns it. It is
+      # baked into every printed QR code, so it must be right before any
+      # code is printed - changing it later orphans every pack already out.
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+      # Generated once by Render and then held. CODE_SECRET signs the payload
+      # of every code this installation mints: treat it as permanent and back
+      # it up, because rotating it invalidates every code already printed.
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: CODE_SECRET
+        generateValue: true
+      - key: SMS_WEBHOOK_SECRET
+        generateValue: true
