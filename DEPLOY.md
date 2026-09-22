@@ -121,6 +121,35 @@ import('./src/db/index.js').then(async db => {
 
 ---
 
+## Vercel (frontend only)
+
+[`vercel.json`](vercel.json) is committed so the built SPA deploys correctly:
+it sets the build command and `dist` as the output, adds the catch-all rewrite
+that makes `/login` and `/admin/*` resolve to `index.html`, and re-declares the
+security headers from `src/middleware/security.js` - those are set by Express
+at runtime, so on a static deploy nothing would send them otherwise.
+
+Note that `vercel.json` rejects any property its schema does not define: a
+`comment` key inside a `rewrites` or `headers` entry fails the deploy with
+`should NOT have additional property`. That is why the explanations live here
+rather than in the file.
+
+**This deploys the interface, not the system.** There is no Node process on a
+static deploy, so every `/api/*` call returns 404: no sign-in, no code
+verification, no dashboard data. To get a working system with the frontend on
+Vercel, run the API on one of the hosts above and add a rewrite pointing at
+it:
+
+```json
+{ "source": "/api/:path*", "destination": "https://your-api-host/api/:path*" }
+```
+
+The API host then needs `PUBLIC_BASE_URL` set to the Vercel domain, and the
+session cookie has to be valid for it - see `src/middleware/security.js` for
+the CORS origin allowlist.
+
+---
+
 ## Verifying a deployment
 
 ```bash

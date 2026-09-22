@@ -5,14 +5,12 @@
   "installCommand": "npm install",
   "rewrites": [
     {
-      "comment": "SPA fallback. Vercel serves a real file if one matches first, so /assets/* is untouched; /api/* is excluded so a missing backend returns 404 instead of HTML, which is far easier to diagnose.",
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
     {
-      "comment": "On a static deploy there is no Express to run src/middleware/security.js, so these mirror the headers it sets. The strict script-src is the one that matters: the frontend ships no inline <script> and loads nothing from a CDN.",
       "source": "/(.*)",
       "headers": [
         {
