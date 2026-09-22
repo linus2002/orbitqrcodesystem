@@ -127,8 +127,8 @@ export async function start({ port = config.port } = {}) {
 
   const shutdown = (signal) => {
     logger.info(`${signal} received, shutting down`);
-    server.close(() => {
-      db.close();
+    server.close(async () => {
+      await db.close();
       process.exit(0);
     });
     // Do not hang forever on a stuck connection.

@@ -70,6 +70,16 @@ export const config = {
     file: path.resolve(ROOT, str('DB_FILE', './data/qrshield.db')),
     url: str('TURSO_DATABASE_URL', ''),
     authToken: str('TURSO_AUTH_TOKEN', ''),
+    /*
+     * A Postgres connection string (Supabase). When set it wins over the two
+     * above: it is the only one of the three that both persists on a
+     * serverless platform and is shared by every instance.
+     *
+     * Supabase gives two - use the CONNECTION POOLER one (port 6543) for
+     * serverless. The direct connection (5432) allows far fewer clients, and
+     * a function that scales out will exhaust them.
+     */
+    postgresUrl: str('DATABASE_URL', str('POSTGRES_URL', '')),
   },
 
   secrets: {
@@ -101,7 +111,12 @@ export const config = {
      * instance serves traffic - on serverless the counters must be shared or
      * an attacker just spreads attempts across instances.
      */
-    store: str('RATELIMIT_STORE', str('TURSO_DATABASE_URL', '') ? 'sql' : 'memory'),
+    store: str(
+      'RATELIMIT_STORE',
+      str('TURSO_DATABASE_URL', '') || str('DATABASE_URL', '') || str('POSTGRES_URL', '')
+        ? 'sql'
+        : 'memory'
+    ),
     guessAlertThreshold: int('GUESS_ALERT_THRESHOLD', 8),
   },
 

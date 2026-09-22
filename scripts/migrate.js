@@ -24,4 +24,4 @@ for (const t of tables) {
   const n = await db.scalar(`SELECT COUNT(*) FROM "${t.name}"`);
   console.log(`  ${t.name.padEnd(20)} ${String(n).padStart(8)} rows`);
 }
-db.close();
+await db.close();

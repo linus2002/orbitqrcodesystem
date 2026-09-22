@@ -17,6 +17,7 @@
     "dev:client": "vite",
     "preview": "npm run build && node src/server.js",
     "db:migrate": "node scripts/migrate.js",
+    "db:pg-schema": "node scripts/gen-pg-schema.js && node scripts/check-pg-schema.js",
     "db:seed": "node scripts/seed.js",
     "db:reset": "node scripts/reset.js",
     "setup": "node scripts/setup.js",
@@ -30,6 +31,7 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",
     "jsqr": "^1.4.0",
+    "pg": "^8.23.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -37,6 +39,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.1",
+    "pg-mem": "^3.0.14",
     "vite": "^8.3.0"
   }
 }

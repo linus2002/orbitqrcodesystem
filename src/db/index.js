@@ -1,16 +1,21 @@
 /**
  * Database access layer.
  *
- * Uses libSQL, which speaks SQLite's dialect against three different backends
- * from one driver: `:memory:` for tests, a local `file:` in development, and a
- * hosted Turso database in production. That is what lets this run on a
- * serverless platform, where there is no disk to keep a .db file on.
+ * Two drivers sit behind one interface, chosen by configuration:
  *
- * Every call here is async because a hosted database is a network round trip.
- * Nothing above this layer talks to the driver directly; services only ever
- * use `db.get/all/run/scalar/tx`.
+ *   Postgres (Supabase)  when DATABASE_URL is set - the production target,
+ *                        and the only option that both persists and is shared
+ *                        across instances on a serverless platform
+ *   libSQL               otherwise - `:memory:` for tests, a local file for
+ *                        development, so neither needs a server running
+ *
+ * Both speak the same SQLite-flavoured SQL: src/db/postgres.js translates the
+ * three constructs that differ. Every call is async because a hosted database
+ * is a network round trip. Nothing above this layer talks to a driver
+ * directly; services only ever use `db.get/all/run/scalar/tx`.
  */
 import { createClient } from '@libsql/client';
+import { PostgresDriver } from './postgres.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +23,11 @@ import { config } from '../config.js';
 
 let handle = null;
 
-/** Absolute path to schema.sql (resolved relative to this module, Windows-safe). */
-const SCHEMA_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema.sql');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/** The schema for whichever engine is in use (resolved Windows-safe). */
+const schemaPath = () =>
+  path.join(HERE, config.db.postgresUrl ? 'schema.postgres.sql' : 'schema.sql');
 
 /**
  * Turn the configured target into a libSQL URL.
@@ -44,7 +52,9 @@ function resolveTarget(file) {
  */
 export function open(file = config.db.file) {
   if (handle) return handle;
-  handle = createClient(resolveTarget(file));
+  handle = config.db.postgresUrl
+    ? new PostgresDriver(config.db.postgresUrl)
+    : createClient(resolveTarget(file));
   return handle;
 }
 
@@ -53,11 +63,16 @@ export function db() {
   return handle ?? open();
 }
 
-/** Close the connection (tests, graceful shutdown). */
-export function close() {
+/**
+ * Close the connection (tests, graceful shutdown).
+ *
+ * Awaitable: closing a Postgres pool drains it, whereas libSQL's close is
+ * immediate. Callers that do not care can still fire and forget.
+ */
+export async function close() {
   if (handle) {
     try {
-      handle.close();
+      await handle.close();
     } catch {
       /* already closed */
     }
@@ -71,7 +86,7 @@ export function close() {
  * The transaction currently in flight, if any.
  *
  * libSQL hands back a transaction object that statements must be issued
- * against, but `tx(fn)` takes a plain callback and the 100-odd call sites
+ * against, but `await tx(fn)` takes a plain callback and the 100-odd call sites
  * inside those callbacks just call `db.run(...)`. Holding the handle here lets
  * every helper below route itself, so a transaction stays invisible to callers
  * - exactly as it was when the driver was synchronous.
@@ -119,7 +134,7 @@ export async function scalar(sql, params = []) {
 
 /** Apply schema.sql. Safe to run repeatedly - every statement is IF NOT EXISTS. */
 export async function migrate({ silent = false } = {}) {
-  const sql = fs.readFileSync(SCHEMA_PATH, 'utf8');
+  const sql = fs.readFileSync(schemaPath(), 'utf8');
   const conn = db();
   await conn.executeMultiple(sql);
   await run(

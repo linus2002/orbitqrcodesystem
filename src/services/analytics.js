@@ -160,7 +160,9 @@ export async function topFlaggedBatches({ days = 30, limit = 8 } = {}) {
        JOIN batches b  ON b.id = s.batch_id
        JOIN products p ON p.id = b.product_id
       WHERE s.is_test = 0 AND s.created_at >= ?
-      GROUP BY b.id
+      -- p.name and p.sku are listed explicitly: grouping by b.id only makes
+      -- the BATCHES columns functionally dependent, not the joined product's.
+      GROUP BY b.id, b.batch_number, b.status, b.expiry_date, p.name, p.sku
      HAVING flagged > 0
       ORDER BY flagged DESC, scans DESC
       LIMIT ?`,

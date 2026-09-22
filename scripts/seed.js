@@ -264,7 +264,7 @@ async function historicScan({ code, result, reason, daysBack, channel = 'web', l
 }
 
 const codesOf = async (batchNumber, limit, offset = 0) =>
-  db.all(
+  await db.all(
     `SELECT c.*, b.is_test FROM codes c JOIN batches b ON b.id = c.batch_id
       WHERE c.batch_id = ? ORDER BY c.unit_index LIMIT ? OFFSET ?`,
     [batchIds[batchNumber], limit, offset]
@@ -476,4 +476,4 @@ for (const [label, code] of samples) {
 }
 console.log('');
 
-db.close();
+await db.close();

@@ -15,7 +15,7 @@ import * as serialization from '../src/services/serialization.js';
 
 /** Fresh schema in memory. */
 export async function freshDb() {
-  db.close();
+  await db.close();
   db.open(':memory:');
   await db.migrate({ silent: true });
   return db;
