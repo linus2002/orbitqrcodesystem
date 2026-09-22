@@ -158,8 +158,12 @@ export async function startServer() {
   return client;
 }
 
-/** Reset the in-process rate limiter between tests. */
+/** Clear rate-limit state between tests, whichever store is in use. */
 export async function resetRateLimits() {
   const { store } = await import('../src/lib/ratelimit.js');
-  store.hits.clear();
+  if (store.hits) {
+    store.hits.clear();          // MemoryStore
+  } else {
+    await db.run('DELETE FROM rate_hits');  // SqlStore
+  }
 }

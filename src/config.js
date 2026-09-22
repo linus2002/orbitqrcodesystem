@@ -96,6 +96,12 @@ export const config = {
     verifyPerHour: int('RL_VERIFY_PER_HOUR', 80),
     loginPer15Min: int('RL_LOGIN_PER_15MIN', 5),
     reportPerHour: int('RL_REPORT_PER_HOUR', 5),
+    /*
+     * 'memory' for a single long-running process, 'sql' when more than one
+     * instance serves traffic - on serverless the counters must be shared or
+     * an attacker just spreads attempts across instances.
+     */
+    store: str('RATELIMIT_STORE', str('TURSO_DATABASE_URL', '') ? 'sql' : 'memory'),
     guessAlertThreshold: int('GUESS_ALERT_THRESHOLD', 8),
   },
 

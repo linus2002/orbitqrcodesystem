@@ -321,3 +321,21 @@ CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- ---------------------------------------------------------------------------
+-- rate_hits: rate-limiting state.
+--
+-- In a single long-running process these counters live in memory. On a
+-- serverless platform each request may land on a different instance, so the
+-- counters have to be shared or the limits mean nothing: login lockout and the
+-- code-guessing alert are security controls, not conveniences.
+--
+-- One row per hit, matching the sliding window the limiter implements. Rows
+-- are pruned opportunistically, so this table stays small.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS rate_hits (
+  key TEXT    NOT NULL,
+  ts  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_hits_key_ts ON rate_hits (key, ts);

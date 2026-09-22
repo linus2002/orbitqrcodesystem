@@ -6,11 +6,16 @@
  * point for that, and it is applied to /api/verify, /api/report and the login
  * endpoint.
  *
- * SCALING NOTE: state is held in this process's memory, which is correct for a
- * single instance and for the pilot. Behind more than one instance, swap
- * `MemoryStore` for a Redis store implementing the same three methods - no
- * caller changes required.
+ * STORE: `MemoryStore` is correct for one long-running process. On a
+ * serverless platform each request may land on a different instance, so the
+ * counters must be shared or the limits mean nothing - an attacker simply
+ * spreads attempts across instances. `SqlStore` keeps them in the database
+ * instead, and RATELIMIT_STORE=sql selects it.
+ *
+ * Both implement the same four methods; nothing above this file changes.
  */
+import * as db from '../db/index.js';
+import { config } from '../config.js';
 import { tooManyRequests } from './errors.js';
 import logger from './logger.js';
 
@@ -54,13 +59,48 @@ class MemoryStore {
   }
 }
 
-export const store = new MemoryStore();
+/**
+ * The same window arithmetic, kept in the database so every instance sees the
+ * same counters.
+ *
+ * Each call is a round trip, so this is only worth paying on a platform that
+ * actually runs more than one instance - hence the switch rather than a
+ * replacement.
+ */
+class SqlStore {
+  async hit(key, windowMs, now = Date.now()) {
+    const cutoff = now - windowMs;
+    await db.run('INSERT INTO rate_hits (key, ts) VALUES (?, ?)', [key, now]);
+    // Prune this key's expired rows as we go, so the table cannot grow
+    // without a separate sweeper process to own it.
+    await db.run('DELETE FROM rate_hits WHERE key = ? AND ts <= ?', [key, cutoff]);
+    return Number(await db.scalar('SELECT COUNT(*) FROM rate_hits WHERE key = ? AND ts > ?', [key, cutoff]));
+  }
 
-// Housekeeping: prune anything older than the longest window we use (1 hour).
-const SWEEP_MS = 5 * 60 * 1000;
-const sweeper = setInterval(() => store.sweep(60 * 60 * 1000), SWEEP_MS);
-// Do not hold the event loop open just for housekeeping.
-if (typeof sweeper.unref === 'function') sweeper.unref();
+  async peek(key, windowMs, now = Date.now()) {
+    const cutoff = now - windowMs;
+    return Number(await db.scalar('SELECT COUNT(*) FROM rate_hits WHERE key = ? AND ts > ?', [key, cutoff]));
+  }
+
+  async reset(key) {
+    await db.run('DELETE FROM rate_hits WHERE key = ?', [key]);
+  }
+
+  async sweep(maxWindowMs, now = Date.now()) {
+    await db.run('DELETE FROM rate_hits WHERE ts <= ?', [now - maxWindowMs]);
+  }
+}
+
+export const store = config.rateLimit.store === 'sql' ? new SqlStore() : new MemoryStore();
+
+// Housekeeping for the in-memory store only: the SQL store prunes per key as
+// it goes, and a serverless instance is too short-lived to own a timer.
+if (store instanceof MemoryStore) {
+  const SWEEP_MS = 5 * 60 * 1000;
+  const sweeper = setInterval(() => store.sweep(60 * 60 * 1000), SWEEP_MS);
+  // Do not hold the event loop open just for housekeeping.
+  if (typeof sweeper.unref === 'function') sweeper.unref();
+}
 
 /**
  * Create a reusable limiter.
@@ -76,8 +116,8 @@ export function createLimiter({ name, windowMs, max }) {
     windowMs,
     max,
     /** Record an attempt. */
-    consume(key) {
-      const count = store.hit(`${name}:${key}`, windowMs);
+    async consume(key) {
+      const count = await store.hit(`${name}:${key}`, windowMs);
       return {
         allowed: count <= max,
         count,
@@ -86,12 +126,12 @@ export function createLimiter({ name, windowMs, max }) {
       };
     },
     /** Inspect without consuming. */
-    inspect(key) {
-      const count = store.peek(`${name}:${key}`, windowMs);
+    async inspect(key) {
+      const count = await store.peek(`${name}:${key}`, windowMs);
       return { allowed: count < max, count, remaining: Math.max(0, max - count) };
     },
-    reset(key) {
-      store.reset(`${name}:${key}`);
+    async reset(key) {
+      await store.reset(`${name}:${key}`);
     },
   };
 }
@@ -108,12 +148,12 @@ export function createLimiter({ name, windowMs, max }) {
 export function rateLimit({ limiters, keyFn = (req) => req.clientIp, onLimit }) {
   const list = Array.isArray(limiters) ? limiters : [limiters];
 
-  return function rateLimitMiddleware(req, res, next) {
+  return async function rateLimitMiddleware(req, res, next) {
     const key = keyFn(req);
     if (!key) return next();
 
     for (const limiter of list) {
-      const result = limiter.consume(key);
+      const result = await limiter.consume(key);
       if (!result.allowed) {
         res.set('Retry-After', String(result.retryAfterSec));
         res.set('X-RateLimit-Limit', String(limiter.max));
@@ -124,7 +164,7 @@ export function rateLimit({ limiters, keyFn = (req) => req.clientIp, onLimit }) 
           path: req.path,
         });
         try {
-          onLimit?.(req, result, limiter);
+          await onLimit?.(req, result, limiter);
         } catch (err) {
           logger.error('rate limit hook failed', { error: err.message });
         }
