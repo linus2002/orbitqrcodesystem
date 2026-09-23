@@ -83,7 +83,7 @@ export default function SignInShowcase() {
     <aside
       className="showcase"
       ref={panelRef}
-      aria-label="About QR Shield"
+      aria-label="About Orbit"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >

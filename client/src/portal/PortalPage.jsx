@@ -14,6 +14,7 @@ import { api, ApiError } from '../lib/api.js';
 import { formatCodeInput } from '../lib/format.js';
 import { useBodyClass, useTheme } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
+import { Logo } from '../components/Logo.jsx';
 import Scanner from './Scanner.jsx';
 import ResultCard from './ResultCard.jsx';
 
@@ -123,13 +124,8 @@ export default function PortalPage() {
     <>
       <header className="portal-header">
         <div className="wrap">
-          <Link className="brand" to="/">
-            <Icon name="shield" />
-            <span>
-              <span className="brand-name">QR Shield</span>
-              <br />
-              <span className="brand-sub">Medicine check</span>
-            </span>
+          <Link className="brand" to="/" aria-label="Orbit - check your medicine">
+            <Logo size="sm" />
           </Link>
           {/* No staff link here by design. Patients and pharmacists never
               need an account, so a sign-in door on the page they use adds
@@ -310,7 +306,7 @@ export default function PortalPage() {
       <footer className="portal-footer">
         <div className="wrap portal-wrap">
           <p>
-            <strong>QR Shield</strong> verifies that the pack in your hand matches a real,
+            <strong>Orbit</strong> verifies that the pack in your hand matches a real,
             serialized unit made by the manufacturer.
           </p>
           <p className="mt-8">

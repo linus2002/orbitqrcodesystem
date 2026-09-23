@@ -74,7 +74,7 @@ export default function BrandLoader({ size = 'md', message = 'Loading...', class
           />
         </svg>
 
-        <img className="brand-loader-mark" src="/img/il-logo.png" alt="" width="1254" height="1254" />
+        <img className="brand-loader-mark" src="/img/logo-mark-192.png" alt="" width="192" height="192" />
       </div>
 
       {message ? <p className="brand-loader-message">{message}</p> : null}

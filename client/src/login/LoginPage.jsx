@@ -94,7 +94,7 @@ export default function LoginPage() {
         </div>
 
         <div className="signin-body">
-          <h1 className="signin-title">Access your QR Shield account</h1>
+          <h1 className="signin-title">Access your Orbit account</h1>
           <p className="signin-sub">
             Sign in to manage serialization, investigate flagged packs and work the alert queue.
           </p>
