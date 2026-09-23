@@ -11,6 +11,7 @@ import { useApi, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
+import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
 import {
   TableCard, Table, KV, Timeline, TimelineItem, StatusBadge, ErrorNote,
 } from '../components/ui.jsx';
@@ -23,11 +24,14 @@ export default function Products() {
   useHeader(
     'Products',
     'The catalogue. A product SKU becomes the first segment of every code issued for it.',
-    canWrite ? (
-      <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
-        New product
-      </button>
-    ) : null,
+    <div className="row row-wrap">
+      <SpreadsheetTools entity="products" label="products" canWrite={canWrite} onImported={reload} />
+      {canWrite && (
+        <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
+          New product
+        </button>
+      )}
+    </div>,
     [canWrite]
   );
 

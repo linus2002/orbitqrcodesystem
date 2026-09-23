@@ -94,3 +94,78 @@ export async function api(path, { method = 'GET', body, query, signal } = {}) {
   if (!res.ok) throw new ApiError(res.status, typeof payload === 'object' ? payload : null);
   return payload;
 }
+
+/**
+ * Download a file the API generates, and hand it to the browser.
+ *
+ * A plain <a href> cannot be used: these routes need the CSRF header, and a
+ * link cannot send one. So the file is fetched, turned into a blob, and given
+ * to a synthetic link - which is also what lets an error come back as a
+ * readable message instead of the browser navigating away to a JSON page.
+ */
+export async function download(path, { filename } = {}) {
+  const res = await fetch(path, {
+    headers: { 'X-CSRF-Token': csrfToken() ?? '' },
+    credentials: 'same-origin',
+  });
+
+  if (!res.ok) {
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      /* not JSON; the status is all we have */
+    }
+    throw new ApiError(res.status, body);
+  }
+
+  const blob = await res.blob();
+  const name =
+    filename ??
+    /filename="?([^"]+)"?/.exec(res.headers.get('content-disposition') ?? '')?.[1] ??
+    'download';
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoking immediately can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/**
+ * Upload a file as the raw request body.
+ *
+ * The import endpoint takes one file and nothing else, so there is no reason
+ * to build a multipart form - the file IS the body.
+ */
+export async function upload(path, file, { query } = {}) {
+  let url = path;
+  if (query) {
+    const qs = new URLSearchParams(
+      Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    ).toString();
+    if (qs) url += `?${qs}`;
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-CSRF-Token': csrfToken() ?? '',
+    },
+    credentials: 'same-origin',
+    body: file,
+  });
+
+  const payload = (res.headers.get('content-type') ?? '').includes('application/json')
+    ? await res.json()
+    : await res.text();
+
+  if (!res.ok) throw new ApiError(res.status, typeof payload === 'object' ? payload : null);
+  return payload;
+}

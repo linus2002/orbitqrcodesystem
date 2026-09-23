@@ -50,6 +50,28 @@ export function createApp() {
 
   // Body limits are deliberately tight: no endpoint needs a large payload, and
   // a small cap is free protection against memory-exhaustion attempts.
+  /*
+   * A spreadsheet upload arrives as the raw file on this one path, so the
+   * import endpoint needs no multipart parser - there is one file and no other
+   * fields. Mounted BEFORE the JSON parser and scoped to the path, so nothing
+   * else in the API starts accepting binary bodies.
+   *
+   * 8MB holds a workbook of tens of thousands of rows; past that the file is
+   * almost certainly not a product list.
+   */
+  app.use(
+    '/api/admin/import',
+    express.raw({
+      type: [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/octet-stream',
+        'text/csv',
+      ],
+      limit: '8mb',
+    })
+  );
+
   app.use(express.json({ limit: '64kb' }));
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(cookieParser());

@@ -285,6 +285,35 @@ docs/                    API reference, data model, security notes
 
 ---
 
+## Spreadsheets
+
+Products and batches can be loaded from a spreadsheet, and any list can be
+downloaded as one.
+
+| | Where |
+|---|---|
+| Export | **Export** on the Products and Batches screens |
+| Import | **Import**, then **Template** for a file with the right headings |
+
+Import is two steps. The file is checked first and the result shown - how many
+rows would be added, how many updated, and every row that cannot be read with
+its spreadsheet row number - and nothing is written until that is confirmed. A
+row that fails never stops the rest of the file.
+
+Some details worth knowing:
+
+- **A SKU that already exists updates that product.** The SKU itself is never
+  changed, because it is already part of every code issued for it.
+- **Batch numbers are never reused.** They identify a physical production run,
+  and codes may already be printed against one.
+- **Importing a batch does not issue codes.** The batch is created in `planned`
+  status; issuing codes stays a deliberate, audited step in the dashboard.
+- **Codes cannot be imported at all.** A code is minted and signed by this
+  system - accepting one from a file would let an unsigned value into the table
+  that decides whether a pack is genuine.
+- **Dates must be unambiguous.** `2026-09-01` is read; `01/02/2026` is refused
+  rather than guessed at, because it means different days in different places.
+
 ## Configuration
 
 Everything lives in `.env`, which `npm run setup` generates with freshly

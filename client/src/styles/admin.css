@@ -409,3 +409,53 @@
     border-color: var(--line);
   }
 }
+
+
+/* --- Spreadsheet import review ------------------------------------------- */
+
+/*
+ * The review sits over the page rather than beside it: it is a decision, and
+ * the rows behind it are exactly what the decision is about to change.
+ */
+.import-review {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+.import-review-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 22px;
+  width: min(560px, 100%);
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+}
+.import-review-panel h3 {
+  font-size: 1rem;
+  word-break: break-all;  /* a long filename must not widen the panel */
+}
+.import-tally { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/*
+ * Capped and scrollable: a file with 200 bad rows would otherwise push the
+ * confirm button off the screen, leaving no way to act on what it says.
+ */
+.import-errors {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  background: var(--surface-2);
+}
+.import-errors ul { margin: 8px 0 0; padding-left: 18px; }
+.import-errors li { margin-bottom: 5px; color: var(--ink-2); }
+.import-errors li strong { color: var(--ink); }

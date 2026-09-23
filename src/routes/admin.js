@@ -17,9 +17,11 @@ import * as alertService from '../services/alerts.js';
 import * as serialization from '../services/serialization.js';
 import * as authService from '../services/auth.js';
 import * as audit from '../services/audit.js';
+import * as importer from '../services/importer.js';
 import { validate } from '../lib/validate.js';
+import { buildWorkbook, sendWorkbook, readSheet } from '../lib/spreadsheet.js';
 import { normalizeCode, qrPayload } from '../lib/codes.js';
-import { notFound, badRequest, conflict } from '../lib/errors.js';
+import { notFound, badRequest, conflict, forbidden } from '../lib/errors.js';
 import { requireAuth, requirePermission, requireCsrf } from '../middleware/auth.js';
 
 const router = Router();
@@ -648,6 +650,184 @@ router.patch('/settings/:key', requirePermission('settings:write'), async (req, 
   );
   await audit.record({ actor: req.user, req, action: 'settings.update', entityType: 'setting', entityId: req.params.key, detail: { value } });
   res.json(await db.get('SELECT * FROM settings WHERE key = ?', [req.params.key]));
+});
+
+// ===========================================================================
+// Spreadsheets
+//
+// Export is a read of whatever the matching list endpoint would return, so a
+// download and the screen it came from can never disagree. Import is the
+// reverse, and deliberately narrower: only products and batches, because a
+// code is minted and signed by this system and must never arrive from a file.
+// ===========================================================================
+
+/** The sheet each export offers, and the query that fills it. */
+const EXPORTS = {
+  products: {
+    permission: 'products:read',
+    columns: [
+      { header: 'SKU', key: 'sku' },
+      { header: 'Name', key: 'name', width: 30 },
+      { header: 'Generic name', key: 'generic_name', width: 26 },
+      { header: 'Strength', key: 'strength' },
+      { header: 'Dosage form', key: 'dosage_form' },
+      { header: 'Pack size', key: 'pack_size' },
+      { header: 'Manufacturer', key: 'manufacturer', width: 26 },
+      { header: 'Category', key: 'category' },
+      { header: 'Status', key: 'status' },
+      { header: 'Batches', key: 'batch_count' },
+      { header: 'Codes', key: 'code_count' },
+    ],
+    // The same shape the /products list returns, so an export and the screen
+    // it came from can never disagree.
+    load: () =>
+      db.all(
+        `SELECT p.*,
+                (SELECT COUNT(*) FROM batches b WHERE b.product_id = p.id) AS batch_count,
+                (SELECT COUNT(*) FROM codes c WHERE c.product_id = p.id)   AS code_count
+           FROM products p ORDER BY p.name`
+      ),
+  },
+  batches: {
+    permission: 'batches:read',
+    columns: [
+      { header: 'Batch number', key: 'batch_number', width: 22 },
+      { header: 'Product SKU', key: 'sku' },
+      { header: 'Product', key: 'product_name', width: 28 },
+      { header: 'Manufacturing date', key: 'mfg_date' },
+      { header: 'Expiry date', key: 'expiry_date' },
+      { header: 'Quantity', key: 'quantity' },
+      { header: 'Status', key: 'status' },
+      { header: 'Test batch', key: 'is_test' },
+      { header: 'Codes issued', key: 'codes_issued' },
+      { header: 'Notes', key: 'notes', width: 40 },
+    ],
+    load: () =>
+      db.all(
+        `SELECT b.*, p.name AS product_name, p.sku,
+                (SELECT COUNT(*) FROM codes c WHERE c.batch_id = b.id) AS codes_issued
+           FROM batches b JOIN products p ON p.id = b.product_id
+          ORDER BY b.created_at DESC`
+      ),
+  },
+};
+
+/** Download a list as a workbook. */
+router.get('/export/:entity.xlsx', async (req, res) => {
+  const spec = EXPORTS[req.params.entity];
+  if (!spec) throw notFound('There is no export for that.');
+  // Checked here rather than with requirePermission, because which permission
+  // applies depends on the entity in the path.
+  if (!authService.can(req.user.role, spec.permission)) {
+    throw forbidden(`Your role (${req.user.role}) cannot export that.`);
+  }
+
+  const rows = await spec.load();
+  // A checkbox reads better than 1/0 in a spreadsheet somebody will scan.
+  const items = rows.map((r) => ({ ...r, is_test: r.is_test ? 'yes' : '' }));
+
+  const buffer = await buildWorkbook([
+    { name: req.params.entity, columns: spec.columns, rows: items },
+  ]);
+
+  await audit.record({
+    actor: req.user,
+    req,
+    action: `${req.params.entity}.export`,
+    detail: { rows: items.length, format: 'xlsx' },
+  });
+
+  const today = new Date().toISOString().slice(0, 10);
+  sendWorkbook(res, `${req.params.entity}-${today}.xlsx`, buffer);
+});
+
+/**
+ * The import template: the accepted headings, with one worked example row per
+ * sheet so the expected date and quantity formats are visible rather than
+ * described.
+ */
+router.get('/import/template.xlsx', requirePermission('products:read'), async (req, res) => {
+  const example = {
+    products: {
+      sku: 'AMX25',
+      name: 'Amoxicillin 250 mg',
+      'generic name': 'Amoxicillin trihydrate',
+      strength: '250 mg',
+      'dosage form': 'Capsule',
+      'pack size': '21 capsules',
+      manufacturer: 'Northbridge Pharmaceuticals',
+      category: 'Antibiotic',
+    },
+    batches: {
+      'product sku': 'AMX25',
+      'batch number': 'AMX25-2609A',
+      'manufacturing date': '2026-09-01',
+      'expiry date': '2028-09-01',
+      quantity: 1200,
+      'test batch': 'no',
+      notes: 'Delete this example row before importing',
+    },
+  };
+
+  const buffer = await buildWorkbook([
+    {
+      name: 'products',
+      columns: importer.TEMPLATE_COLUMNS.products.map((c) => ({ header: c.header, key: c.header })),
+      rows: [example.products],
+      note: 'SKU and Name and Manufacturer are required. A SKU that already exists updates that product.',
+    },
+    {
+      name: 'batches',
+      columns: importer.TEMPLATE_COLUMNS.batches.map((c) => ({ header: c.header, key: c.header })),
+      rows: [example.batches],
+      note: 'Dates as YYYY-MM-DD. The product SKU must already exist. Batch numbers are never reused.',
+    },
+  ]);
+
+  sendWorkbook(res, 'orbit-import-template.xlsx', buffer);
+});
+
+/**
+ * Import products or batches from an uploaded workbook.
+ *
+ * The body is the file itself rather than a multipart form: one file, no other
+ * fields, and it saves carrying a multipart parser for a single endpoint.
+ *
+ * `?dryRun=1` validates and reports without writing, which is what the
+ * dashboard calls first so somebody can see what a file will do before it
+ * does it.
+ */
+router.post('/import/:entity', async (req, res) => {
+  const entity = req.params.entity;
+  const handlers = {
+    products: { permission: 'products:write', run: importer.importProducts },
+    batches: { permission: 'batches:write', run: importer.importBatches },
+  };
+  const handler = handlers[entity];
+  if (!handler) throw notFound('Only products and batches can be imported.');
+  if (!authService.can(req.user.role, handler.permission)) {
+    throw forbidden(`Your role (${req.user.role}) cannot import that.`);
+  }
+
+  if (!Buffer.isBuffer(req.body) || !req.body.length) {
+    throw badRequest('No file was received. Attach a .xlsx or .csv file.');
+  }
+
+  let sheet;
+  try {
+    sheet = await readSheet(req.body, { sheetName: entity });
+  } catch {
+    throw badRequest('That file could not be read as a spreadsheet. Save it as .xlsx or .csv and try again.');
+  }
+
+  if (!sheet.rows.length) {
+    throw badRequest('That sheet has no rows below the heading row.');
+  }
+
+  const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+  const result = await handler.run(sheet.rows, { actor: req.user, req, dryRun });
+
+  res.json({ entity, dryRun, ...result });
 });
 
 export default router;

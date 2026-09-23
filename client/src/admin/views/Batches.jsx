@@ -15,6 +15,7 @@ import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.j
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
+import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
 import { Icon } from '../../components/Icons.jsx';
 import {
   TableCard, Table, Pager, Toolbar, Spacer, Select, KV, StatusBadge, ErrorNote, Loading,
@@ -62,11 +63,14 @@ export default function Batches() {
   useHeader(
     'Batches & codes',
     'Every production run, the codes issued for it, and where it sits in its lifecycle.',
-    canWrite ? (
-      <button className="btn btn-primary btn-sm" onClick={() => openNewBatch(drawer, reload)}>
-        New batch
-      </button>
-    ) : null,
+    <div className="row row-wrap">
+      <SpreadsheetTools entity="batches" label="batches" canWrite={canWrite} onImported={reload} />
+      {canWrite && (
+        <button className="btn btn-primary btn-sm" onClick={() => openNewBatch(drawer, reload)}>
+          New batch
+        </button>
+      )}
+    </div>,
     [canWrite]
   );
 

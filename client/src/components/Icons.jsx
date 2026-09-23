@@ -119,6 +119,16 @@ export function IconSprite() {
         <path d="M3 7.5l9-4.5 9 4.5v9l-9 4.5-9-4.5z" />
         <path d="M3 7.5l9 4.5 9-4.5M12 12v9" />
       </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3.5v11" />
+        <path d="M7.8 10.6L12 14.8l4.2-4.2" />
+        <path d="M4.5 17.5v1.6a1.4 1.4 0 0 0 1.4 1.4h12.2a1.4 1.4 0 0 0 1.4-1.4v-1.6" />
+      </symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 14.8v-11" />
+        <path d="M7.8 7.7L12 3.5l4.2 4.2" />
+        <path d="M4.5 17.5v1.6a1.4 1.4 0 0 0 1.4 1.4h12.2a1.4 1.4 0 0 0 1.4-1.4v-1.6" />
+      </symbol>
       <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
         <circle cx="11" cy="11" r="6.5" />
         <path d="M16 16l4.5 4.5" />
