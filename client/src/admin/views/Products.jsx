@@ -24,14 +24,14 @@ export default function Products() {
   useHeader(
     'Products',
     'The catalogue. A product SKU becomes the first segment of every code issued for it.',
-    <div className="row row-wrap">
+    <>
       <SpreadsheetTools entity="products" label="products" canWrite={canWrite} onImported={reload} />
       {canWrite && (
         <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
           New product
         </button>
       )}
-    </div>,
+    </>,
     [canWrite]
   );
 

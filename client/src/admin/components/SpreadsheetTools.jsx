@@ -87,38 +87,41 @@ export default function SpreadsheetTools({ entity, label, canWrite, onImported }
   const result = pending?.result;
   const willWrite = (result?.created ?? 0) + (result?.updated ?? 0);
 
+  /*
+   * No wrapper element around the buttons: the header already lays its actions
+   * out in a row, and a nested flex container is what pushed the view's own
+   * button onto a second line.
+   */
   return (
     <>
-      <div className="row row-wrap">
-        <button type="button" className="btn btn-sm" onClick={exportRows} disabled={busy}>
-          <Icon name="download" />
-          Export
-        </button>
+      <button type="button" className="btn btn-sm" onClick={exportRows} disabled={busy}>
+        <Icon name="download" />
+        Export
+      </button>
 
-        {canWrite && (
-          <>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => fileInput.current?.click()}
-              disabled={busy}
-            >
-              <Icon name="upload" />
-              Import
-            </button>
-            <button type="button" className="btn btn-sm btn-quiet" onClick={getTemplate} disabled={busy}>
-              Template
-            </button>
-            <input
-              ref={fileInput}
-              type="file"
-              accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-              hidden
-              onChange={(e) => inspect(e.target.files?.[0])}
-            />
-          </>
-        )}
-      </div>
+      {canWrite && (
+        <>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => fileInput.current?.click()}
+            disabled={busy}
+          >
+            <Icon name="upload" />
+            Import
+          </button>
+          <button type="button" className="btn btn-sm btn-quiet" onClick={getTemplate} disabled={busy}>
+            Template
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+            hidden
+            onChange={(e) => inspect(e.target.files?.[0])}
+          />
+        </>
+      )}
 
       {pending && (
         <div className="import-review" role="dialog" aria-label={`Review the ${label} import`}>

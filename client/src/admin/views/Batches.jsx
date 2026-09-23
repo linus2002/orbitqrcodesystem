@@ -63,14 +63,14 @@ export default function Batches() {
   useHeader(
     'Batches & codes',
     'Every production run, the codes issued for it, and where it sits in its lifecycle.',
-    <div className="row row-wrap">
+    <>
       <SpreadsheetTools entity="batches" label="batches" canWrite={canWrite} onImported={reload} />
       {canWrite && (
         <button className="btn btn-primary btn-sm" onClick={() => openNewBatch(drawer, reload)}>
           New batch
         </button>
       )}
-    </div>,
+    </>,
     [canWrite]
   );
 

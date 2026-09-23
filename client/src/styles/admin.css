@@ -123,6 +123,17 @@
 }
 /* Theme + sign out, hard right, after the view's own actions. */
 .shell-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+/*
+ * The action buttons keep their natural width and stay on one line; the
+ * description paragraph beside them is what gives way. A sentence that wraps
+ * still reads perfectly, whereas a button row broken across two lines looks
+ * like a mistake - so the text yields first, not the controls.
+ *
+ * Below 900px the rule is lifted (see the responsive block) because there the
+ * header stacks and wrapping is the only thing that fits.
+ */
+.topbar > .row { flex: 0 0 auto; }
+
 .topbar h1 { font-size: 1.22rem; }
 .topbar .sub { font-size: 0.82rem; color: var(--ink-muted); margin-top: 2px; }
 .menu-btn { display: none; }
@@ -329,7 +340,9 @@
   }
   .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
   .menu-btn { display: inline-flex; }
-  .topbar { padding: 12px 16px; }
+  .topbar { padding: 12px 16px; flex-wrap: wrap; }
+  /* Narrow enough that one line is not on offer: let the buttons wrap. */
+  .topbar > .row { flex: 1 1 auto; }
   .view { padding: 16px 16px 60px; }
   .drawer { width: 100%; }
 }
