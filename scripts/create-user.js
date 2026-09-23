@@ -22,15 +22,25 @@ import * as db from '../src/db/index.js';
 import { config } from '../src/config.js';
 import * as auth from '../src/services/auth.js';
 
-/** Parse `--key value` pairs. */
+/**
+ * Parse `--key value` pairs.
+ *
+ * A value runs until the next `--flag`, so a multi-word name survives npm and
+ * PowerShell stripping its quotes: `--name "Ada Lovelace"` reaches this script
+ * as two separate arguments, and taking only the first would silently create
+ * an account called "Ada".
+ */
 function args(argv) {
   const out = {};
-  for (let i = 0; i < argv.length; i++) {
-    if (!argv[i].startsWith('--')) continue;
-    const key = argv[i].slice(2);
-    const next = argv[i + 1];
-    out[key] = next && !next.startsWith('--') ? next : 'true';
-    if (out[key] !== 'true') i++;
+  let key = null;
+  for (const token of argv) {
+    if (token.startsWith('--')) {
+      key = token.slice(2);
+      out[key] = 'true';
+      continue;
+    }
+    if (!key) continue;
+    out[key] = out[key] === 'true' ? token : `${out[key]} ${token}`;
   }
   return out;
 }
