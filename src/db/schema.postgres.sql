@@ -17,7 +17,6 @@
 --   * Every table that the security team can act on carries created_at so the
 --     audit trail is reconstructable.
 -- ===========================================================================
-
 -- ---------------------------------------------------------------------------
 -- users: only staff have accounts. Patients and pharmacists never log in.
 -- ---------------------------------------------------------------------------
@@ -335,8 +334,12 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 -- are pruned opportunistically, so this table stays small.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS rate_hits (
-  key TEXT    NOT NULL,
-  ts  INTEGER NOT NULL
+  key TEXT   NOT NULL,
+  -- BIGINT, not INTEGER: this holds Date.now() in milliseconds, which passed
+  -- 2^31 in 2001. SQLite's INTEGER is 8 bytes and hides that, but Postgres
+  -- INTEGER is 4 and rejects the value outright, taking every rate-limited
+  -- endpoint down with it.
+  ts  BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_rate_hits_key_ts ON rate_hits (key, ts);
