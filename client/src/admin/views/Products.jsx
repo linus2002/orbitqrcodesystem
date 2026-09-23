@@ -13,7 +13,7 @@ import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
 import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
 import {
-  TableCard, Table, KV, Timeline, TimelineItem, StatusBadge, ErrorNote,
+  TableCard, Table, Toolbar, Spacer, KV, Timeline, TimelineItem, StatusBadge, ErrorNote,
 } from '../components/ui.jsx';
 
 export default function Products() {
@@ -23,46 +23,64 @@ export default function Products() {
 
   useHeader(
     'Products',
-    'The catalogue. A product SKU becomes the first segment of every code issued for it.',
-    <>
-      <SpreadsheetTools entity="products" label="products" canWrite={canWrite} onImported={reload} />
-      {canWrite && (
-        <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
-          New product
-        </button>
-      )}
-    </>,
-    [canWrite]
+    'The catalogue. A product SKU becomes the first segment of every code issued for it.'
   );
 
   if (error) return <ErrorNote error={error} />;
 
+  const count = data?.items?.length;
+
   return (
-    <TableCard>
-      <Table
-        loading={loading}
-        rows={data?.items}
-        empty="No products yet."
-        onRowClick={(row) => openProduct(row.id, drawer)}
-        columns={[
-          {
-            label: 'Product',
-            render: (r) => (
-              <>
-                <strong>{r.name}</strong> {r.strength ?? ''}
-                <br />
-                <span className="text-muted text-sm">{r.generic_name ?? r.dosage_form ?? ''}</span>
-              </>
-            ),
-          },
-          { label: 'SKU', className: 'code', render: (r) => r.sku },
-          { label: 'Manufacturer', render: (r) => r.manufacturer },
-          { label: 'Batches', className: 'num', render: (r) => fmtNumber(r.batch_count) },
-          { label: 'Codes', className: 'num', render: (r) => fmtNumber(r.code_count) },
-          { label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
-        ]}
-      />
-    </TableCard>
+    <>
+      {/*
+        The actions sit above the table rather than in the page header strip.
+        They act on the catalogue below them - importing a spreadsheet or
+        adding a product changes these rows - so they belong beside it. In the
+        header they shared a line with the shell's own controls (theme, sign
+        out, the clock), which read as one undifferentiated row of buttons
+        where only some had anything to do with the page.
+      */}
+      <Toolbar>
+        {count !== undefined && (
+          <span className="text-sm text-muted">
+            {fmtNumber(count)} {count === 1 ? 'product' : 'products'}
+          </span>
+        )}
+        <Spacer />
+        <SpreadsheetTools entity="products" label="products" canWrite={canWrite} onImported={reload} />
+        {canWrite && (
+          <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
+            New product
+          </button>
+        )}
+      </Toolbar>
+
+      <TableCard>
+        <Table
+          loading={loading}
+          rows={data?.items}
+          empty="No products yet."
+          onRowClick={(row) => openProduct(row.id, drawer)}
+          columns={[
+            {
+              label: 'Product',
+              render: (r) => (
+                <>
+                  <strong>{r.name}</strong> {r.strength ?? ''}
+                  <br />
+                  <span className="text-muted text-sm">{r.generic_name ?? r.dosage_form ?? ''}</span>
+                </>
+              ),
+            },
+            { label: 'SKU', className: 'code', render: (r) => r.sku },
+            { label: 'Manufacturer', render: (r) => r.manufacturer },
+            { label: 'Batches', className: 'num', render: (r) => fmtNumber(r.batch_count) },
+            { label: 'Codes', className: 'num', render: (r) => fmtNumber(r.code_count) },
+            { label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+          ]}
+        />
+      </TableCard>
+    </>
   );
 }
 

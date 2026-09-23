@@ -18,7 +18,7 @@ import { useDrawer } from '../components/Drawer.jsx';
 import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
 import { Icon } from '../../components/Icons.jsx';
 import {
-  TableCard, Table, Pager, Toolbar, Spacer, Select, KV, StatusBadge, ErrorNote, Loading,
+  TableCard, Table, Pager, Toolbar, Spacer, Select, KV, StatusBadge, ErrorNote,
 } from '../components/ui.jsx';
 
 /** Which transition each status offers next - mirrors services/serialization.js */
@@ -62,16 +62,7 @@ export default function Batches() {
 
   useHeader(
     'Batches & codes',
-    'Every production run, the codes issued for it, and where it sits in its lifecycle.',
-    <>
-      <SpreadsheetTools entity="batches" label="batches" canWrite={canWrite} onImported={reload} />
-      {canWrite && (
-        <button className="btn btn-primary btn-sm" onClick={() => openNewBatch(drawer, reload)}>
-          New batch
-        </button>
-      )}
-    </>,
-    [canWrite]
+    'Every production run, the codes issued for it, and where it sits in its lifecycle.'
   );
 
   if (error) return <ErrorNote error={error} />;
@@ -79,6 +70,10 @@ export default function Batches() {
   return (
     <>
       <Toolbar>
+        {/* The count leads, as it does on every other listing screen. Sitting
+            after the "Include pilot batches" checkbox it read as part of that
+            label rather than as a total. */}
+        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} batches</span>
         <input
           className="input search"
           type="search"
@@ -105,7 +100,14 @@ export default function Batches() {
           Include pilot batches
         </label>
         <Spacer />
-        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} batches</span>
+        {/* Actions sit with the rows they change, not in the page header
+            strip - see the note in Products.jsx. */}
+        <SpreadsheetTools entity="batches" label="batches" canWrite={canWrite} onImported={reload} />
+        {canWrite && (
+          <button className="btn btn-primary btn-sm" onClick={() => openNewBatch(drawer, reload)}>
+            New batch
+          </button>
+        )}
       </Toolbar>
 
       <TableCard

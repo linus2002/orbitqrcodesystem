@@ -11,7 +11,9 @@ import { useApi, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
-import { TableCard, Table, Pager, StatusBadge, ErrorNote } from '../components/ui.jsx';
+import {
+  TableCard, Table, Pager, Toolbar, Spacer, StatusBadge, ErrorNote,
+} from '../components/ui.jsx';
 
 export default function Shipments() {
   const canWrite = usePermission('batches:write');
@@ -26,13 +28,7 @@ export default function Shipments() {
 
   useHeader(
     'Shipments',
-    'Where each batch was sent. Helps narrow a cluster of flags to a distribution route.',
-    canWrite ? (
-      <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload, toast)}>
-        New shipment
-      </button>
-    ) : null,
-    [canWrite]
+    'Where each batch was sent. Helps narrow a cluster of flags to a distribution route.'
   );
 
   async function receive(id) {
@@ -51,65 +47,80 @@ export default function Shipments() {
   if (error) return <ErrorNote error={error} />;
 
   return (
-    <TableCard
-      title={`${fmtNumber(data?.total ?? 0)} shipments`}
-      footer={
-        data && (
-          <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
-        )
-      }
-    >
-      <Table
-        loading={loading}
-        rows={data?.items}
-        empty="No shipments recorded."
-        columns={[
-          { label: 'Reference', className: 'code', render: (r) => r.reference },
-          {
-            label: 'Batch',
-            render: (r) => (
-              <>
-                <span className="mono">{r.batch_number}</span>
-                <br />
-                <span className="text-muted text-sm">{r.product_name}</span>
-              </>
-            ),
-          },
-          { label: 'Units', className: 'num', render: (r) => fmtNumber(r.quantity) },
-          {
-            label: 'Destination',
-            render: (r) => (
-              <>
-                {r.to_name}
-                <br />
-                <span className="text-muted text-sm">
-                  {r.to_type}
-                  {r.to_region ? `, ${r.to_region}` : ''}
-                </span>
-              </>
-            ),
-          },
-          { label: 'Shipped', render: (r) => fmtDate(r.shipped_at) },
-          { label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
-          {
-            label: '',
-            render: (r) =>
-              canWrite && r.status === 'in_transit' ? (
-                <button
-                  className="btn btn-sm"
-                  disabled={busyId === r.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    receive(r.id);
-                  }}
-                >
-                  Mark received
-                </button>
-              ) : null,
-          },
-        ]}
-      />
-    </TableCard>
+    <>
+      {/* The action sits with the rows it changes, not in the page header
+          strip - see the note in Products.jsx. The count moved up here with
+          it, out of the card's title, so the two share one line instead of
+          taking a row each. */}
+      <Toolbar>
+        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} shipments</span>
+        <Spacer />
+        {canWrite && (
+          <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload, toast)}>
+            New shipment
+          </button>
+        )}
+      </Toolbar>
+
+      <TableCard
+        footer={
+          data && (
+            <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
+          )
+        }
+      >
+        <Table
+          loading={loading}
+          rows={data?.items}
+          empty="No shipments recorded."
+          columns={[
+            { label: 'Reference', className: 'code', render: (r) => r.reference },
+            {
+              label: 'Batch',
+              render: (r) => (
+                <>
+                  <span className="mono">{r.batch_number}</span>
+                  <br />
+                  <span className="text-muted text-sm">{r.product_name}</span>
+                </>
+              ),
+            },
+            { label: 'Units', className: 'num', render: (r) => fmtNumber(r.quantity) },
+            {
+              label: 'Destination',
+              render: (r) => (
+                <>
+                  {r.to_name}
+                  <br />
+                  <span className="text-muted text-sm">
+                    {r.to_type}
+                    {r.to_region ? `, ${r.to_region}` : ''}
+                  </span>
+                </>
+              ),
+            },
+            { label: 'Shipped', render: (r) => fmtDate(r.shipped_at) },
+            { label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+            {
+              label: '',
+              render: (r) =>
+                canWrite && r.status === 'in_transit' ? (
+                  <button
+                    className="btn btn-sm"
+                    disabled={busyId === r.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      receive(r.id);
+                    }}
+                  >
+                    Mark received
+                  </button>
+                ) : null,
+            },
+          ]}
+        />
+      </TableCard>
+    </>
   );
 }
 

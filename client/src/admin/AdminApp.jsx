@@ -15,6 +15,7 @@ import { useSession, useTheme } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
 import { Logo } from '../components/Logo.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
+import Clock from './components/Clock.jsx';
 import { DrawerProvider, useDrawer } from './components/Drawer.jsx';
 import { HeaderProvider, PageHeader, useHeader } from './components/PageHeader.jsx';
 
@@ -121,7 +122,7 @@ export default function AdminApp() {
                 <Icon name="menu" />
               </button>
               <PageHeader />
-              <ShellTools signOut={session.signOut} />
+              <ShellTools signOut={session.signOut} user={session.user} />
             </header>
 
             <main className="view" aria-live="polite">
@@ -162,17 +163,28 @@ function Denied({ role, notFound = false }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Theme and sign-out, pinned to the right of the top bar.
+ * Clock, theme, sign-out and your own picture, pinned to the right of the top
+ * bar.
  *
- * Borderless: these two sit beside a view's own action buttons, and giving
- * them the same boxed treatment would put three equal-looking buttons in a row
- * where only one is the thing the page wants you to do.
+ * The two icon buttons are borderless: they sit beside a view's own action
+ * buttons, and giving them the same boxed treatment would put three
+ * equal-looking buttons in a row where only one is the thing the page wants
+ * you to do.
+ *
+ * The picture is the same account button as the one in the sidebar foot, not a
+ * second way in. It is duplicated here because the sidebar collapses off
+ * screen on a narrow window, which is exactly where "am I still signed in as
+ * the right person?" is hardest to answer - and on a shared workstation that
+ * is a question worth being able to answer at a glance.
  */
-function ShellTools({ signOut }) {
+function ShellTools({ signOut, user }) {
   const { toggle: toggleTheme } = useTheme();
+  const { open: openAccount, loading } = useOpenAccount(user);
 
   return (
     <div className="shell-tools">
+      <Clock />
+      <span className="shell-tools-sep" aria-hidden="true" />
       <button
         className="icon-btn icon-btn-bare"
         type="button"
@@ -192,8 +204,56 @@ function ShellTools({ signOut }) {
       >
         <Icon name="out" />
       </button>
+      <button
+        className="shell-avatar"
+        type="button"
+        onClick={openAccount}
+        disabled={loading}
+        aria-label={`Your account: ${user.fullName}`}
+        title={`${user.fullName} - ${user.email}`}
+      >
+        <span className="avatar">
+          {user.avatar ? <img src={user.avatar} alt="" /> : initials(user.fullName)}
+        </span>
+      </button>
     </div>
   );
+}
+
+/**
+ * Open the account panel through the shared drawer.
+ *
+ * Shared by the sidebar chip and the top bar picture so both open the same
+ * panel with the same title - two account panels that differed would read as
+ * two different accounts.
+ *
+ * It goes through the drawer provider rather than rendering its own overlay:
+ * the sidebar is `position: sticky`, which creates a stacking context, so
+ * anything viewport-covering rendered inside it is trapped behind elements
+ * that sit higher in the root stacking context - the page's sticky table
+ * headers, for one.
+ *
+ * The panel is loaded on demand so it stays out of the initial admin chunk.
+ */
+function useOpenAccount(user) {
+  const drawer = useDrawer();
+  const [loading, setLoading] = useState(false);
+
+  async function open() {
+    setLoading(true);
+    try {
+      const { default: Account } = await import('./views/Account.jsx');
+      drawer.open({
+        title: user.fullName,
+        subtitle: user.email,
+        body: <Account />,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return { open, loading };
 }
 
 // ---------------------------------------------------------------------------
@@ -256,31 +316,7 @@ function Sidebar({ open, routes, session }) {
 }
 
 function AccountChip({ user }) {
-  const drawer = useDrawer();
-  const [loading, setLoading] = useState(false);
-
-  /*
-   * Opened through the shared drawer rather than rendering its own overlay.
-   * The sidebar is `position: sticky`, which creates a stacking context, so
-   * anything viewport-covering rendered inside it is trapped behind elements
-   * that sit higher in the root stacking context - the page's sticky table
-   * headers, for one.
-   *
-   * The panel is loaded on demand so it stays out of the initial admin chunk.
-   */
-  async function openAccount() {
-    setLoading(true);
-    try {
-      const { default: Account } = await import('./views/Account.jsx');
-      drawer.open({
-        title: user.fullName,
-        subtitle: user.email,
-        body: <Account />,
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { open: openAccount, loading } = useOpenAccount(user);
 
   return (
     <button className="user-chip" type="button" onClick={openAccount} disabled={loading}>

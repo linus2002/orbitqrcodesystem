@@ -229,7 +229,7 @@ async function cleanup(code) {
 let target = null;
 for (let i = 0; i < 40; i++) {
   try {
-    const list = (await await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
+    const list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
     target = list.find((t) => t.type === 'page');
     if (target) break;
   } catch { /* not up yet */ }
@@ -447,6 +447,33 @@ try {
         nothingBleedsThrough: topmost(0.15) && topmost(0.4) && topmost(0.85),
       });
     })()`),
+    cdp
+  );
+
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+  });
+  await sleep(600);
+
+  // The top bar clock and the picture beside it. The clock is asserted on
+  // shape rather than value - the test cannot know the machine's locale, but a
+  // clock stuck on a placeholder, or one line silently missing, would show up
+  // here. The picture opens the same account panel as the sidebar chip.
+  check(
+    'the top bar shows a clock and opens the account panel from the picture',
+    await cdp.json(`(async () => {
+      const clock = document.querySelector('.topbar .shell-clock');
+      const before = !!document.querySelector('.drawer.open');
+      document.querySelector('.topbar .shell-avatar').click();
+      await new Promise((r) => setTimeout(r, 1500));
+      return JSON.stringify({
+        hasTime: /[0-9]{1,2}[:.][0-9]{2}/.test(clock?.querySelector('strong')?.textContent ?? ''),
+        hasDate: (clock?.querySelector('span')?.textContent ?? '').length > 8,
+        machineReadable: !Number.isNaN(Date.parse(clock?.getAttribute('datetime') ?? '')),
+        noDrawerBefore: !before,
+        pictureOpensAccount: !!document.querySelector('.drawer.open .drawer-head h2')?.textContent,
+      });
+    })()`, true),
     cdp
   );
 

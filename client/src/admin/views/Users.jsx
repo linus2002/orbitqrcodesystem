@@ -31,13 +31,7 @@ export default function Users() {
   const { data, error, loading, reload } = useApi('/api/admin/users');
   const [view, setView] = useRememberedView('qrshield.users-view');
 
-  useHeader(
-    'Users',
-    'Staff accounts. Patients and pharmacists never need one.',
-    <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
-      Add user
-    </button>
-  );
+  useHeader('Users', 'Staff accounts. Patients and pharmacists never need one.');
 
   if (error) return <ErrorNote error={error} />;
 
@@ -63,6 +57,9 @@ export default function Users() {
         </span>
         <Spacer />
         <ViewToggle view={view} onChange={setView} label="How to show the accounts" />
+        <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
+          Add user
+        </button>
       </Toolbar>
 
       {view === 'grid' ? (

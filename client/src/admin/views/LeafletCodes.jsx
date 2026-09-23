@@ -33,12 +33,7 @@ export default function LeafletCodes() {
 
   useHeader(
     'Leaflet QR codes',
-    'One code per medicine, opening its patient information leaflet. These are not pack codes and make no claim that a pack is genuine.',
-    <button className="btn btn-sm btn-quiet" onClick={() => printSheet()} disabled={loading}>
-      <Icon name="qr" />
-      Print sheet
-    </button>,
-    [loading]
+    'One code per medicine, opening its patient information leaflet. These are not pack codes and make no claim that a pack is genuine.'
   );
 
   if (error) return <ErrorNote error={error} />;
@@ -77,6 +72,10 @@ export default function LeafletCodes() {
         </span>
         <Spacer />
         <ViewToggle view={view} onChange={setView} label="How to show the codes" />
+        <button className="btn btn-sm btn-quiet" onClick={() => printSheet()}>
+          <Icon name="qr" />
+          Print sheet
+        </button>
       </Toolbar>
 
       {view === 'grid' ? (

@@ -121,19 +121,53 @@
   padding: 14px 24px;
   display: flex; align-items: center; justify-content: space-between; gap: 14px;
 }
-/* Theme + sign out, hard right, after the view's own actions. */
+/* Clock, theme, sign out and your picture, hard right, after the view's own
+   actions. The two icon buttons stay tight together so they read as one pair;
+   the clock and the picture are spaced off them. */
 .shell-tools { display: flex; align-items: center; gap: 2px; flex: none; }
-/*
- * The action buttons keep their natural width and stay on one line; the
- * description paragraph beside them is what gives way. A sentence that wraps
- * still reads perfectly, whereas a button row broken across two lines looks
- * like a mistake - so the text yields first, not the controls.
- *
- * Below 900px the rule is lifted (see the responsive block) because there the
- * header stacks and wrapping is the only thing that fits.
- */
-.topbar > .row { flex: 0 0 auto; }
 
+/*
+ * The clock. Right-aligned, so the time and the date keep a shared edge with
+ * the buttons beside them instead of drifting apart as the date's width
+ * changes through the week - "Wednesday, September 23" is a good deal wider
+ * than "Friday, May 1".
+ *
+ * `tabular-nums` stops the block twitching sideways every minute: with
+ * proportional figures a 1 is narrower than a 4, so the width changes as the
+ * digits roll over.
+ */
+.shell-clock {
+  display: flex; flex-direction: column; align-items: flex-end;
+  flex: none; line-height: 1.15; margin-right: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.shell-clock strong { font-size: 1.02rem; font-weight: 700; color: var(--ink); }
+.shell-clock span {
+  font-size: 0.7rem; font-weight: 600; color: var(--ink-muted);
+  margin-top: 2px; white-space: nowrap;
+}
+/* On a phone the page title and the buttons are already competing for the
+   width, and the date alone is wider than both. The clock is the one thing
+   here the device shows in its own status bar, so it is what gives way. */
+@media (max-width: 700px) {
+  /* The separator goes with it - on its own it is a rule dividing nothing. */
+  .shell-clock, .shell-tools-sep { display: none; }
+}
+
+.shell-tools-sep {
+  width: 1px; height: 22px; flex: none;
+  background: var(--line); margin: 0 8px 0 2px;
+}
+
+/* Your own picture: a button, because it opens the account panel. */
+.shell-avatar {
+  border: 0; background: none; padding: 0; margin-left: 8px;
+  border-radius: 50%; cursor: pointer; line-height: 0; flex: none;
+}
+.shell-avatar .avatar { width: 32px; height: 32px; font-size: 0.74rem; }
+.shell-avatar:hover .avatar { box-shadow: 0 0 0 3px var(--brand-tint); }
+.shell-avatar:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.shell-avatar[disabled] { cursor: default; opacity: 0.6; }
 .topbar h1 { font-size: 1.22rem; }
 .topbar .sub { font-size: 0.82rem; color: var(--ink-muted); margin-top: 2px; }
 .menu-btn { display: none; }
@@ -470,8 +504,10 @@
   .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
   .menu-btn { display: inline-flex; }
   .topbar { padding: 12px 16px; flex-wrap: wrap; }
-  /* Narrow enough that one line is not on offer: let the buttons wrap. */
-  .topbar > .row { flex: 1 1 auto; }
+  /* Once wrapped the tools start a line of their own, and `space-between` has
+     nothing to push them against. Keep them on the right edge they occupy on a
+     wide window, so they do not appear to move house when the window narrows. */
+  .shell-tools { margin-left: auto; }
   .view { padding: 16px 16px 60px; }
   .drawer { width: 100%; }
 }

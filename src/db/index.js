@@ -132,6 +132,54 @@ export async function scalar(sql, params = []) {
   return res.rows[0][res.columns[0]];
 }
 
+/**
+ * Columns added to a table AFTER it first shipped.
+ *
+ * schema.sql declares every table with CREATE TABLE IF NOT EXISTS, which is a
+ * no-op once the table exists - so a column added to the file later never
+ * reaches a database created before it. The table looks correct in the source
+ * and is missing a column in production, and the only symptom is a 500 from
+ * whichever endpoint writes to it.
+ *
+ * Anything added to an existing table belongs here as well as in schema.sql.
+ * Keep them additive and nullable: this runs unattended on every boot, and a
+ * NOT NULL column with no default would fail against a table that has rows.
+ */
+const ADDED_COLUMNS = [
+  { table: 'users', column: 'avatar', type: 'TEXT' },
+];
+
+/** Does this table already have that column? */
+async function hasColumn(table, column) {
+  if (config.db.postgresUrl) {
+    const row = await get(
+      `SELECT 1 AS present FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ? AND column_name = ?`,
+      [table, column]
+    );
+    return Boolean(row);
+  }
+  const cols = await all(`PRAGMA table_info("${table}")`);
+  return cols.some((c) => c.name === column);
+}
+
+/**
+ * Add any column in ADDED_COLUMNS that is missing.
+ *
+ * Checked rather than relying on ADD COLUMN IF NOT EXISTS, which Postgres
+ * supports and SQLite does not.
+ */
+export async function ensureColumns({ silent = false } = {}) {
+  const added = [];
+  for (const { table, column, type } of ADDED_COLUMNS) {
+    if (await hasColumn(table, column)) continue;
+    await run(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${type}`);
+    added.push(`${table}.${column}`);
+  }
+  if (added.length && !silent) console.log(`[db] added column(s): ${added.join(', ')}`);
+  return added;
+}
+
 /** Apply schema.sql. Safe to run repeatedly - every statement is IF NOT EXISTS. */
 export async function migrate({ silent = false } = {}) {
   const sql = fs.readFileSync(schemaPath(), 'utf8');
@@ -142,6 +190,9 @@ export async function migrate({ silent = false } = {}) {
      ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
     [new Date().toISOString()]
   );
+  // New tables come from the schema above; new columns on OLD tables do not.
+  await ensureColumns({ silent });
+
   if (!silent) console.log('[db] schema applied');
   return conn;
 }
@@ -255,4 +306,4 @@ export function paginate({ page = 1, pageSize = 25, maxPageSize = 200 } = {}) {
   return { limit: size, offset: (p - 1) * size, page: p, pageSize: size };
 }
 
-export default { open, db, close, migrate, run, get, all, scalar, tx, tables, resetTables, resetForTests, paginate };
+export default { open, db, close, migrate, ensureColumns, run, get, all, scalar, tx, tables, resetTables, resetForTests, paginate };
