@@ -472,3 +472,21 @@
 .import-errors ul { margin: 8px 0 0; padding-left: 18px; }
 .import-errors li { margin-bottom: 5px; color: var(--ink-2); }
 .import-errors li strong { color: var(--ink); }
+
+
+/* --- Leaflet QR preview --------------------------------------------------- */
+
+.qr-preview { text-align: center; }
+/*
+ * White behind the code regardless of theme: a QR relies on the contrast
+ * between its dark modules and a light quiet zone, and on the dark theme the
+ * surface behind it would swallow that.
+ */
+.qr-preview-image {
+  background: #fff;
+  border-radius: var(--r);
+  padding: 10px;
+  width: 320px;
+  max-width: 100%;
+  height: auto;
+}

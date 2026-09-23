@@ -24,6 +24,7 @@ import Scans from './views/Scans.jsx';
 import Reports from './views/Reports.jsx';
 import Lookup from './views/Lookup.jsx';
 import Products from './views/Products.jsx';
+import LeafletCodes from './views/LeafletCodes.jsx';
 import Batches from './views/Batches.jsx';
 import Shipments from './views/Shipments.jsx';
 import Compliance from './views/Compliance.jsx';
@@ -41,6 +42,7 @@ const ROUTES = [
   { path: 'lookup', label: 'Code lookup', icon: 'search', perm: 'codes:read', group: 'Investigate', element: <Lookup /> },
 
   { path: 'products', label: 'Products', icon: 'pill', perm: 'products:read', group: 'Manage', element: <Products /> },
+  { path: 'leaflet-codes', label: 'Leaflet QR codes', icon: 'qr', perm: 'products:read', group: 'Manage', element: <LeafletCodes /> },
   { path: 'batches', label: 'Batches & codes', icon: 'box', perm: 'batches:read', group: 'Manage', element: <Batches /> },
   { path: 'shipments', label: 'Shipments', icon: 'truck', perm: 'batches:read', group: 'Manage', element: <Shipments /> },
 

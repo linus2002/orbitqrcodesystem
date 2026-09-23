@@ -13,6 +13,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { IconSprite } from './components/Icons.jsx';
 import PortalPage from './portal/PortalPage.jsx';
+import LeafletPage from './portal/LeafletPage.jsx';
 import LoginPage from './login/LoginPage.jsx';
 import NotFound from './components/NotFound.jsx';
 
@@ -37,6 +38,8 @@ export default function App() {
         <Route path="/verify" element={<Navigate to="/" replace />} />
         {/* The QR deep link. The portal reads the code from the URL. */}
         <Route path="/v/:code" element={<PortalPage />} />
+        {/* The leaflet QR: product information, no authenticity claim. */}
+        <Route path="/leaflet/:sku" element={<LeafletPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/admin/*"

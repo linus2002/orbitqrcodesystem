@@ -223,6 +223,7 @@ router.get('/product/:sku/leaflet', async (req, res) => {
     leaflet: {
       version: leaflet.version,
       language: leaflet.language,
+      effectiveFrom: leaflet.effective_from,
       sections: JSON.parse(leaflet.sections_json),
     },
   });

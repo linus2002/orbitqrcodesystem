@@ -18,6 +18,7 @@ import * as serialization from '../services/serialization.js';
 import * as authService from '../services/auth.js';
 import * as audit from '../services/audit.js';
 import * as importer from '../services/importer.js';
+import * as leaflets from '../services/leaflets.js';
 import { validate } from '../lib/validate.js';
 import { buildWorkbook, sendWorkbook, readSheet } from '../lib/spreadsheet.js';
 import { normalizeCode, qrPayload } from '../lib/codes.js';
@@ -650,6 +651,51 @@ router.patch('/settings/:key', requirePermission('settings:write'), async (req, 
   );
   await audit.record({ actor: req.user, req, action: 'settings.update', entityType: 'setting', entityId: req.params.key, detail: { value } });
   res.json(await db.get('SELECT * FROM settings WHERE key = ?', [req.params.key]));
+});
+
+// ===========================================================================
+// Leaflet QR codes
+//
+// One per medicine, pointing at that product's patient information. Not to be
+// confused with the pack codes: these are unsigned links for a shelf talker or
+// a carton, and they make no claim that any particular pack is genuine.
+// ===========================================================================
+
+/** Every product with its leaflet and the URL its QR carries. */
+router.get('/leaflet-codes', requirePermission('products:read'), async (req, res) => {
+  const lang = String(req.query.lang ?? 'en');
+  const items = await leaflets.listLeafletCodes({ lang });
+  res.json({
+    items,
+    total: items.length,
+    // Surfaced so the screen can say how many QRs would lead nowhere.
+    missing: items.filter((i) => !i.hasLeaflet).length,
+    lang,
+  });
+});
+
+/** One product's leaflet QR as an SVG, for download or for the screen. */
+router.get('/leaflet-codes/:sku.svg', requirePermission('products:read'), async (req, res) => {
+  const svg = await leaflets.leafletQrSvg(req.params.sku, {
+    lang: String(req.query.lang ?? 'en'),
+    width: Math.min(Math.max(Number(req.query.width) || 240, 80), 1024),
+  });
+
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  // Regenerated from the URL every time, so it can be cached briefly without
+  // risk of serving a QR for a leaflet that has since been replaced - the URL
+  // does not change when a new leaflet version is published.
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  if (req.query.download === '1') {
+    res.setHeader('Content-Disposition', `attachment; filename="leaflet-${req.params.sku}.svg"`);
+  }
+  res.send(svg);
+});
+
+/** Print sheet data: every product that has a leaflet, with its QR. */
+router.get('/leaflet-codes/sheet', requirePermission('products:read'), async (req, res) => {
+  const items = await leaflets.leafletSheet({ lang: String(req.query.lang ?? 'en') });
+  res.json({ items, total: items.length });
 });
 
 // ===========================================================================
