@@ -40,35 +40,74 @@ const NOW_ISO = `to_char(timezone('utc', now()), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
 const STRFTIME = /strftime\(\s*'%Y-%m-%dT%H:%M:%fZ'\s*,\s*'now'\s*\)/gi;
 
 /**
- * Replace `?` placeholders with `$n`, leaving any inside string literals be.
+ * Replace `?` placeholders with `$n`, leaving alone any that are not really
+ * placeholders.
  *
- * A question mark in a literal is not a placeholder, and this query set does
- * contain them (patient-facing message text), so the scan has to track quotes
- * rather than doing a blind replace.
+ * Three things have to be skipped, and each of them has bitten:
+ *
+ *   'text?'      a question mark in a literal is data, not a placeholder
+ *   -- don't     an apostrophe in a COMMENT is not a quote. Miss this and the
+ *                scanner believes a string opened that never closes, so every
+ *                later `?` is left alone and Postgres answers with the
+ *                baffling "syntax error at end of input"
+ *   block        the same again, for the slash-star form
  */
 export function toPositional(sql) {
   let out = '';
   let n = 0;
-  let inString = false;
-  for (let i = 0; i < sql.length; i++) {
+  let i = 0;
+
+  while (i < sql.length) {
     const c = sql[i];
-    if (c === "'") {
-      // '' inside a string is an escaped quote, not a terminator.
-      if (inString && sql[i + 1] === "'") {
-        out += "''";
-        i += 1;
-        continue;
-      }
-      inString = !inString;
-      out += c;
+    const next = sql[i + 1];
+
+    // -- line comment: copy verbatim to the end of the line.
+    if (c === '-' && next === '-') {
+      const end = sql.indexOf(String.fromCharCode(10), i);
+      const stop = end === -1 ? sql.length : end;
+      out += sql.slice(i, stop);
+      i = stop;
       continue;
     }
-    if (c === '?' && !inString) {
+
+    // Block comment: copy verbatim to its terminator.
+    if (c === '/' && next === '*') {
+      const end = sql.indexOf('*/', i + 2);
+      const stop = end === -1 ? sql.length : end + 2;
+      out += sql.slice(i, stop);
+      i = stop;
+      continue;
+    }
+
+    // String literal: copy verbatim, honouring '' as an escaped quote.
+    if (c === "'") {
+      out += c;
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === "'" && sql[i + 1] === "'") {
+          out += "''";
+          i += 2;
+          continue;
+        }
+        out += sql[i];
+        if (sql[i] === "'") {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+
+    if (c === '?') {
       n += 1;
       out += `$${n}`;
+      i += 1;
       continue;
     }
+
     out += c;
+    i += 1;
   }
   return out;
 }
