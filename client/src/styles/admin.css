@@ -474,6 +474,38 @@
 .import-errors li strong { color: var(--ink); }
 
 
+/* --- Grid / table switch -------------------------------------------------- */
+
+/*
+ * One control with two states, drawn as a segmented pair rather than two loose
+ * buttons - the border around both is what says they are alternatives.
+ */
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--surface);
+}
+.view-toggle-option {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: 500 0.82rem var(--sans);
+  cursor: pointer;
+}
+.view-toggle-option + .view-toggle-option { border-left: 1px solid var(--line-strong); }
+.view-toggle-option svg { width: 15px; height: 15px; }
+.view-toggle-option:hover { background: var(--surface-3); color: var(--ink); }
+.view-toggle-option.is-active {
+  background: var(--brand-tint);
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+.view-toggle-option:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
 /* --- Leaflet QR grid ------------------------------------------------------ */
 
 /*

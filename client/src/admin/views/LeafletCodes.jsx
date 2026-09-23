@@ -7,26 +7,56 @@
  * carton. The screen says so, because printing the wrong one is an expensive
  * mistake to discover after a print run.
  *
- * Shown as a grid rather than a table because the QR is the content here, not
- * a cell in a row about something else: the thing a person came to this screen
- * to do is look at a code, check it scans, and send it to a printer.
+ * Two layouts, because two jobs bring people here. The grid shows the codes
+ * themselves, which is what matters when you are checking one scans before a
+ * print run. The table compares versions and dates down a column, which is
+ * what matters across a long catalogue. The choice is remembered.
  *
  * Products with no published leaflet are shown rather than hidden - a QR
  * printed for one would take a patient to a dead end, so the gap has to be
  * visible here, where it can still be fixed.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useApi } from '../../lib/hooks.jsx';
 import { api, download } from '../../lib/api.js';
 import { fmtDate } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { Icon } from '../../components/Icons.jsx';
-import { ErrorNote, Loading } from '../components/ui.jsx';
+import { TableCard, Table, ErrorNote, Loading, Toolbar, Spacer } from '../components/ui.jsx';
+
+/*
+ * Remembered per browser. Which layout suits depends on what the person does
+ * here - four medicines and a printer wants the grid, two hundred and a
+ * question about versions wants the table - and that does not change between
+ * visits, so asking again every time would be noise.
+ */
+const VIEW_KEY = 'qrshield.leaflet-view';
+
+function useRememberedView() {
+  const [view, setView] = useState(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'grid';
+    } catch {
+      return 'grid'; // private windows and blocked storage
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, view);
+    } catch {
+      /* the choice simply will not persist; the screen still works */
+    }
+  }, [view]);
+
+  return [view, setView];
+}
 
 export default function LeafletCodes() {
   const { data, error, loading } = useApi('/api/admin/leaflet-codes');
   const [preview, setPreview] = useState(null);
+  const [view, setView] = useRememberedView();
 
   useHeader(
     'Leaflet QR codes',
@@ -68,14 +98,129 @@ export default function LeafletCodes() {
         </div>
       )}
 
-      <div className="qr-grid">
-        {items.map((row) => (
-          <QrCard key={row.sku} row={row} onEnlarge={() => setPreview(row)} />
-        ))}
-      </div>
+      <Toolbar>
+        <span className="text-sm text-muted">
+          {items.length} {items.length === 1 ? 'medicine' : 'medicines'}
+        </span>
+        <Spacer />
+        <ViewToggle view={view} onChange={setView} />
+      </Toolbar>
+
+      {view === 'grid' ? (
+        <div className="qr-grid">
+          {items.map((row) => (
+            <QrCard key={row.sku} row={row} onEnlarge={() => setPreview(row)} />
+          ))}
+        </div>
+      ) : (
+        <LeafletTable items={items} onEnlarge={setPreview} />
+      )}
 
       {preview && <QrPreview row={preview} onClose={() => setPreview(null)} />}
     </>
+  );
+}
+
+/**
+ * Grid or table.
+ *
+ * A radiogroup rather than two buttons: they are one choice with two states,
+ * and a screen reader should say which is currently selected rather than
+ * offering two commands that look unrelated.
+ */
+function ViewToggle({ view, onChange }) {
+  return (
+    <div className="view-toggle" role="radiogroup" aria-label="How to show the codes">
+      {[
+        { id: 'grid', icon: 'grid', label: 'Grid' },
+        { id: 'table', icon: 'menu', label: 'Table' },
+      ].map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="radio"
+          aria-checked={view === option.id}
+          className={`view-toggle-option${view === option.id ? ' is-active' : ''}`}
+          onClick={() => onChange(option.id)}
+        >
+          <Icon name={option.icon} />
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The same rows as the grid, for comparing versions across a long catalogue. */
+function LeafletTable({ items, onEnlarge }) {
+  return (
+    <TableCard>
+      <Table
+        rows={items}
+        rowKey={(r) => r.sku}
+        columns={[
+          {
+            label: 'Medicine',
+            render: (r) => (
+              <>
+                <strong>{r.name}</strong> {r.strength ?? ''}
+                <br />
+                <span className="text-muted text-sm">
+                  {r.sku}
+                  {r.dosage_form ? ` · ${r.dosage_form}` : ''}
+                </span>
+              </>
+            ),
+          },
+          {
+            label: 'Leaflet',
+            render: (r) =>
+              r.hasLeaflet ? (
+                <>
+                  v{r.leaflet_version}
+                  <br />
+                  <span className="text-muted text-sm">
+                    since {fmtDate(r.effective_from)}
+                    {r.leaflet_versions > 1 ? ` · ${r.leaflet_versions} versions` : ''}
+                  </span>
+                </>
+              ) : (
+                <span className="badge badge-warn">Not published</span>
+              ),
+          },
+          {
+            label: 'Opens',
+            render: (r) => (
+              <a href={r.url} target="_blank" rel="noreferrer" className="text-sm">
+                {r.url.replace(/^https?:\/\//, '')}
+              </a>
+            ),
+          },
+          {
+            label: 'QR',
+            render: (r) => (
+              <div className="row">
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => onEnlarge(r)}>
+                  View
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-quiet"
+                  onClick={() =>
+                    download(`/api/admin/leaflet-codes/${r.sku}.svg?download=1&width=512`, {
+                      filename: `leaflet-${r.sku}.svg`,
+                    })
+                  }
+                >
+                  <Icon name="download" />
+                  SVG
+                </button>
+              </div>
+            ),
+          },
+        ]}
+      />
+    </TableCard>
   );
 }
 
