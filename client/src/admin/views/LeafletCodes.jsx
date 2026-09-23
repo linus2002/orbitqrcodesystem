@@ -61,7 +61,7 @@ export default function LeafletCodes() {
   useHeader(
     'Leaflet QR codes',
     'One code per medicine, opening its patient information leaflet. These are not pack codes and make no claim that a pack is genuine.',
-    <button className="btn btn-sm" onClick={() => printSheet()} disabled={loading}>
+    <button className="btn btn-sm btn-quiet" onClick={() => printSheet()} disabled={loading}>
       <Icon name="qr" />
       Print sheet
     </button>,

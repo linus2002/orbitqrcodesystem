@@ -354,6 +354,18 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/*
+ * A secondary action: no border, no fill, until you point at it. For controls
+ * that sit beside the thing they act on - a download next to a row, a print
+ * button above a grid - where an outline would give each one the same weight
+ * as the page's primary action.
+ */
+.btn-quiet {
+  border-color: transparent;
+  background: none;
+}
+.btn-quiet:hover:not(:disabled) { background: var(--surface-3); border-color: transparent; }
+
 .btn-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-contrast); }
 .btn-primary:hover:not(:disabled) { background: var(--brand-ink); border-color: var(--brand-ink); }
 
