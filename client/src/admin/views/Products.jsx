@@ -60,7 +60,7 @@ export default function Products() {
           loading={loading}
           rows={data?.items}
           empty="No products yet."
-          onRowClick={(row) => openProduct(row.id, drawer)}
+          onRowClick={(row) => openProduct(row.id, drawer, reload, canWrite)}
           columns={[
             {
               label: 'Product',
@@ -84,7 +84,7 @@ export default function Products() {
   );
 }
 
-async function openProduct(id, drawer) {
+async function openProduct(id, drawer, reload, canWrite) {
   const p = await api(`/api/admin/products/${id}`);
   drawer.open({
     title: p.name,
@@ -117,6 +117,14 @@ async function openProduct(id, drawer) {
             <p className="text-muted text-sm">
               No leaflet published. Patients will see no dosing information on a genuine result.
             </p>
+          )}
+          {canWrite && (
+            <button
+              className="btn btn-sm mt-8"
+              onClick={() => openPublishLeaflet(p, drawer, reload)}
+            >
+              {p.leaflets.length ? 'Publish new version' : 'Publish leaflet'}
+            </button>
           )}
         </div>
 
@@ -215,6 +223,167 @@ function NewProductForm({ drawer, reload }) {
 
       <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
         {busy ? 'Creating...' : 'Create product'}
+      </button>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Publishing a leaflet
+//
+// The endpoint this posts to has existed since the leaflet QR landed; until
+// now nothing called it, so a leaflet could only be created by the seed. A
+// leaflet QR printed for a medicine with no leaflet opens a page saying there
+// is none, which is why the Leaflet QR screen counts those separately.
+// ---------------------------------------------------------------------------
+
+function openPublishLeaflet(product, drawer, reload) {
+  drawer.open({
+    title: `Publish a leaflet for ${product.name}`,
+    subtitle: `${product.sku} - this becomes what the leaflet QR opens`,
+    body: <PublishLeafletForm product={product} drawer={drawer} reload={reload} />,
+  });
+}
+
+/** One empty section. Kept as a factory so each row gets its own object. */
+const emptySection = () => ({ heading: '', body: '' });
+
+function PublishLeafletForm({ product, drawer, reload }) {
+  const toast = useToast();
+  const [version, setVersion] = useState('');
+  const [language, setLanguage] = useState('en');
+  const [sections, setSections] = useState([emptySection()]);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const setSection = (i, key, value) =>
+    setSections((s) => s.map((row, n) => (n === i ? { ...row, [key]: value } : row)));
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(null);
+
+    const cleaned = sections
+      .map((s) => ({ heading: s.heading.trim(), body: s.body.trim() }))
+      .filter((s) => s.heading || s.body);
+
+    // Checked here as well as on the server: the server's message names the
+    // fault but not which section, and a half-filled row is the likely slip.
+    if (!cleaned.length) {
+      setError('A leaflet needs at least one section.');
+      return;
+    }
+    if (cleaned.some((s) => !s.heading || !s.body)) {
+      setError('Every section needs both a heading and a body.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await api(`/api/admin/products/${product.id}/leaflets`, {
+        method: 'POST',
+        body: { version: version.trim(), language: language.trim() || 'en', sections: cleaned },
+      });
+      toast('Leaflet published.', 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      setError(err.formMessage);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="stack" onSubmit={submit} noValidate>
+      <div className="field">
+        <label className="label" htmlFor="lf-version">Version</label>
+        <input
+          className="input mono"
+          id="lf-version"
+          value={version}
+          onChange={(e) => setVersion(e.target.value)}
+          maxLength={20}
+          placeholder="1.0"
+          spellCheck={false}
+        />
+        <p className="hint">
+          Your own reference for this revision. A product may not have two leaflets with the same
+          version and language.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="lf-language">Language</label>
+        <input
+          className="input mono"
+          id="lf-language"
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          maxLength={8}
+          placeholder="en"
+          spellCheck={false}
+        />
+        <p className="hint">
+          A short language code. English is what the QR opens by default; any other code is reached
+          only through a language link.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="label">Sections</label>
+        <p className="hint mb-8">
+          Each becomes one heading a patient can open. Write them in the order they should be read.
+        </p>
+
+        {sections.map((s, i) => (
+          <div className="stack mb-8" key={i}>
+            <input
+              className="input"
+              value={s.heading}
+              onChange={(e) => setSection(i, 'heading', e.target.value)}
+              maxLength={160}
+              placeholder={i === 0 ? 'What this medicine is for' : 'Heading'}
+              aria-label={`Section ${i + 1} heading`}
+            />
+            <textarea
+              className="textarea"
+              value={s.body}
+              onChange={(e) => setSection(i, 'body', e.target.value)}
+              placeholder="The text a patient reads under this heading."
+              aria-label={`Section ${i + 1} body`}
+            />
+            {sections.length > 1 && (
+              <button
+                className="btn btn-sm btn-quiet"
+                type="button"
+                onClick={() => setSections((all) => all.filter((_, n) => n !== i))}
+              >
+                Remove this section
+              </button>
+            )}
+          </div>
+        ))}
+
+        {sections.length < 40 && (
+          <button
+            className="btn btn-sm"
+            type="button"
+            onClick={() => setSections((all) => [...all, emptySection()])}
+          >
+            Add a section
+          </button>
+        )}
+      </div>
+
+      <p className="hint">
+        Publishing takes effect immediately: the leaflet QR already printed for this medicine points
+        at a fixed address, so it will start opening this version. Existing versions are kept.
+      </p>
+
+      {error && <p className="field-error" role="alert">{error}</p>}
+
+      <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
+        {busy ? 'Publishing...' : 'Publish leaflet'}
       </button>
     </form>
   );
