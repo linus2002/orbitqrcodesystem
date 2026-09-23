@@ -177,6 +177,29 @@ export async function tx(fn) {
 }
 
 /**
+ * Empty the named tables and restart their identity counters.
+ *
+ * The two engines reset auto-increment differently: SQLite keeps its counters
+ * in sqlite_sequence, a table Postgres does not have, so a plain DELETE loop
+ * leaves Postgres identities continuing from where they stopped - and the seed
+ * data, which assumes product 1 and batch 1, would be built on ids that no
+ * longer start at 1.
+ *
+ * Destructive by definition; the caller decides whether that is appropriate.
+ */
+export async function resetTables(names) {
+  if (config.db.postgresUrl) {
+    const list = names.map((n) => `"${n}"`).join(', ');
+    await run(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+    return;
+  }
+  for (const name of names) await run(`DELETE FROM "${name}"`);
+  // Present only once a table with AUTOINCREMENT has been written to.
+  const seq = await get(`SELECT name FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'`);
+  if (seq) await run('DELETE FROM sqlite_sequence');
+}
+
+/**
  * Empty every table and restart identity counters. TESTS ONLY.
  *
  * With SQLite the equivalent is simply opening a new `:memory:` database, so
@@ -232,4 +255,4 @@ export function paginate({ page = 1, pageSize = 25, maxPageSize = 200 } = {}) {
   return { limit: size, offset: (p - 1) * size, page: p, pageSize: size };
 }
 
-export default { open, db, close, migrate, run, get, all, scalar, tx, tables, resetForTests, paginate };
+export default { open, db, close, migrate, run, get, all, scalar, tx, tables, resetTables, resetForTests, paginate };

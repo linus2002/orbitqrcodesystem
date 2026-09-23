@@ -48,15 +48,10 @@ console.log('Seeding QR Shield demonstration data...\n');
 // ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
-await db.tx(async () => {
-  for (const t of [
-    'sms_log', 'audit_log', 'consumer_reports', 'alerts', 'scans',
-    'shipments', 'codes', 'batches', 'leaflets', 'products', 'sessions', 'users', 'settings',
-  ]) {
-    await db.run(`DELETE FROM "${t}"`);
-  }
-  await db.run(`DELETE FROM sqlite_sequence`);
-});
+await db.resetTables([
+  'sms_log', 'audit_log', 'consumer_reports', 'alerts', 'scans',
+  'shipments', 'codes', 'batches', 'leaflets', 'products', 'sessions', 'users', 'settings',
+]);
 
 // ---------------------------------------------------------------------------
 // Users
