@@ -22,7 +22,6 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const canScans = usePermission('scans:read');
   const canAlerts = usePermission('alerts:read');
-  const canReports = usePermission('reports:read');
 
   useHeader(
     'Overview',
@@ -53,46 +52,38 @@ export default function Dashboard() {
       <Tiles
         items={[
           {
+            // The headline figure, so it carries the filled tile.
             label: 'Checks',
             value: fmtNumber(o.scans.total),
-            meta: `${fmtNumber(o.scans.today)} today`,
-            icon: 'scan',
+            meta: `${fmtNumber(o.scans.today)} today · ${fmtNumber(o.scans.previousTotal)} previous ${DAYS} days`,
+            change: o.scans.changePct,
+            changeGood: 'up',
+            to: canScans ? '/admin/scans' : undefined,
+            tone: 'blue',
           },
           {
             label: 'Flagged',
             value: fmtNumber(o.scans.flagged),
-            meta: `${o.scans.flagRatePerThousand} per 1,000 checks`,
-            accent: o.scans.flagged > 0 ? 'danger' : undefined,
-            icon: 'alert',
+            // A rise here is bad news, which is why changeGood is inverted.
+            meta: `${o.scans.flagRatePerThousand} per 1,000 · ${fmtNumber(o.scans.previousFlagged)} previous ${DAYS} days`,
+            change: o.scans.flaggedChangePct,
+            changeGood: 'down',
+            tone: 'red',
+            to: canScans ? '/admin/scans?result=flagged' : undefined,
           },
           canAlerts && {
             label: 'Needs attention',
             value: fmtNumber(o.alerts.open + o.alerts.investigating),
             meta: `${fmtNumber(o.alerts.urgent)} high or critical`,
-            accent: o.alerts.urgent > 0 ? 'danger' : undefined,
-            icon: 'flag',
-          },
-          canReports && {
-            label: 'Patient reports',
-            value: fmtNumber(o.reports.new),
-            meta: 'awaiting review',
-            accent: o.reports.new > 0 ? 'warn' : undefined,
-            icon: 'report',
+            tone: 'violet',
+            to: '/admin/alerts',
           },
           {
             label: 'Units serialized',
             value: fmtNumber(o.codes.total),
             meta: `${fmtNumber(o.codes.verified)} verified by a patient`,
-            icon: 'qr',
-          },
-          {
-            label: 'Active batches',
-            value: fmtNumber(o.batches.active),
-            meta: o.batches.recalled
-              ? `${fmtNumber(o.batches.recalled)} recalled`
-              : 'none recalled',
-            accent: o.batches.recalled > 0 ? 'warn' : undefined,
-            icon: 'box',
+            tone: 'green',
+            to: '/admin/batches',
           },
         ]}
       />

@@ -66,29 +66,27 @@ export default function Compliance() {
         <>
           <Tiles
             items={[
-              { label: 'Batches in period', value: fmtNumber(data.serialization.batches), icon: 'box' },
+              { label: 'Batches in period', value: fmtNumber(data.serialization.batches), tone: 'blue' },
               {
                 label: 'Units serialized',
+                tone: 'green',
                 value: fmtNumber(data.serialization.unitsSerialized),
                 meta: `${fmtNumber(data.serialization.unitsPlanned)} planned`,
-                icon: 'qr',
               },
               {
                 label: 'Verification checks',
+                tone: 'violet',
                 value: fmtNumber(data.verification.totalChecks),
-                icon: 'scan',
               },
               {
                 label: 'Flagged checks',
+                tone: 'red',
                 value: fmtNumber(data.verification.flagged),
-                accent: data.verification.flagged ? 'danger' : undefined,
-                icon: 'alert',
               },
               {
                 label: 'Recalled batches',
+                tone: 'blue',
                 value: fmtNumber(data.serialization.recalledBatches),
-                accent: data.serialization.recalledBatches ? 'warn' : undefined,
-                icon: 'flag',
               },
             ]}
           />

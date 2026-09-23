@@ -11,11 +11,12 @@ import { useState } from 'react';
 
 import { api } from '../../lib/api.js';
 import { useApi, useSession, useToast } from '../../lib/hooks.jsx';
-import { fmtDate } from '../../lib/format.js';
+import { fmtDate, initials } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
 import { Icon } from '../../components/Icons.jsx';
-import { TableCard, Table, KV, StatusBadge, ErrorNote } from '../components/ui.jsx';
+import { TableCard, Table, KV, StatusBadge, ErrorNote, Toolbar, Spacer } from '../components/ui.jsx';
+import ViewToggle, { useRememberedView } from '../components/ViewToggle.jsx';
 
 const ROLE_NOTE = {
   admin: 'Full access, including user administration.',
@@ -28,6 +29,7 @@ export default function Users() {
   const drawer = useDrawer();
   const session = useSession();
   const { data, error, loading, reload } = useApi('/api/admin/users');
+  const [view, setView] = useRememberedView('qrshield.users-view');
 
   useHeader(
     'Users',
@@ -39,23 +41,128 @@ export default function Users() {
 
   if (error) return <ErrorNote error={error} />;
 
+  const items = data?.items ?? [];
+
+  /** One place to open an account, so both layouts behave identically. */
+  const openUser = (row) =>
+    drawer.open({
+      title: row.fullName,
+      subtitle: row.email,
+      body: <UserDetail user={row} isSelf={row.id === session.user.id} />,
+      footer:
+        row.id === session.user.id ? null : (
+          <UserActions user={row} drawer={drawer} reload={reload} />
+        ),
+    });
+
   return (
-    <TableCard title={`${data?.total ?? 0} accounts`}>
+    <>
+      <Toolbar>
+        <span className="text-sm text-muted">
+          {items.length} {items.length === 1 ? 'account' : 'accounts'}
+        </span>
+        <Spacer />
+        <ViewToggle view={view} onChange={setView} label="How to show the accounts" />
+      </Toolbar>
+
+      {view === 'grid' ? (
+        <div className="user-grid">
+          {items.map((row) => (
+            <UserCard
+              key={row.id}
+              user={row}
+              isSelf={row.id === session.user.id}
+              onOpen={() => openUser(row)}
+            />
+          ))}
+        </div>
+      ) : (
+        <UsersTable
+          items={items}
+          loading={loading}
+          session={session}
+          onOpen={openUser}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * One account as a card.
+ *
+ * The permissions are the substance here: a role name tells you what somebody
+ * is called, the permission list tells you what they can actually reach, and
+ * that is the question an administrator is usually on this screen to answer.
+ * Four are shown with a count for the rest, so cards stay the same height and
+ * comparable side by side.
+ */
+function UserCard({ user, isSelf, onOpen }) {
+  const shown = user.permissions.slice(0, 4);
+  const extra = user.permissions.length - shown.length;
+
+  return (
+    <article className={`user-card${user.status === 'active' ? '' : ' user-card-suspended'}`}>
+      <header className="user-card-head">
+        <span className="user-card-avatar" aria-hidden="true">
+          {user.avatar ? <img src={user.avatar} alt="" /> : initials(user.fullName)}
+        </span>
+        <div className="user-card-who">
+          <h3>
+            {user.fullName}
+            {isSelf && <span className="badge badge-info">you</span>}
+          </h3>
+          <p>{user.email}</p>
+        </div>
+      </header>
+
+      <div className="user-card-facts">
+        <span className={`user-card-role role-${user.role}`}>{user.role}</span>
+        <span className="user-card-status">
+          <Icon name={user.status === 'active' ? 'check' : 'lock'} />
+          {user.status === 'active' ? 'Active' : 'Suspended'}
+        </span>
+      </div>
+
+      <dl className="user-card-stats">
+        <div>
+          <dt>Last signed in</dt>
+          <dd>{user.lastLoginAt ? fmtDate(user.lastLoginAt, { withTime: true }) : 'never'}</dd>
+        </div>
+        <div>
+          <dt>Account added</dt>
+          <dd>{fmtDate(user.createdAt)}</dd>
+        </div>
+      </dl>
+
+      <ul className="user-card-tags">
+        {shown.map((permission) => (
+          <li key={permission}>{permission}</li>
+        ))}
+        {extra > 0 && <li className="is-more">+{extra}</li>}
+      </ul>
+
+      <footer className="user-card-foot">
+        <div className="user-card-access">
+          <strong>{user.permissions.length} permissions</strong>
+          {user.mustChangePassword && <span>Must change password</span>}
+        </div>
+        <button type="button" className="btn btn-primary btn-sm" onClick={onOpen}>
+          {isSelf ? 'View account' : 'Manage'}
+        </button>
+      </footer>
+    </article>
+  );
+}
+
+function UsersTable({ items, loading, session, onOpen }) {
+  return (
+    <TableCard>
       <Table
         loading={loading}
-        rows={data?.items}
+        rows={items}
         empty="No users."
-        onRowClick={(row) =>
-          drawer.open({
-            title: row.fullName,
-            subtitle: row.email,
-            body: <UserDetail user={row} isSelf={row.id === session.user.id} />,
-            footer:
-              row.id === session.user.id ? null : (
-                <UserActions user={row} drawer={drawer} reload={reload} />
-              ),
-          })
-        }
+        onRowClick={onOpen}
         columns={[
           {
             label: 'Name',

@@ -68,6 +68,7 @@ export function publicUser(row) {
     role: row.role,
     status: row.status,
     lastLoginAt: row.last_login_at,
+    avatar: row.avatar ?? null,
     mustChangePassword: row.must_change_pw === 1,
     createdAt: row.created_at,
     permissions: PERMISSIONS[row.role] ?? [],
@@ -223,6 +224,58 @@ export async function pruneSessions() {
 export async function listUsers() {
   const rows = await db.all('SELECT * FROM users ORDER BY role, full_name');
   return rows.map(publicUser);
+}
+
+/**
+ * Update the signed-in person's own profile.
+ *
+ * Deliberately narrow. A person may change how they are NAMED and how they
+ * LOOK; they may not change what they can DO or who they ARE. Role, status and
+ * email stay with an administrator, because email is a login credential and
+ * role is the whole access model - letting either be self-served would turn
+ * this endpoint into privilege escalation.
+ */
+export async function updateProfile(userId, { fullName, avatar }, { req } = {}) {
+  const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!user) throw notFound('Account not found');
+
+  const changes = [];
+  const params = [];
+
+  if (fullName !== undefined) {
+    changes.push('full_name = ?');
+    params.push(fullName);
+  }
+
+  if (avatar !== undefined) {
+    // null clears it; anything else has already been validated by the route.
+    changes.push('avatar = ?');
+    params.push(avatar);
+  }
+
+  if (!changes.length) return publicUser(user);
+
+  await db.run(
+    `UPDATE users SET ${changes.join(', ')},
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id = ?`,
+    [...params, userId]
+  );
+
+  await audit.record({
+    actor: user,
+    req,
+    action: 'profile.update',
+    entityType: 'user',
+    entityId: userId,
+    // The image itself is not written to the audit log - only that it changed.
+    detail: {
+      fullName: fullName !== undefined ? fullName : undefined,
+      avatar: avatar === undefined ? undefined : avatar === null ? 'removed' : 'replaced',
+    },
+  });
+
+  return publicUser(await db.get('SELECT * FROM users WHERE id = ?', [userId]));
 }
 
 export async function createUser({ email, fullName, role, password, mustChangePassword = true }, { actor, req } = {}) {

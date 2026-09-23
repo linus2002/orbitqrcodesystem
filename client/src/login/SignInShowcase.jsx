@@ -1,19 +1,34 @@
 /**
  * The rotating panel beside the sign-in form.
  *
+ * Each slide is one capability of the system, in the order a pack actually
+ * travels: serialized on the line, checked by a patient, cloned and caught,
+ * investigated by a person, accounted for to a regulator. Somebody evaluating
+ * the system sees what it does; somebody signing in every morning sees why
+ * their work matters. The same five slides serve both.
+ *
  * ---------------------------------------------------------------------------
- * SWAPPING IN REAL PHOTOGRAPHY
+ * PHOTOGRAPHY
  *
- * Drop your images into `client/public/img/signin/` and point the `image`
- * fields below at them:
+ * Every slide is written around a person, because the subject of each one is a
+ * person doing something - not a screenshot of software. A brief sits above
+ * each slide below.
  *
- *     { image: '/img/signin/pharmacy.jpg', title: '...', body: '...' }
+ * Shooting notes that apply to all five:
  *
- * Nothing else changes. Portrait or landscape both work (the panel uses
- * object-fit: cover). Use roughly 1200x1500 or larger, and keep each file
- * under a few hundred KB - this is the first thing a staff member downloads.
+ *   - Real people in real settings. Stock photography of models in unbranded
+ *     lab coats reads as stock, and this system's whole claim is that it is in
+ *     use in actual pharmacies and actual production lines.
+ *   - Portrait or landscape both work; the panel uses object-fit: cover, so
+ *     keep the subject off-centre-left, away from where the text sits.
+ *   - Roughly 1200x1500 or larger, under a few hundred KB each. This is the
+ *     first thing anybody downloads on the sign-in page.
+ *   - No readable patient details, no identifiable prescriptions, no real
+ *     codes on a pack that could be photographed and reused.
+ *   - Written consent from anybody recognisable, including staff.
  *
- * The files currently here are designed placeholders, not photographs.
+ * Drop the files into `client/public/img/signin/` and point `image` at them.
+ * The files currently there are designed placeholders, not photographs.
  * ---------------------------------------------------------------------------
  *
  * Images are served from our own origin, so the strict `img-src 'self'`
@@ -27,19 +42,42 @@ const INTERVAL = 7000;
 
 export const SLIDES = [
   {
-    image: '/img/signin/slide-1.svg',
-    title: 'One code per pack',
-    body: 'Every unit leaves the line with a unique, non-sequential code - serialized here, verified in the patient’s hand.',
+    /* PHOTO: a packaging operator in gowning inspecting a coded carton, with
+     the line running behind her. Serialization happens at manufacture, not
+     in an office afterwards. */
+    image: '/img/signin/slide-1.jpg',
+    title: 'Serialized at the line',
+    body: 'Every pack leaves production with its own signed, non-sequential code. Batches of up to 500,000 units are issued and exported for the printer in one step.',
   },
   {
-    image: '/img/signin/slide-2.svg',
+    /* PHOTO: a woman at a kitchen table, phone raised to the code on a
+     medicine box. Ordinary clothes, ordinary room - deliberately not a
+     clinician, because this slide is about the person the system is for. */
+    image: '/img/signin/slide-2.jpg',
+    title: 'Anyone can check a pack',
+    body: 'A patient scans the code and gets a plain answer in seconds - no app, no account, no sign-up. Where there is no data signal, the same check works over SMS.',
+  },
+  {
+    /* PHOTO: two hands holding two identical-looking packs at a pharmacy
+     counter. You cannot tell which is the copy by looking, which is the
+     entire argument this slide makes. */
+    image: '/img/signin/slide-3.jpg',
     title: 'Copies surface themselves',
-    body: 'A cloned code looks genuine exactly once. The moment a second person checks it, the duplicate is flagged and queued.',
+    body: 'A cloned code passes exactly once. The second time anyone checks it, in any pharmacy or any city, the duplicate is flagged and an alert is raised.',
   },
   {
-    image: '/img/signin/slide-3.svg',
-    title: 'A human closes the loop',
-    body: 'Flags become work for the security team, never an automatic recall. Every decision is recorded in the audit log.',
+    /* PHOTO: an analyst on the phone mid-decision, pen in hand, screen out of
+     focus behind her. The subject is the judgement, not the dashboard. */
+    image: '/img/signin/slide-4.jpg',
+    title: 'A person decides, not a rule',
+    body: 'Flags become work for the security team, never an automatic recall. Every decision, and who made it, is written to an append-only audit log.',
+  },
+  {
+    /* PHOTO: a quality lead working through a printed binder. Paper matters
+     here: this slide is about what you can hand to an inspector. */
+    image: '/img/signin/slide-5.jpg',
+    title: 'Evidence for the regulator',
+    body: 'Every scan, alert and batch transition is retained and exportable. A recall reaches the next person to scan the pack, and the record shows exactly who was told what, and when.',
   },
 ];
 

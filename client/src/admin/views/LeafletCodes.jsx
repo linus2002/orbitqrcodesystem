@@ -16,7 +16,7 @@
  * printed for one would take a patient to a dead end, so the gap has to be
  * visible here, where it can still be fixed.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { useApi } from '../../lib/hooks.jsx';
 import { api, download } from '../../lib/api.js';
@@ -24,39 +24,12 @@ import { fmtDate } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { Icon } from '../../components/Icons.jsx';
 import { TableCard, Table, ErrorNote, Loading, Toolbar, Spacer } from '../components/ui.jsx';
-
-/*
- * Remembered per browser. Which layout suits depends on what the person does
- * here - four medicines and a printer wants the grid, two hundred and a
- * question about versions wants the table - and that does not change between
- * visits, so asking again every time would be noise.
- */
-const VIEW_KEY = 'qrshield.leaflet-view';
-
-function useRememberedView() {
-  const [view, setView] = useState(() => {
-    try {
-      return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'grid';
-    } catch {
-      return 'grid'; // private windows and blocked storage
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(VIEW_KEY, view);
-    } catch {
-      /* the choice simply will not persist; the screen still works */
-    }
-  }, [view]);
-
-  return [view, setView];
-}
+import ViewToggle, { useRememberedView } from '../components/ViewToggle.jsx';
 
 export default function LeafletCodes() {
   const { data, error, loading } = useApi('/api/admin/leaflet-codes');
   const [preview, setPreview] = useState(null);
-  const [view, setView] = useRememberedView();
+  const [view, setView] = useRememberedView('qrshield.leaflet-view');
 
   useHeader(
     'Leaflet QR codes',
@@ -103,7 +76,7 @@ export default function LeafletCodes() {
           {items.length} {items.length === 1 ? 'medicine' : 'medicines'}
         </span>
         <Spacer />
-        <ViewToggle view={view} onChange={setView} />
+        <ViewToggle view={view} onChange={setView} label="How to show the codes" />
       </Toolbar>
 
       {view === 'grid' ? (
@@ -118,40 +91,6 @@ export default function LeafletCodes() {
 
       {preview && <QrPreview row={preview} onClose={() => setPreview(null)} />}
     </>
-  );
-}
-
-/**
- * Grid or table.
- *
- * A radiogroup rather than two buttons: they are one choice with two states,
- * and a screen reader should say which is currently selected rather than
- * offering two commands that look unrelated.
- */
-function ViewToggle({ view, onChange }) {
-  return (
-    <div className="view-toggle" role="radiogroup" aria-label="How to show the codes">
-      {[
-        { id: 'grid', icon: 'grid', label: 'Grid' },
-        { id: 'table', icon: 'menu', label: 'Table' },
-      ].map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          role="radio"
-          aria-checked={view === option.id}
-          /* The label is carried by aria-label and title now that the text is
-             gone: without it the control announces as an unnamed radio, and a
-             pointer user gets no way to learn what the icon means. */
-          aria-label={`${option.label} view`}
-          title={`${option.label} view`}
-          className={`view-toggle-option${view === option.id ? ' is-active' : ''}`}
-          onClick={() => onChange(option.id)}
-        >
-          <Icon name={option.icon} />
-        </button>
-      ))}
-    </div>
   );
 }
 

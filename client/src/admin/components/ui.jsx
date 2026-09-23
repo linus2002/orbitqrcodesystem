@@ -7,6 +7,8 @@
  * accident - which was the single largest risk in the old string-templated UI.
  */
 import { fmtNumber, humanise } from '../../lib/format.js';
+import { Link } from 'react-router-dom';
+
 import { Icon } from '../../components/Icons.jsx';
 import BrandLoader from '../../components/BrandLoader.jsx';
 
@@ -93,20 +95,68 @@ export function ErrorNote({ error }) {
 // Stat tiles
 // ---------------------------------------------------------------------------
 
-/** @param {{items: Array<{label,value,meta?,accent?,icon?}>}} props */
+/**
+ * @param {object} props
+ * @param {Array<{
+ *   label: string,
+ *   value: React.ReactNode,
+ *   meta?: React.ReactNode,
+ *   change?: number|null,        percentage against the previous period
+ *   changeGood?: 'up'|'down',    which direction is the good news
+ *   to?: string,                 where the corner arrow goes
+ *   tone?: 'blue'|'red'|'violet'|'green'   which gradient the card carries
+ * }>} props.items
+ */
 export function Tiles({ items }) {
   return (
     <div className="tiles">
       {items.filter(Boolean).map((t) => (
-        <div className={`tile${t.accent ? ` accent-${t.accent}` : ''}`} key={t.label}>
-          <div className="k">
-            {t.icon && <Icon name={t.icon} />}
-            {t.label}
-          </div>
-          <div className="v">{t.value}</div>
-          {t.meta && <div className="m">{t.meta}</div>}
-        </div>
+        <Tile key={t.label} {...t} />
       ))}
+    </div>
+  );
+}
+
+function Tile({ label, value, meta, change, changeGood = 'up', to, tone = 'blue' }) {
+  const hasChange = typeof change === 'number' && Number.isFinite(change);
+  const rising = hasChange && change > 0;
+  /*
+   * Which direction counts as good is per-metric, not universal: more checks
+   * is reassuring, more flagged packs is not. Without this the same green
+   * arrow would congratulate somebody on a rise in counterfeits.
+   */
+  const welcome = hasChange && (rising ? changeGood === 'up' : changeGood === 'down');
+
+  return (
+    <div className={`tile tone-${tone}`}>
+      {/*
+        The shape sits behind the content as a lighter facet of the same
+        gradient, the way the reference does. Decorative, so it is hidden from
+        assistive tech and never carries meaning on its own.
+      */}
+      <span className="tile-shape" aria-hidden="true" />
+
+      <div className="tile-top">
+        <span className="k">{label}</span>
+        {to && (
+          <Link className="tile-link" to={to} aria-label={`Open ${label}`}>
+            <Icon name="arrow-right" />
+          </Link>
+        )}
+      </div>
+
+      <div className="tile-figure">
+        <div className="tile-value-row">
+          <span className="v">{value}</span>
+          {hasChange && change !== 0 && (
+            <span className={`tile-change${welcome ? ' is-good' : ' is-bad'}`}>
+              {rising ? '↗' : '↘'} {rising ? '+' : ''}
+              {change}%
+            </span>
+          )}
+        </div>
+        {meta && <div className="m">{meta}</div>}
+      </div>
     </div>
   );
 }

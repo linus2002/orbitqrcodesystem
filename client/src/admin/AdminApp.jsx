@@ -284,7 +284,9 @@ function AccountChip({ user }) {
 
   return (
     <button className="user-chip" type="button" onClick={openAccount} disabled={loading}>
-      <span className="avatar">{initials(user.fullName)}</span>
+      <span className="avatar">
+        {user.avatar ? <img src={user.avatar} alt="" /> : initials(user.fullName)}
+      </span>
       <span className="who">
         <b>{user.fullName}</b>
         <span>{user.role}</span>

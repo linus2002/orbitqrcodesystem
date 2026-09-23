@@ -12,7 +12,8 @@ import { api } from '../../lib/api.js';
 import { useApi, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
-import { TableCard, Table, ErrorNote, Loading } from '../components/ui.jsx';
+import { Card, TableCard, Table, ErrorNote, Loading } from '../components/ui.jsx';
+import ProfileEditor from '../components/ProfileEditor.jsx';
 
 export default function Settings() {
   const canWrite = usePermission('settings:write');
@@ -48,6 +49,12 @@ export default function Settings() {
 
   return (
     <>
+      {/* Your own account first: it is the only thing on this page a
+          non-administrator can change. */}
+      <Card title="Your profile">
+        <ProfileEditor />
+      </Card>
+
       <TableCard title="Adjustable settings">
         <Table
           rows={data.items}

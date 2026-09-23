@@ -21,9 +21,28 @@ import * as db from '../db/index.js';
 const LIVE_ONLY = 'is_test = 0';
 
 /** Headline numbers for the dashboard. */
+/**
+ * Percentage change, or null when there is nothing to compare against.
+ *
+ * Null rather than 0 or 100 when the previous period was empty: "up 100%" from
+ * a base of zero is arithmetic, not information, and on a dashboard it reads
+ * as a trend somebody might act on.
+ */
+function changePct(current, previous) {
+  if (!previous) return null;
+  return Number((((current - previous) / previous) * 100).toFixed(1));
+}
+
 export async function overview({ days = 30 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const today = new Date(new Date().toDateString()).toISOString();
+
+  /*
+   * The window immediately before this one, the same length. That is what
+   * makes a count mean something: 57 flagged checks is unreadable on its own,
+   * and "57, up from 31" is the whole point of putting it on a dashboard.
+   */
+  const previousSince = new Date(Date.now() - days * 2 * 86400000).toISOString();
 
   const scans = await db.get(
     `SELECT COUNT(*) AS total,
@@ -32,6 +51,14 @@ export async function overview({ days = 30 } = {}) {
             SUM(CASE WHEN result = 'invalid' THEN 1 ELSE 0 END) AS invalid
        FROM scans WHERE ${LIVE_ONLY} AND created_at >= ?`,
     [since]
+  );
+
+  const previousScans = await db.get(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged
+       FROM scans
+      WHERE ${LIVE_ONLY} AND created_at >= ? AND created_at < ?`,
+    [previousSince, since]
   );
 
   const todayScans = await db.scalar(
@@ -72,6 +99,10 @@ export async function overview({ days = 30 } = {}) {
       flagged,
       invalid: scans?.invalid ?? 0,
       today: todayScans ?? 0,
+      previousTotal: previousScans?.total ?? 0,
+      previousFlagged: previousScans?.flagged ?? 0,
+      changePct: changePct(total, previousScans?.total ?? 0),
+      flaggedChangePct: changePct(flagged, previousScans?.flagged ?? 0),
       // The single number the security team watches. Expressed per-thousand
       // because a healthy rate is a fraction of a percent.
       flagRatePerThousand: total ? Number(((flagged / total) * 1000).toFixed(1)) : 0,

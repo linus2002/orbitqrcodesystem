@@ -7,6 +7,7 @@ import * as authService from '../services/auth.js';
 import { validate } from '../lib/validate.js';
 import { createLimiter, rateLimit } from '../lib/ratelimit.js';
 import { requireAuth, requireCsrf } from '../middleware/auth.js';
+import { badRequest } from '../lib/errors.js';
 
 const router = Router();
 
@@ -99,6 +100,55 @@ router.post('/change-password', requireAuth, requireCsrf, async (req, res) => {
   });
 
   res.json({ ok: true, message: 'Password changed. Other devices have been signed out.' });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/auth/profile - change your own name and picture
+// ---------------------------------------------------------------------------
+
+/** 200KB of data URL. The browser sends about 30KB after resizing. */
+const MAX_AVATAR_BYTES = 200 * 1024;
+
+/** Only raster formats a browser will render inline, and never SVG. */
+const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+/**
+ * Check an uploaded avatar.
+ *
+ * The browser downsizes before uploading, but that is a convenience, not a
+ * control: this endpoint is reachable directly. SVG is refused outright
+ * because an SVG is a document that can carry script, and this one would be
+ * served from our own origin and rendered in another user's page.
+ */
+function checkAvatar(value) {
+  if (value === null) return null;
+
+  const m = /^data:([a-z/+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(String(value));
+  if (!m) throw badRequest('That picture could not be read. Upload a JPEG, PNG or WebP.');
+
+  const [, mime, payload] = m;
+  if (!AVATAR_TYPES.includes(mime)) {
+    throw badRequest('Upload a JPEG, PNG or WebP image.');
+  }
+  if (Buffer.byteLength(payload, 'base64') > MAX_AVATAR_BYTES) {
+    throw badRequest('That picture is too large. Choose one under 200KB.');
+  }
+  return value;
+}
+
+router.patch('/profile', requireAuth, requireCsrf, async (req, res) => {
+  const data = validate(req.body, {
+    fullName: { type: 'string', max: 120 },
+    // `avatar` is handled outside validate(): it is a data URL, not a field
+    // shape the validator knows about.
+  });
+
+  const patch = {};
+  if (data.fullName !== undefined) patch.fullName = data.fullName;
+  if ('avatar' in req.body) patch.avatar = checkAvatar(req.body.avatar);
+
+  const user = await authService.updateProfile(req.user.id, patch, { req });
+  res.json({ user });
 });
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS users (
   locked_until    TEXT,
   last_login_at   TEXT,
   must_change_pw  INTEGER NOT NULL DEFAULT 0 CHECK (must_change_pw IN (0, 1)),
+  -- A small square avatar as a data URL, or NULL.
+  --
+  -- In the column rather than on disk or in object storage: there is no disk
+  -- on a serverless deployment, and a bucket would be another service to
+  -- provision, secure and back up for a handful of thumbnails. The browser
+  -- resizes to 256x256 before upload and the API refuses anything over 200KB,
+  -- so the row stays small.
+  avatar          TEXT,
   created_by      INTEGER REFERENCES users (id) ON DELETE SET NULL,
   created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))

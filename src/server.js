@@ -72,6 +72,18 @@ export function createApp() {
     })
   );
 
+  /*
+   * The profile endpoint carries an avatar as a data URL, which base64 pushes
+   * past the 64kb every other endpoint gets. Widened here alone rather than
+   * globally: 64kb is the right ceiling for a login or a batch request, and
+   * raising it everywhere to suit one route would give every endpoint a larger
+   * body to parse before it can reject it.
+   *
+   * 512kb leaves room for a 200KB image plus base64 overhead and the rest of
+   * the object; the route itself enforces the real limit.
+   */
+  app.use('/api/auth/profile', express.json({ limit: '512kb' }));
+
   app.use(express.json({ limit: '64kb' }));
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(cookieParser());

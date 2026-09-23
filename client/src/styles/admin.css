@@ -144,32 +144,161 @@
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 14px;
 }
+
+/*
+ * A coloured gradient card with white text and a large geometric facet showing
+ * through it.
+ *
+ * Every tone is chosen so WHITE TEXT CLEARS 4.5:1 on the lighter end of its
+ * gradient. The brand blue and green are too light for that at full strength -
+ * white on either measures 3:1, which is fine for the figure but fails for the
+ * label and the caption - so each tone runs from a deeper shade of the same
+ * hue. That is the one place this departs from the reference, and it is the
+ * difference between a caption somebody can read and one they cannot.
+ */
 .tile {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  /* On white, a white tile needs a firmer edge - see the override below. */
-  border-radius: var(--r-lg);
-  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 150px;
+  padding: 18px 20px;
+  border: 0;
+  border-radius: 12px;
   box-shadow: var(--shadow-sm);
+  color: #fff;
+  isolation: isolate;
 }
+
+/*
+ * Two colours per card, not two shades of one. Both ends of every pair clear
+ * 4.5:1 against white, so the small label and caption stay readable wherever
+ * they fall on the gradient.
+ */
+.tone-blue   { background: linear-gradient(140deg, #0b6fa8 0%, #2f4bc9 100%); }
+.tone-red    { background: linear-gradient(140deg, #b81f2c 0%, #c9337a 100%); }
+.tone-violet { background: linear-gradient(140deg, #6425c9 0%, #2f4bc9 100%); }
+.tone-green  { background: linear-gradient(140deg, #2f7a2a 0%, #0c7d72 100%); }
+
+/*
+ * Two facets per card, in translucent white so they read as part of the
+ * gradient rather than as stickers on it. Each tone gets its own pair, so a
+ * row of four is four different cards rather than one repeated.
+ *
+ * Both are decorative and sit behind the content; `overflow: hidden` on the
+ * tile is what crops them into the corner.
+ */
+.tile-shape,
+.tile::before {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.1);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* The large facet: bottom-right on every card, shaped per tone. */
+.tile-shape {
+  right: -46px;
+  bottom: -58px;
+  width: 168px;
+  height: 168px;
+  border-radius: 34px;
+  transform: rotate(24deg);
+}
+/* The second, smaller facet: top-right, and lighter so it reads as further
+   back than the first. */
+.tile::before {
+  right: -30px;
+  top: -44px;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tone-blue .tile-shape { border-radius: 50%; transform: none; }
+.tone-blue::before { border-radius: 26px; transform: rotate(18deg); }
+
+.tone-red .tile-shape { border-radius: 34px; transform: rotate(-18deg); }
+.tone-red::before { right: -38px; top: -50px; width: 120px; height: 120px; }
+
+.tone-violet .tile-shape { border-radius: 50% 50% 50% 14px; transform: rotate(8deg); }
+.tone-violet::before { border-radius: 20px; transform: rotate(-24deg); }
+
+.tone-green .tile-shape { border-radius: 14px 50% 50% 50%; transform: rotate(-12deg); }
+.tone-green::before { right: -34px; top: -38px; width: 92px; height: 92px; }
+
+.tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+
 .tile .k {
-  font: 600 0.72rem/1.3 var(--sans);
-  letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--ink-muted);
-  display: flex; align-items: center; gap: 6px;
+  font: 500 0.82rem/1.3 var(--sans);
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(255, 255, 255, 0.86);
 }
-.tile .k svg { width: 14px; height: 14px; }
+
+.tile-value-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tile .v {
-  font-size: 1.85rem; font-weight: 700; letter-spacing: -0.025em;
-  margin-top: 8px; line-height: 1;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: #fff;
 }
-.tile .m { font-size: 0.8rem; color: var(--ink-muted); margin-top: 6px; }
-.tile.accent-danger .v { color: var(--danger-ink); }
-.tile.accent-good .v { color: var(--good-ink); }
-.tile.accent-warn .v { color: var(--warn-ink); }
+.tile .m {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.82);
+  margin-top: 6px;
+}
+
+/*
+ * The change pill is white-on-translucent rather than green or red: on a card
+ * that is already a strong colour, a red pill on a red card says nothing, and
+ * a green one on the red card reads as a contradiction. The arrow and the sign
+ * carry the direction instead.
+ */
+.tile-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: 600 0.7rem/1 var(--sans);
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* Back in the top row beside the label, where it was before the cards took
+   colour - which is also what lets the caption below run the full width. */
+.tile-link {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.tile-link svg {
+  width: 17px;
+  height: 17px;
+  /* Rotated to point up and out of the card: this leads somewhere else, and a
+     horizontal arrow reads as "next" rather than "open". */
+  transform: rotate(-45deg);
+}
+.tile-link:hover { background: rgba(255, 255, 255, 0.34); }
+.tile-link:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
 /* --- Charts -------------------------------------------------------------- */
 
@@ -408,8 +537,8 @@
 :root:not([data-theme='dark']) .admin-main .topbar {
   background: color-mix(in srgb, var(--surface) 90%, transparent);
 }
-:root:not([data-theme='dark']) .admin-main .card,
-:root:not([data-theme='dark']) .admin-main .tile {
+/* Tiles are excluded: they carry a gradient panel and no border at all now. */
+:root:not([data-theme='dark']) .admin-main .card {
   border-color: var(--line-strong);
 }
 
@@ -417,8 +546,7 @@
   :root:not([data-theme='light']) .admin-main .topbar {
     background: color-mix(in srgb, var(--page) 90%, transparent);
   }
-  :root:not([data-theme='light']) .admin-main .card,
-  :root:not([data-theme='light']) .admin-main .tile {
+  :root:not([data-theme='light']) .admin-main .card {
     border-color: var(--line);
   }
 }
@@ -600,4 +728,154 @@
   width: 320px;
   max-width: 100%;
   height: auto;
+}
+
+
+/* --- User cards ----------------------------------------------------------- */
+
+.user-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.user-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/*
+ * A suspended account is dimmed rather than hidden. It still holds a role and
+ * a history, and an administrator scanning this grid needs to see that it
+ * exists - just not mistake it for one that can sign in.
+ */
+.user-card-suspended { opacity: 0.72; border-style: dashed; }
+
+.user-card-head { display: flex; align-items: center; gap: 12px; }
+.user-card-avatar {
+  width: 46px; height: 46px; flex: none;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  display: grid; place-items: center;
+  font: 600 1rem var(--sans);
+}
+.user-card-who { min-width: 0; }
+.user-card-who h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+  /* A long name truncates rather than pushing the card wider than its
+     neighbours and breaking the grid's alignment. */
+  overflow: hidden;
+}
+.user-card-who p {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.user-card-facts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/*
+ * The role reads as the card's headline fact, the way the rating pill does in
+ * the design this follows. Colour is a shortcut, never the only signal - the
+ * role name is written inside it.
+ */
+.user-card-role {
+  display: inline-flex; align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font: 600 0.7rem/1 var(--sans);
+  text-transform: capitalize;
+  color: #fff;
+}
+.role-admin { background: #1d9fda; }
+.role-security { background: #7c3aed; }
+.role-regulator { background: #0f766e; }
+
+.user-card-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+.user-card-status svg { width: 14px; height: 14px; }
+
+.user-card-stats { display: grid; gap: 6px; }
+.user-card-stats div { display: flex; justify-content: space-between; gap: 10px; }
+.user-card-stats dt { font-size: 0.75rem; color: var(--ink-muted); }
+.user-card-stats dd { font-size: 0.75rem; color: var(--ink-2); text-align: right; }
+
+/* Permission chips. What the person can actually reach, not what they are called. */
+.user-card-tags {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  list-style: none; padding: 0; margin: 0;
+  /* Capped so every card is the same height and they compare cleanly. */
+  min-height: 46px;
+  align-content: flex-start;
+}
+.user-card-tags li {
+  font: 500 0.68rem/1 var(--sans);
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+.user-card-tags .is-more { background: none; color: var(--ink-muted); }
+
+.user-card-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.user-card-access strong { display: block; font-size: 0.82rem; font-weight: 600; }
+.user-card-access span { display: block; font-size: 0.7rem; color: var(--warn-ink); margin-top: 2px; }
+
+
+/* --- Profile editor ------------------------------------------------------- */
+
+.profile-avatar-row { display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap; }
+
+.profile-avatar {
+  width: 88px;
+  height: 88px;
+  flex: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--brand);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font: 600 1.5rem var(--sans);
+}
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.profile-avatar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* The note sits under the buttons rather than beside them, so it does not
+   squeeze them onto two lines on a narrow screen. */
+.profile-avatar-actions .hint { flex-basis: 100%; margin: 0; }
+
+.profile-editor .input:disabled {
+  background: var(--surface-2);
+  color: var(--ink-muted);
+  cursor: not-allowed;
+}
+
+/* An avatar anywhere a person is listed. Falls back to initials, which is why
+   the element keeps its background colour underneath the image. */
+.avatar img,
+.user-card-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
 }
