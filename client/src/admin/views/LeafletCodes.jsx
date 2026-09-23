@@ -140,11 +140,15 @@ function ViewToggle({ view, onChange }) {
           type="button"
           role="radio"
           aria-checked={view === option.id}
+          /* The label is carried by aria-label and title now that the text is
+             gone: without it the control announces as an unnamed radio, and a
+             pointer user gets no way to learn what the icon means. */
+          aria-label={`${option.label} view`}
+          title={`${option.label} view`}
           className={`view-toggle-option${view === option.id ? ' is-active' : ''}`}
           onClick={() => onChange(option.id)}
         >
           <Icon name={option.icon} />
-          {option.label}
         </button>
       ))}
     </div>

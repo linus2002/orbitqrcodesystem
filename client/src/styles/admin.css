@@ -477,34 +477,41 @@
 /* --- Grid / table switch -------------------------------------------------- */
 
 /*
- * One control with two states, drawn as a segmented pair rather than two loose
- * buttons - the border around both is what says they are alternatives.
+ * Icon-only, inside one pill. The selected option is a filled disc rather than
+ * a tinted panel, which is what lets the divider go: the fill alone says which
+ * is active, so a line between them would be saying it twice.
  */
 .view-toggle {
   display: inline-flex;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
-  overflow: hidden;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   background: var(--surface);
 }
 .view-toggle-option {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
   border: 0;
+  border-radius: 999px;
   background: none;
   color: var(--ink-2);
-  font: 500 0.82rem var(--sans);
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.view-toggle-option + .view-toggle-option { border-left: 1px solid var(--line-strong); }
-.view-toggle-option svg { width: 15px; height: 15px; }
-.view-toggle-option:hover { background: var(--surface-3); color: var(--ink); }
-.view-toggle-option.is-active {
-  background: var(--brand-tint);
-  color: var(--brand-ink);
-  font-weight: 600;
-}
-.view-toggle-option:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.view-toggle-option svg { width: 17px; height: 17px; }
+.view-toggle-option:hover:not(.is-active) { background: var(--surface-3); color: var(--ink); }
+.view-toggle-option.is-active { background: #1d9fda; color: #fff; }
+/*
+ * The outline goes outside the pill. Inset, it would be drawn over the filled
+ * disc and be nearly invisible on the selected option - which is the one most
+ * likely to be focused.
+ */
+.view-toggle-option:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 /* --- Leaflet QR grid ------------------------------------------------------ */
 
