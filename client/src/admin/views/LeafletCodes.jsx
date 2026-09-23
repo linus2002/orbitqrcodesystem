@@ -7,21 +7,24 @@
  * carton. The screen says so, because printing the wrong one is an expensive
  * mistake to discover after a print run.
  *
- * Products with no published leaflet are listed rather than hidden: a QR
- * printed for one of them would take a patient to a dead end, so the gap has
- * to be visible here, where it can still be fixed.
+ * Shown as a grid rather than a table because the QR is the content here, not
+ * a cell in a row about something else: the thing a person came to this screen
+ * to do is look at a code, check it scans, and send it to a printer.
+ *
+ * Products with no published leaflet are shown rather than hidden - a QR
+ * printed for one would take a patient to a dead end, so the gap has to be
+ * visible here, where it can still be fixed.
  */
 import { useState } from 'react';
 
-import { useApi, usePermission } from '../../lib/hooks.jsx';
+import { useApi } from '../../lib/hooks.jsx';
 import { api, download } from '../../lib/api.js';
 import { fmtDate } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { Icon } from '../../components/Icons.jsx';
-import { TableCard, Table, ErrorNote } from '../components/ui.jsx';
+import { ErrorNote, Loading } from '../components/ui.jsx';
 
 export default function LeafletCodes() {
-  const canWrite = usePermission('products:write');
   const { data, error, loading } = useApi('/api/admin/leaflet-codes');
   const [preview, setPreview] = useState(null);
 
@@ -36,8 +39,21 @@ export default function LeafletCodes() {
   );
 
   if (error) return <ErrorNote error={error} />;
+  if (loading) return <Loading message="Loading leaflet codes..." />;
 
+  const items = data?.items ?? [];
   const missing = data?.missing ?? 0;
+
+  if (!items.length) {
+    return (
+      <div className="card">
+        <div className="empty">
+          <Icon name="qr" />
+          <p>No products yet. Add a product before printing leaflet codes.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -52,82 +68,81 @@ export default function LeafletCodes() {
         </div>
       )}
 
-      <TableCard>
-        <Table
-          loading={loading}
-          rows={data?.items}
-          rowKey={(r) => r.sku}
-          empty="No products yet. Add a product before printing leaflet codes."
-          columns={[
-            {
-              label: 'Medicine',
-              render: (r) => (
-                <>
-                  <strong>{r.name}</strong> {r.strength ?? ''}
-                  <br />
-                  <span className="text-muted text-sm">
-                    {r.sku}
-                    {r.dosage_form ? ` · ${r.dosage_form}` : ''}
-                  </span>
-                </>
-              ),
-            },
-            {
-              label: 'Leaflet',
-              render: (r) =>
-                r.hasLeaflet ? (
-                  <>
-                    v{r.leaflet_version}
-                    <br />
-                    <span className="text-muted text-sm">
-                      since {fmtDate(r.effective_from)}
-                      {r.leaflet_versions > 1 ? ` · ${r.leaflet_versions} versions` : ''}
-                    </span>
-                  </>
-                ) : (
-                  <span className="badge badge-warn">Not published</span>
-                ),
-            },
-            {
-              label: 'Opens',
-              render: (r) => (
-                <a href={r.url} target="_blank" rel="noreferrer" className="text-sm">
-                  {r.url.replace(/^https?:\/\//, '')}
-                </a>
-              ),
-            },
-            {
-              label: 'QR',
-              render: (r) => (
-                <div className="row">
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-quiet"
-                    onClick={() => setPreview(r)}
-                  >
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-quiet"
-                    onClick={() =>
-                      download(`/api/admin/leaflet-codes/${r.sku}.svg?download=1&width=512`, {
-                        filename: `leaflet-${r.sku}.svg`,
-                      })
-                    }
-                  >
-                    <Icon name="download" />
-                    SVG
-                  </button>
-                </div>
-              ),
-            },
-          ]}
-        />
-      </TableCard>
+      <div className="qr-grid">
+        {items.map((row) => (
+          <QrCard key={row.sku} row={row} onEnlarge={() => setPreview(row)} />
+        ))}
+      </div>
 
       {preview && <QrPreview row={preview} onClose={() => setPreview(null)} />}
     </>
+  );
+}
+
+function QrCard({ row, onEnlarge }) {
+  return (
+    <figure className={`qr-card${row.hasLeaflet ? '' : ' qr-card-gap'}`}>
+      {/*
+        The code is a button: the most likely next action on this screen is
+        "make it bigger so I can scan it and check it works".
+
+        `loading="lazy"` because each card fetches its own QR - a catalogue of
+        two hundred medicines would otherwise open two hundred requests before
+        showing anything.
+      */}
+      <button
+        type="button"
+        className="qr-card-code"
+        onClick={onEnlarge}
+        aria-label={`Enlarge the leaflet QR for ${row.name}`}
+      >
+        <img
+          src={`/api/admin/leaflet-codes/${row.sku}.svg?width=200`}
+          alt=""
+          width="200"
+          height="200"
+          loading="lazy"
+        />
+      </button>
+
+      <figcaption className="qr-card-body">
+        <h3 className="qr-card-name">
+          {row.name} {row.strength ?? ''}
+        </h3>
+        <p className="qr-card-meta">
+          {row.sku}
+          {row.dosage_form ? ` · ${row.dosage_form}` : ''}
+        </p>
+
+        {row.hasLeaflet ? (
+          <p className="qr-card-meta">
+            Leaflet v{row.leaflet_version} · since {fmtDate(row.effective_from)}
+          </p>
+        ) : (
+          <p className="qr-card-meta">
+            <span className="badge badge-warn">Not published</span>
+          </p>
+        )}
+      </figcaption>
+
+      <div className="qr-card-actions">
+        <button
+          type="button"
+          className="btn btn-sm btn-quiet"
+          onClick={() =>
+            download(`/api/admin/leaflet-codes/${row.sku}.svg?download=1&width=512`, {
+              filename: `leaflet-${row.sku}.svg`,
+            })
+          }
+        >
+          <Icon name="download" />
+          SVG
+        </button>
+        <a className="btn btn-sm btn-quiet" href={row.url} target="_blank" rel="noreferrer">
+          Open
+        </a>
+      </div>
+    </figure>
   );
 }
 
@@ -141,10 +156,6 @@ function QrPreview({ row, onClose }) {
         </h3>
         <p className="text-sm text-muted">{row.sku}</p>
 
-        {/*
-          Rendered from the endpoint rather than drawn here, so what is shown
-          is exactly what downloads and what prints - one generator, not two.
-        */}
         <img
           className="qr-preview-image mt-16"
           src={`/api/admin/leaflet-codes/${row.sku}.svg?width=320`}
