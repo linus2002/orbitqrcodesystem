@@ -76,15 +76,29 @@ export async function issueCodes(batchId, { actor, req } = {}) {
      * of pure latency. CHUNK is a compromise between round trips and the size
      * of a single request.
      */
-    const CHUNK = 500;
-    const SQL = `INSERT INTO codes (code, batch_id, product_id, unit_index, serial, status)
-                 VALUES (?, ?, ?, ?, ?, 'issued')`;
+    /*
+     * One statement per chunk, not one per code. Every statement is a network
+     * round trip to the database now, and a 1,200-unit batch issued one row at
+     * a time measured at 159 SECONDS against a hosted Postgres - well past the
+     * 30s a serverless function is given, so a real batch could never be
+     * issued at all.
+     *
+     * The chunk size is bounded by the parameter limit of the engine, not by
+     * the wire: Postgres allows 65535 per statement, SQLite far fewer, so the
+     * smaller number is used where it applies. Five columns per row.
+     */
+    const CHUNK = config.db.postgresUrl ? 500 : 150;
 
     let n = 0;
     let pending = [];
     const flush = async () => {
       if (!pending.length) return;
-      for (const args of pending) await db.run(SQL, args);
+      const tuples = pending.map(() => "(?, ?, ?, ?, ?, 'issued')").join(', ');
+      await db.run(
+        `INSERT INTO codes (code, batch_id, product_id, unit_index, serial, status)
+         VALUES ${tuples}`,
+        pending.flat()
+      );
       pending = [];
     };
 
