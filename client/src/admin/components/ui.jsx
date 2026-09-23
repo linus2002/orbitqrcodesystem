@@ -8,6 +8,7 @@
  */
 import { fmtNumber, humanise } from '../../lib/format.js';
 import { Icon } from '../../components/Icons.jsx';
+import BrandLoader from '../../components/BrandLoader.jsx';
 
 // ---------------------------------------------------------------------------
 // Containers
@@ -64,8 +65,7 @@ export const Spacer = () => <span className="spacer" />;
 export function Loading({ message = 'Loading...' }) {
   return (
     <div className="empty">
-      <span className="spinner" aria-hidden="true" />
-      <p className="mt-8">{message}</p>
+      <BrandLoader size="sm" message={message} />
     </div>
   );
 }

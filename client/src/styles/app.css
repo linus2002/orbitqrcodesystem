@@ -668,3 +668,81 @@ table.data .badge-neutral { background: #4a5a6b; } /* white 6.3:1 */
   justify-items: center;
   color: var(--ink-muted);
 }
+
+
+/* --------------------------------------------------------------------------
+   Brand loader
+   -------------------------------------------------------------------------- */
+
+/*
+ * The mark holds still; two arcs travel around it in opposite directions.
+ * One custom property drives the size, so the ring, the mark and the caption
+ * all stay in proportion across the three variants.
+ */
+.brand-loader {
+  --loader-size: 88px;
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+.brand-loader-sm { --loader-size: 54px; gap: 10px; }
+.brand-loader-lg { --loader-size: 124px; gap: 16px; }
+
+.brand-loader-stage {
+  position: relative;
+  width: var(--loader-size);
+  height: var(--loader-size);
+  display: grid;
+  place-items: center;
+}
+
+.brand-loader-orbit {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--line-strong);
+  overflow: visible;
+}
+.brand-loader-track { opacity: 0.45; }
+
+/*
+ * Both arcs turn about the centre of the 120-unit viewBox. Without an explicit
+ * origin an SVG child rotates about the origin of the whole element, which
+ * sends it off the canvas rather than around the mark.
+ */
+.brand-loader-arc { transform-origin: 60px 60px; }
+
+.brand-loader-mark {
+  position: relative;
+  width: 46%;
+  height: auto;
+  z-index: 1;
+}
+
+.brand-loader-message {
+  font-size: 0.86rem;
+  color: var(--ink-muted);
+  margin: 0;
+}
+.brand-loader-sm .brand-loader-message { font-size: 0.8rem; }
+
+/*
+ * Motion only where it is welcome. Without this block the loader is the mark
+ * inside two static arcs - still legibly a loading state, because the spin
+ * carries no information the stillness does not.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .brand-loader-arc-blue  { animation: orbit-cw 1.5s linear infinite; }
+  .brand-loader-arc-green { animation: orbit-ccw 2.4s linear infinite; }
+  .brand-loader-mark      { animation: orbit-breathe 2.8s ease-in-out infinite; }
+}
+
+@keyframes orbit-cw  { to { transform: rotate(360deg); } }
+@keyframes orbit-ccw { to { transform: rotate(-360deg); } }
+
+/* Barely there: alive, not pulsing at the reader. */
+@keyframes orbit-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.05); }
+}

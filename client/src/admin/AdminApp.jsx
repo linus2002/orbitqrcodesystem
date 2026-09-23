@@ -14,6 +14,7 @@ import { initials } from '../lib/format.js';
 import { useSession, useTheme } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
 import { Logo } from '../components/Logo.jsx';
+import BrandLoader from '../components/BrandLoader.jsx';
 import { DrawerProvider, useDrawer } from './components/Drawer.jsx';
 import { HeaderProvider, PageHeader, useHeader } from './components/PageHeader.jsx';
 
@@ -72,8 +73,7 @@ export default function AdminApp() {
   if (session.status === 'idle' || session.status === 'loading') {
     return (
       <div className="page-loading">
-        <span className="spinner" aria-hidden="true" />
-        <p className="text-muted mt-8">Loading...</p>
+        <BrandLoader size="lg" message="Loading your dashboard..." />
       </div>
     );
   }
