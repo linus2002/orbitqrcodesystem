@@ -163,7 +163,10 @@ export async function topFlaggedBatches({ days = 30, limit = 8 } = {}) {
       -- p.name and p.sku are listed explicitly: grouping by b.id only makes
       -- the BATCHES columns functionally dependent, not the joined product's.
       GROUP BY b.id, b.batch_number, b.status, b.expiry_date, p.name, p.sku
-     HAVING flagged > 0
+      -- The aggregate is repeated rather than naming the flagged alias:
+      -- SQLite resolves output aliases in HAVING, Postgres does not, and only
+      -- GROUP BY and ORDER BY may use them in both.
+     HAVING SUM(CASE WHEN s.result = 'flagged' THEN 1 ELSE 0 END) > 0
       ORDER BY flagged DESC, scans DESC
       LIMIT ?`,
     [since, limit]
