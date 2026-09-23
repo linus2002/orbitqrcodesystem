@@ -53,12 +53,44 @@ function secret(key, devFallback) {
   return devFallback;
 }
 
+const publicBaseUrl = str('PUBLIC_BASE_URL', `http://localhost:${int('PORT', 3000)}`).replace(/\/+$/, '');
+
+/**
+ * Hosts that only resolve on the machine running the app.
+ *
+ * Anchored at both ends deliberately, so `localhost.example.com` - a real,
+ * routable host - is not mistaken for a local one.
+ */
+const LOCAL_BASE_URL_RE = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
+
+/** Does this base URL only resolve on the machine serving the app? */
+export function isLocalBaseUrl(url) {
+  return LOCAL_BASE_URL_RE.test(String(url ?? ''));
+}
+
+/**
+ * Said wherever a printable artefact is produced against a local base URL.
+ *
+ * The base URL is baked into a QR when the code is GENERATED, not when it is
+ * scanned, and only the code itself is stored - the payload is rebuilt on
+ * every export. So correcting PUBLIC_BASE_URL fixes future output and does
+ * nothing for a sheet already on paper; reprinting is the only remedy. That
+ * asymmetry is why this warns at the point of production rather than relying
+ * on someone noticing the configuration.
+ */
+export const LOCAL_BASE_URL_WARNING =
+  'PUBLIC_BASE_URL points at this machine, so every QR produced now resolves ' +
+  'only here. Set PUBLIC_BASE_URL to the public address before printing anything.';
+
 export const config = {
   env: NODE_ENV,
   isProd,
   isTest: NODE_ENV === 'test',
   port: int('PORT', 3000),
-  publicBaseUrl: str('PUBLIC_BASE_URL', `http://localhost:${int('PORT', 3000)}`).replace(/\/+$/, ''),
+  publicBaseUrl,
+
+  /** True when publicBaseUrl resolves only on this machine - see above. */
+  publicBaseUrlIsLocal: isLocalBaseUrl(publicBaseUrl),
 
   /*
    * One driver (libSQL) serves both shapes: a local file in development, a
