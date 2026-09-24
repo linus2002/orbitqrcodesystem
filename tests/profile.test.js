@@ -41,6 +41,28 @@ test('a person can change their own display name', async () => {
   assert.equal(await db.scalar('SELECT full_name FROM users'), 'Renamed Person');
 });
 
+test('a display name cannot be blanked through the API', async () => {
+  const before = await db.scalar('SELECT full_name FROM users');
+
+  // Only spaces: trimmed to nothing, which used to be stored.
+  const spaces = await client.patch('/api/auth/profile', { fullName: '    ' });
+  // Empty: used to be silently ignored with a 200.
+  const empty = await client.patch('/api/auth/profile', { fullName: '' });
+
+  assert.equal(spaces.status, 422);
+  assert.equal(empty.status, 422, 'refused, not reported as a success');
+  assert.equal(await db.scalar('SELECT full_name FROM users'), before, 'the name is unchanged');
+});
+
+test('leaving the name out still lets the picture be changed on its own', async () => {
+  const before = await db.scalar('SELECT full_name FROM users');
+
+  const res = await client.patch('/api/auth/profile', { avatar: null });
+
+  assert.equal(res.status, 200);
+  assert.equal(await db.scalar('SELECT full_name FROM users'), before);
+});
+
 test('an avatar is stored and can be cleared again', async () => {
   const set = await client.patch('/api/auth/profile', { avatar: TINY_PNG });
   assert.equal(set.status, 200);
