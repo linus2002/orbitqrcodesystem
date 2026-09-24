@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { config, ROOT } from './config.js';
+import { config, ROOT, LOCAL_BASE_URL_WARNING } from './config.js';
 import * as db from './db/index.js';
 import logger from './lib/logger.js';
 import { securityHeaders, clientIp, cors } from './middleware/security.js';
@@ -147,6 +147,11 @@ export async function start({ port = config.port } = {}) {
       env: config.env,
       publicBaseUrl: config.publicBaseUrl,
     });
+    // Said once at boot as well as at each export, so it is visible to whoever
+    // started the server and not only to whoever clicks a download.
+    if (config.publicBaseUrlIsLocal) {
+      logger.warn(LOCAL_BASE_URL_WARNING, { publicBaseUrl: config.publicBaseUrl });
+    }
   });
 
   // Expire old session rows hourly so the table cannot grow without bound.

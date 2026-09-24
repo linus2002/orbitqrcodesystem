@@ -21,8 +21,9 @@
 import QRCode from 'qrcode';
 
 import * as db from '../db/index.js';
-import { config } from '../config.js';
+import { config, LOCAL_BASE_URL_WARNING } from '../config.js';
 import { notFound } from '../lib/errors.js';
+import logger from '../lib/logger.js';
 
 /** The public address a leaflet QR points at. */
 export function leafletUrl(sku, { lang } = {}) {
@@ -102,6 +103,12 @@ export async function leafletQrDataUrl(sku, { lang = 'en', width = 320 } = {}) {
  */
 export async function leafletSheet({ lang = 'en' } = {}) {
   const products = (await listLeafletCodes({ lang })).filter((p) => p.hasLeaflet);
+
+  // A leaflet QR carries nothing but its URL, so a local base URL leaves it
+  // with no recoverable meaning at all once it is on a shelf talker.
+  if (config.publicBaseUrlIsLocal) {
+    logger.warn(LOCAL_BASE_URL_WARNING, { artefact: 'leaflet sheet', lang, products: products.length });
+  }
 
   return Promise.all(
     products.map(async (p) => ({

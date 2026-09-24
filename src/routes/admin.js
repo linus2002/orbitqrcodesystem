@@ -11,7 +11,7 @@
  */
 import { Router } from 'express';
 import * as db from '../db/index.js';
-import { config } from '../config.js';
+import { config, LOCAL_BASE_URL_WARNING } from '../config.js';
 import * as analytics from '../services/analytics.js';
 import * as alertService from '../services/alerts.js';
 import * as serialization from '../services/serialization.js';
@@ -340,6 +340,9 @@ router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, r
     },
     items,
     total: await db.scalar('SELECT COUNT(*) FROM codes WHERE batch_id = ?', [batch.id]),
+    // Undefined when the base URL is a real one, so a correctly configured
+    // deployment returns exactly the response it returned before.
+    warning: config.publicBaseUrlIsLocal ? LOCAL_BASE_URL_WARNING : undefined,
   });
 });
 
@@ -671,6 +674,7 @@ router.get('/leaflet-codes', requirePermission('products:read'), async (req, res
     // Surfaced so the screen can say how many QRs would lead nowhere.
     missing: items.filter((i) => !i.hasLeaflet).length,
     lang,
+    warning: config.publicBaseUrlIsLocal ? LOCAL_BASE_URL_WARNING : undefined,
   });
 });
 
@@ -695,7 +699,11 @@ router.get('/leaflet-codes/:sku.svg', requirePermission('products:read'), async 
 /** Print sheet data: every product that has a leaflet, with its QR. */
 router.get('/leaflet-codes/sheet', requirePermission('products:read'), async (req, res) => {
   const items = await leaflets.leafletSheet({ lang: String(req.query.lang ?? 'en') });
-  res.json({ items, total: items.length });
+  res.json({
+    items,
+    total: items.length,
+    warning: config.publicBaseUrlIsLocal ? LOCAL_BASE_URL_WARNING : undefined,
+  });
 });
 
 // ===========================================================================

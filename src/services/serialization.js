@@ -14,7 +14,7 @@
  */
 import QRCode from 'qrcode';
 import * as db from '../db/index.js';
-import { config } from '../config.js';
+import { config, LOCAL_BASE_URL_WARNING } from '../config.js';
 import { generateBatchCodes, serialWidthFor, qrPayload } from '../lib/codes.js';
 import { conflict, notFound, badRequest } from '../lib/errors.js';
 import * as audit from './audit.js';
@@ -303,7 +303,24 @@ export async function exportCsv(batchId) {
       batch.expiry_date,
     ].join(',')
   );
-  return { filename: `codes-${batch.batch_number}.csv`, csv: [header, ...lines].join('\n') };
+  /*
+   * This file is what a packaging line prints from, so a local base URL here
+   * is the costliest place for it to go unnoticed. Logged rather than refused:
+   * exporting against a local address is exactly what a demonstration does.
+   */
+  if (config.publicBaseUrlIsLocal) {
+    logger.warn(LOCAL_BASE_URL_WARNING, {
+      batch: batch.batch_number,
+      artefact: 'codes.csv',
+      units: rows.length,
+    });
+  }
+
+  return {
+    filename: `codes-${batch.batch_number}.csv`,
+    csv: [header, ...lines].join('\n'),
+    warning: config.publicBaseUrlIsLocal ? LOCAL_BASE_URL_WARNING : undefined,
+  };
 }
 
 export default {
