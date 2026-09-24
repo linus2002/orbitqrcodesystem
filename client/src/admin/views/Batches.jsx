@@ -334,12 +334,30 @@ function BatchActions({ batch, drawer, reload }) {
 // Printable label sheet
 // ---------------------------------------------------------------------------
 
+/**
+ * Labels per request, which is also labels per print run.
+ *
+ * 60 is the route's own ceiling, and sitting at the ceiling means a batch
+ * takes as few print runs as possible: at four columns in print, 60 is about
+ * three A4 pages. It is a ceiling rather than "all of them" because a batch
+ * runs to hundreds of thousands of units and every label carries its own
+ * rendered SVG - one request for a whole batch would be megabytes.
+ */
+const LABELS_PER_PAGE = 60;
+
+const fetchLabels = (batchId, page) =>
+  api(`/api/admin/batches/${batchId}/labels`, {
+    query: { limit: LABELS_PER_PAGE, offset: (page - 1) * LABELS_PER_PAGE },
+  });
+
 async function openLabels(batchId, drawer) {
-  const data = await api(`/api/admin/batches/${batchId}/labels`, { query: { limit: 24 } });
+  // Fetched before the drawer opens so a failure surfaces where the click
+  // happened rather than as an empty panel.
+  const first = await fetchLabels(batchId, 1);
   drawer.open({
     title: 'Label sheet',
-    subtitle: `${data.batch.batchNumber} - first ${data.items.length} of ${fmtNumber(data.total)} units`,
-    body: <Labels data={data} />,
+    subtitle: `${first.batch.batchNumber} - ${fmtNumber(first.total)} units`,
+    body: <Labels batchId={batchId} first={first} />,
     footer: (
       <button className="btn btn-sm btn-primary" onClick={() => window.print()}>
         Print
@@ -348,14 +366,39 @@ async function openLabels(batchId, drawer) {
   });
 }
 
-function Labels({ data }) {
+function Labels({ batchId, first }) {
+  const toast = useToast();
+  const [data, setData] = useState(first);
+  const [page, setPage] = useState(1);
+  const [busy, setBusy] = useState(false);
+
+  async function go(next) {
+    // Guarded: two quick clicks on Next would otherwise race, and the slower
+    // response could land after the faster one and contradict the pager.
+    if (busy) return;
+    setBusy(true);
+    try {
+      setData(await fetchLabels(batchId, next));
+      setPage(next);
+    } catch (err) {
+      toast(err.formMessage ?? 'Could not load that page of labels.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <p className="text-sm text-muted no-print">
         These are real, scannable codes. Print this panel to test the full loop: print, scan with a
-        phone, and watch the check appear in the scan log.
+        phone, and watch the check appear in the scan log. Print each page in turn to cover the
+        whole batch - or use the code list (CSV), which carries every unit at once.
       </p>
-      <div className="labels">
+
+      {/* Hidden in print, so only the labels themselves reach the paper. */}
+      <Pager page={page} pageSize={LABELS_PER_PAGE} total={data.total} onPage={go} />
+
+      <div className={`labels${busy ? ' is-busy' : ''}`}>
         {data.items.map((item) => (
           <div className="label-cell" key={item.id}>
             {/* The SVG comes from our own server-side QR renderer, not from

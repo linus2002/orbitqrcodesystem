@@ -482,6 +482,9 @@
 .label-cell svg { width: 100%; height: auto; max-width: 110px; }
 .label-cell .lc { font-family: var(--mono); font-size: 0.62rem; margin-top: 5px; word-break: break-all; line-height: 1.35; }
 .label-cell .lp { font-size: 0.6rem; color: #555; margin-top: 2px; }
+/* While a page of labels is being fetched. Dimmed rather than removed, so the
+   sheet does not collapse and shift the Print button under the cursor. */
+.labels.is-busy { opacity: 0.45; pointer-events: none; }
 
 @media print {
   .sidebar, .topbar, .toolbar, .pager, .no-print { display: none !important; }
@@ -489,6 +492,12 @@
   .view { padding: 0; }
   .card { border: 0; box-shadow: none; }
   .labels { grid-template-columns: repeat(4, 1fr); }
+  /* A page of labels now spans more than one sheet of paper, so a label must
+     not be split down the middle by a page break - half a QR scans as
+     nothing. Both spellings: the unprefixed one is still not universal. */
+  .label-cell { break-inside: avoid; page-break-inside: avoid; }
+  /* Dimming is a screen affordance; it must never reach the printer. */
+  .labels.is-busy { opacity: 1; }
 }
 
 /* --- Responsive ---------------------------------------------------------- */
