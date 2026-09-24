@@ -468,6 +468,118 @@ router.patch('/alerts/:id', requirePermission('alerts:write'), async (req, res) 
   res.json(updated);
 });
 
+/*
+ * Closing an alert by acting on its code.
+ *
+ * Both routes below change the code AND resolve the alert in one
+ * transaction, so a code can never be corrected while its alert stays open,
+ * or the other way round. Both require a reason, which becomes the alert's
+ * resolution note and goes into the audit trail - whoever operates this after
+ * handover will be asked who changed a code and why.
+ *
+ * Neither touches scan_count, verified_count or the scan history. Those are
+ * the evidence; correcting a status never rewrites it.
+ */
+
+/** Load an alert that is still open and has a code attached. */
+async function openAlertWithCode(id) {
+  const alert = await db.get(
+    `SELECT a.id, a.status, a.code_id, c.status AS code_status, c.verified_count,
+            b.status AS batch_status
+       FROM alerts a
+       LEFT JOIN codes c   ON c.id = a.code_id
+       LEFT JOIN batches b ON b.id = c.batch_id
+      WHERE a.id = ?`,
+    [id]
+  );
+  if (!alert) throw notFound('Alert not found');
+  if (alert.status === 'resolved' || alert.status === 'dismissed') {
+    throw conflict('This alert is already closed.');
+  }
+  if (!alert.code_id) {
+    // An unknown-code alert has no code row: there is nothing to correct.
+    throw badRequest('This alert is not linked to a code.');
+  }
+  return alert;
+}
+
+/**
+ * The status a flagged code returns to when the flag was a false positive.
+ *
+ * A code's `flagged` status is a label: verification never reads it, and
+ * re-evaluates batch, void, expiry and prior verifications on every scan. So
+ * clearing it changes nothing a patient sees - a second device scanning
+ * afterwards is flagged again by the duplicate rule, exactly as before.
+ */
+function unflaggedStatus({ verified_count: verified, batch_status: batch }) {
+  if (batch === 'recalled') return 'recalled'; // a recall always wins
+  if (verified > 0) return 'verified';
+  // Never verified: back to what its batch implies, not to "verified" - that
+  // would claim a successful check that never happened.
+  if (batch === 'codes_issued') return 'issued';
+  if (batch === 'printed') return 'printed';
+  return 'released';
+}
+
+const closingReason = (body) =>
+  validate(body, { reason: { type: 'string', required: true, min: 5, max: 300 } }).reason;
+
+/** Resolve an alert as a false positive, clearing its code's flag. */
+router.post('/alerts/:id/false-positive', requirePermission('alerts:write'), async (req, res) => {
+  const reason = closingReason(req.body);
+  const alert = await openAlertWithCode(Number(req.params.id));
+
+  if (alert.code_status === 'void') {
+    throw conflict('This code has been voided. A voided code cannot be cleared as a false positive.');
+  }
+
+  const from = alert.code_status;
+  const to = from === 'flagged' ? unflaggedStatus(alert) : from;
+  const note = `False positive: ${reason}`;
+
+  await db.tx(async () => {
+    if (to !== from) {
+      await db.run(`UPDATE codes SET status = ? WHERE id = ?`, [to, alert.code_id]);
+    }
+    await alertService.updateStatus(alert.id, { status: 'resolved', note, actor: req.user });
+  });
+
+  // No pack code in the detail: the id identifies it, and codes already
+  // reach too many places they should not.
+  if (to !== from) {
+    await audit.record({ actor: req.user, req, action: 'code.unflag', entityType: 'code', entityId: alert.code_id, detail: { alertId: alert.id, from, to, reason } });
+  }
+  await audit.record({ actor: req.user, req, action: 'alert.resolved', entityType: 'alert', entityId: alert.id, detail: { falsePositive: true, codeStatus: { from, to }, reason } });
+
+  res.json({ alert: await alertService.getById(alert.id), codeStatus: { from, to } });
+});
+
+/**
+ * Void the alert's code and resolve the alert - for a pack confirmed
+ * counterfeit, destroyed or stolen. Every later scan of it is refused.
+ * Needs batches:write as well, the permission the stand-alone void uses.
+ */
+router.post(
+  '/alerts/:id/void-code',
+  requirePermission('alerts:write'),
+  requirePermission('batches:write'),
+  async (req, res) => {
+    const reason = closingReason(req.body);
+    const alert = await openAlertWithCode(Number(req.params.id));
+    const from = alert.code_status;
+
+    await db.tx(async () => {
+      await db.run(`UPDATE codes SET status = 'void' WHERE id = ?`, [alert.code_id]);
+      await alertService.updateStatus(alert.id, { status: 'resolved', note: `Code voided: ${reason}`, actor: req.user });
+    });
+
+    await audit.record({ actor: req.user, req, action: 'code.void', entityType: 'code', entityId: alert.code_id, detail: { alertId: alert.id, from, reason } });
+    await audit.record({ actor: req.user, req, action: 'alert.resolved', entityType: 'alert', entityId: alert.id, detail: { codeVoided: true, reason } });
+
+    res.json({ alert: await alertService.getById(alert.id), codeStatus: { from, to: 'void' } });
+  }
+);
+
 // ===========================================================================
 // Consumer reports
 // ===========================================================================

@@ -186,7 +186,8 @@ export async function list({ page, pageSize, status, severity, type, batchId } =
 /** Full detail for one alert, including the scans that produced it. */
 export async function getById(id) {
   const alert = await db.get(
-    `SELECT a.*, c.code, c.scan_count, b.batch_number, b.expiry_date, p.name AS product_name, p.sku
+    `SELECT a.*, c.code, c.scan_count, c.status AS code_status, c.verified_count,
+            b.batch_number, b.expiry_date, b.status AS batch_status, p.name AS product_name, p.sku
        FROM alerts a
        LEFT JOIN codes c    ON c.id = a.code_id
        LEFT JOIN batches b  ON b.id = COALESCE(a.batch_id, c.batch_id)
