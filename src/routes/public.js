@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import * as db from '../db/index.js';
 import * as verification from '../services/verification.js';
 import * as alerts from '../services/alerts.js';
+import * as settingsService from '../services/settings.js';
 import { normalizeCode } from '../lib/codes.js';
 import { validate } from '../lib/validate.js';
 import { createLimiter, rateLimit } from '../lib/ratelimit.js';
@@ -194,6 +195,15 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
       'Thank you. Your report has been sent to the brand security team. ' +
       'Please keep the pack and its packaging - do not use the product.',
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/portal - what the public page shows that staff can change
+// ---------------------------------------------------------------------------
+router.get('/portal', async (req, res) => {
+  // The notice, the support number and the SMS shortcode. None is sensitive,
+  // and all three are read fresh so a change shows on the next page load.
+  res.json(await settingsService.portal());
 });
 
 // ---------------------------------------------------------------------------

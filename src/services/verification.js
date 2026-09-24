@@ -27,6 +27,7 @@ import { config } from '../config.js';
 import { parseCode, checkSignature } from '../lib/codes.js';
 import { pseudonymize } from '../lib/crypto.js';
 import * as alerts from './alerts.js';
+import * as settings from './settings.js';
 import logger from '../lib/logger.js';
 
 /**
@@ -278,7 +279,14 @@ export async function verify(rawCode, ctx = {}) {
   } else if (daysUntil(row.expiry_date) < 0) {
     result = 'flagged';
     reason = REASONS.EXPIRED;
-  } else if (row.verified_count > 0) {
+  } else if (
+    row.verified_count > 0 &&
+    // How many devices may verify a pack before it counts as a duplicate.
+    // Read only once a pack has been verified, so a first scan costs nothing
+    // extra. The default of 1 is exactly the rule this replaced
+    // (verified_count > 0): a second device is flagged.
+    row.verified_count >= (await settings.get('alerts.duplicate_threshold'))
+  ) {
     // Grace window: the same source re-checking the same pack is one event.
     const lastSameSource = await db.get(
       `SELECT created_at FROM scans

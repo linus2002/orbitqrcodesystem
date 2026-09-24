@@ -19,6 +19,7 @@ import * as authService from '../services/auth.js';
 import * as audit from '../services/audit.js';
 import * as importer from '../services/importer.js';
 import * as leaflets from '../services/leaflets.js';
+import * as settingsService from '../services/settings.js';
 import { validate } from '../lib/validate.js';
 import { buildWorkbook, sendWorkbook, readSheet } from '../lib/spreadsheet.js';
 import { normalizeCode, qrPayload } from '../lib/codes.js';
@@ -630,7 +631,9 @@ router.get('/compliance.csv', requirePermission('batches:read'), async (req, res
 
 router.get('/settings', requirePermission('dashboard:view'), async (req, res) => {
   res.json({
-    items: await db.all('SELECT * FROM settings ORDER BY key'),
+    // The defined settings only, each with its effective value - not raw
+    // table rows, so a stray key can never appear as if it did something.
+    items: await settingsService.list(),
     runtime: {
       environment: config.env,
       publicBaseUrl: config.publicBaseUrl,
@@ -641,16 +644,17 @@ router.get('/settings', requirePermission('dashboard:view'), async (req, res) =>
   });
 });
 
+/**
+ * Change one setting. Only defined keys, each validated by its own rule in
+ * services/settings.js. The audit entry records the value before and after,
+ * so a change to how duplicates are detected is always traceable.
+ */
 router.patch('/settings/:key', requirePermission('settings:write'), async (req, res) => {
-  const { value } = validate(req.body, { value: { type: 'string', required: true, max: 500 } });
-  await db.run(
-    `INSERT INTO settings (key, value, updated_by, updated_at)
-     VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-    [req.params.key, value, req.user.id]
-  );
-  await audit.record({ actor: req.user, req, action: 'settings.update', entityType: 'setting', entityId: req.params.key, detail: { value } });
-  res.json(await db.get('SELECT * FROM settings WHERE key = ?', [req.params.key]));
+  if (!req.body || !('value' in req.body)) throw badRequest('A value is required.');
+  // An empty string is a real value here: it hides the portal notice.
+  const change = await settingsService.update(req.params.key, req.body.value, { actor: req.user });
+  await audit.record({ actor: req.user, req, action: 'settings.update', entityType: 'setting', entityId: change.key, detail: { from: change.from, to: change.to } });
+  res.json((await settingsService.list()).find((s) => s.key === change.key));
 });
 
 // ===========================================================================
