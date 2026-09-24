@@ -14,6 +14,7 @@
  * would be actively dangerous.
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { fmtDate } from '../lib/format.js';
 import { Icon } from '../components/Icons.jsx';
 import ReportForm from './ReportForm.jsx';
@@ -44,6 +45,19 @@ export default function ResultCard({ result, onCheckAnother }) {
       {genuine && result.leaflet && <Leaflet leaflet={result.leaflet} />}
 
       <div className="card-body">
+        {/* The accordion above shows the current leaflet; the full page also
+            carries earlier versions, and is where a reader who wants them
+            goes. Linked rather than repeated here - the result card is
+            already the longest thing on a phone screen. */}
+        {genuine && result.leaflet && result.product?.sku && (
+          <p className="text-sm text-muted">
+            <Link to={`/leaflet/${encodeURIComponent(result.product.sku)}`}>
+              Read the full leaflet
+            </Link>
+            , including any earlier versions.
+          </p>
+        )}
+
         {genuine && result.batch?.expiringSoon && (
           <div className="alert alert-warn mt-16">
             <Icon name="alert" />

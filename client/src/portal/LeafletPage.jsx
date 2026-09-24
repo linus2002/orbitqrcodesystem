@@ -9,6 +9,12 @@
  * a link printed on packaging, and packaging is exactly what a counterfeiter
  * copies - so this page says nothing about authenticity and instead points at
  * the check that does, which needs the unique code on the pack.
+ *
+ * Versions. Publishing a new leaflet supersedes the old one, and this page
+ * shows the newest by default: a safety correction has to reach everyone
+ * holding the medicine, including packs printed before it. Older versions
+ * are reachable by ?version= and are marked as superseded ABOVE the content,
+ * so nobody reads outdated dosing without being told first.
  */
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -19,15 +25,29 @@ import { Icon } from '../components/Icons.jsx';
 import { Logo } from '../components/Logo.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
 
+/**
+ * The address of one version of a leaflet - or of the current one when no
+ * version is given. The current version's address carries no version, so it
+ * is the same address the QR encodes and never goes stale.
+ */
+function leafletHref(sku, { lang, version } = {}) {
+  const q = new URLSearchParams();
+  if (lang && lang !== 'en') q.set('lang', lang);
+  if (version) q.set('version', version);
+  const s = q.toString();
+  return `/leaflet/${encodeURIComponent(sku)}${s ? `?${s}` : ''}`;
+}
+
 export default function LeafletPage() {
   const { sku } = useParams();
   const [params] = useSearchParams();
   const lang = params.get('lang') ?? 'en';
+  const version = params.get('version') ?? undefined;
 
   const { data, error, loading } = useApi(
     `/api/product/${encodeURIComponent(sku)}/leaflet`,
-    { query: { lang } },
-    [sku, lang]
+    { query: { lang, version } },
+    [sku, lang, version]
   );
 
   return (
@@ -48,11 +68,18 @@ export default function LeafletPage() {
             <div className="alert alert-warn">
               <Icon name="alert" />
               <span>
-                {error.status === 404
-                  ? 'There is no published leaflet for this medicine yet.'
-                  : 'The leaflet could not be loaded. Please try again.'}
+                {error.status === 404 && version
+                  ? 'That version of the leaflet is not available.'
+                  : error.status === 404
+                    ? 'There is no published leaflet for this medicine yet.'
+                    : 'The leaflet could not be loaded. Please try again.'}
               </span>
             </div>
+            {error.status === 404 && version && (
+              <p className="text-sm text-muted mt-16">
+                <Link to={leafletHref(sku, { lang })}>Read the current version instead</Link>.
+              </p>
+            )}
             <p className="text-sm text-muted mt-16">
               If you were checking whether a pack is genuine, use the code printed on the pack
               itself - <Link to="/">check a pack here</Link>.
@@ -60,14 +87,18 @@ export default function LeafletPage() {
           </div>
         )}
 
-        {data && <LeafletBody data={data} />}
+        {/* Keyed on the version so the open-section state resets when the
+            reader switches versions - section 4 of one version is not
+            section 4 of another. */}
+        {data && <LeafletBody key={data.leaflet.version} data={data} lang={lang} />}
       </main>
     </>
   );
 }
 
-function LeafletBody({ data }) {
-  const { product, leaflet } = data;
+function LeafletBody({ data, lang }) {
+  const { product, leaflet, history = [] } = data;
+  const current = history.find((h) => h.current);
   // The first section starts open: a leaflet that opens fully collapsed looks
   // like an empty page on a phone.
   const [open, setOpen] = useState(0);
@@ -100,10 +131,39 @@ function LeafletBody({ data }) {
         </div>
       </div>
 
+      {/*
+        Also before the content, for the same reason. A superseded leaflet is
+        the one thing on this page that could mislead someone about their
+        medicine, and it must be impossible to reach the dosing text without
+        passing this.
+      */}
+      {leaflet.superseded && (
+        <div className="card-body pt-0">
+          <div className="alert alert-warn" role="status">
+            <Icon name="alert" />
+            <span>
+              You are reading an <strong>older version</strong> of this leaflet (v{leaflet.version},
+              effective {fmtDate(leaflet.effectiveFrom)}). It has been replaced
+              {current ? (
+                <>
+                  {' '}by version {current.version} -{' '}
+                  <Link to={leafletHref(product.sku, { lang })}>read the current version</Link>.
+                </>
+              ) : (
+                '.'
+              )}
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="leaflet">
         <div className="card-head">
           <h2>Patient information leaflet</h2>
-          <span className="badge badge-neutral">v{leaflet.version}</span>
+          <span className={`badge ${leaflet.superseded ? 'badge-warn' : 'badge-neutral'}`}>
+            v{leaflet.version}
+            {leaflet.superseded ? ' · superseded' : ''}
+          </span>
         </div>
 
         {leaflet.sections.map((section, i) => (
@@ -130,9 +190,38 @@ function LeafletBody({ data }) {
       <div className="card-body">
         <p className="text-sm text-muted">
           Leaflet version {leaflet.version}
-          {data.leaflet.effectiveFrom ? `, effective ${fmtDate(data.leaflet.effectiveFrom)}` : ''}.
+          {leaflet.effectiveFrom ? `, effective ${fmtDate(leaflet.effectiveFrom)}` : ''}.
           Always follow the advice of your doctor or pharmacist.
         </p>
+
+        {/* Only offered when there is more than one version to choose from;
+            a single-version leaflet has no history to show. */}
+        {history.length > 1 && (
+          <div className="mt-16">
+            <p className="text-sm">
+              <strong>Versions of this leaflet</strong>
+            </p>
+            {history.map((h) => (
+              <p className="text-sm text-muted mt-8" key={h.version}>
+                {h.version === leaflet.version ? (
+                  <span>v{h.version}</span>
+                ) : (
+                  <Link
+                    to={leafletHref(product.sku, {
+                      lang,
+                      version: h.current ? undefined : h.version,
+                    })}
+                  >
+                    v{h.version}
+                  </Link>
+                )}
+                {' - '}
+                {h.current ? 'current' : 'superseded'}, effective {fmtDate(h.effectiveFrom)}
+                {h.version === leaflet.version ? ' (you are reading this one)' : ''}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
     </article>
   );
