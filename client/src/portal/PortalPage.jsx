@@ -32,6 +32,21 @@ export default function PortalPage() {
   const [notice, setNotice] = useState(null);
   const [fieldError, setFieldError] = useState(null);
 
+  // What staff can change from Settings: a notice, the support number and
+  // the SMS shortcode. The page works without it - if this request fails,
+  // the notice is simply absent and the shortcode falls back to its default.
+  const [portal, setPortal] = useState(null);
+  useEffect(() => {
+    let active = true;
+    api('/api/portal')
+      .then((p) => active && setPortal(p))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+  const shortcode = portal?.smsShortcode || '32123';
+
   const resultRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -166,6 +181,15 @@ export default function PortalPage() {
             </div>
           </section>
 
+          {/* Staff-set notice, e.g. a recall. Plain text only - rendered as a
+              text node, never as markup. */}
+          {portal?.banner && (
+            <div className="alert alert-info mb-16" role="status">
+              <Icon name="alert" />
+              <span>{portal.banner}</span>
+            </div>
+          )}
+
           {notice && (
             <div className={`alert alert-${notice.kind} mb-16`} role="status">
               <Icon name={notice.kind === 'error' ? 'alert' : 'help'} />
@@ -266,7 +290,13 @@ export default function PortalPage() {
               {/* The answer belongs with the form that produced it, so it
                   stays in the left column rather than below both. */}
               <section className="result" ref={resultRef} aria-live="polite" aria-atomic="true">
-                {result && <ResultCard result={result} onCheckAnother={reset} />}
+                {result && (
+                  <ResultCard
+                    result={result}
+                    onCheckAnother={reset}
+                    supportPhone={portal?.supportPhone}
+                  />
+                )}
               </section>
             </div>
 
@@ -276,7 +306,7 @@ export default function PortalPage() {
                   <Icon name="message" /> No internet?
                 </h3>
                 <p>
-                  Text the code to <span className="mono">32123</span> and you will get the same
+                  Text the code to <span className="mono">{shortcode}</span> and you will get the same
                   answer by SMS. Standard message rates apply.
                 </p>
               </article>

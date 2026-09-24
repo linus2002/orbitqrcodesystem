@@ -61,7 +61,16 @@ export default function Settings() {
           rowKey={(s) => s.key}
           empty="No stored settings."
           columns={[
-            { label: 'Key', render: (s) => <span className="mono text-sm">{s.key}</span> },
+            {
+              label: 'Setting',
+              render: (s) => (
+                <>
+                  {s.label}
+                  <br />
+                  <span className="mono text-sm text-muted">{s.key}</span>
+                </>
+              ),
+            },
             {
               label: 'Value',
               render: (s) =>
@@ -73,7 +82,22 @@ export default function Settings() {
             },
             {
               label: 'What it does',
-              render: (s) => <span className="text-sm text-muted">{s.description ?? ''}</span>,
+              render: (s) => (
+                <span className="text-sm text-muted">
+                  {s.description ?? ''}
+                  {/* Stated where the change is made, not only in the docs:
+                      this is the one setting that weakens detection. */}
+                  {s.key === 'alerts.duplicate_threshold' && Number(s.value) > 1 && (
+                    <>
+                      <br />
+                      <strong className="bl-flag">
+                        Currently {s.value}: a pack can be verified on {s.value} devices before it
+                        is flagged.
+                      </strong>
+                    </>
+                  )}
+                </span>
+              ),
             },
           ]}
         />
@@ -102,25 +126,64 @@ export default function Settings() {
   );
 }
 
-/** Saves on blur, so typing does not fire a request per keystroke. */
+/**
+ * Text settings save on blur, so typing does not fire a request per
+ * keystroke. Whole-number settings are a picker over their allowed range, so
+ * an out-of-range value cannot be typed at all; the server checks it anyway.
+ */
 function SettingInput({ setting }) {
   const toast = useToast();
   const [value, setValue] = useState(setting.value);
   const [saved, setSaved] = useState(setting.value);
 
-  async function save() {
-    if (value === saved) return;
+  async function save(next = value) {
+    if (next === saved) return;
     try {
-      await api(`/api/admin/settings/${encodeURIComponent(setting.key)}`, {
+      const updated = await api(`/api/admin/settings/${encodeURIComponent(setting.key)}`, {
         method: 'PATCH',
-        body: { value },
+        body: { value: next },
       });
-      setSaved(value);
+      // The server normalises (trims, parses), so show what it stored.
+      setValue(updated.value);
+      setSaved(updated.value);
       toast('Setting saved.', 'success');
     } catch (err) {
       toast(err.message, 'error');
       setValue(saved);
     }
+  }
+
+  if (setting.kind === 'int') {
+    const options = [];
+    for (let n = setting.min; n <= setting.max; n++) options.push(String(n));
+    return (
+      <select
+        className="select input-inline"
+        id={`setting-${setting.key}`}
+        value={value}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (
+            setting.key === 'alerts.duplicate_threshold' &&
+            Number(next) > Number(saved) &&
+            !window.confirm(
+              `Allow a pack to be verified on ${next} devices before it is flagged? ` +
+                'A cloned pack would pass more checks before anyone is alerted.'
+            )
+          ) {
+            return;
+          }
+          setValue(next);
+          save(next);
+        }}
+      >
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
   }
 
   return (
@@ -129,7 +192,7 @@ function SettingInput({ setting }) {
       value={value}
       maxLength={500}
       onChange={(e) => setValue(e.target.value)}
-      onBlur={save}
+      onBlur={() => save()}
       onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
     />
   );

@@ -25,7 +25,7 @@ const PRESENTATION = {
   invalid: { cls: 'banner-invalid', icon: 'help', heading: 'Check the code' },
 };
 
-export default function ResultCard({ result, onCheckAnother }) {
+export default function ResultCard({ result, onCheckAnother, supportPhone }) {
   const [reporting, setReporting] = useState(false);
   const presentation = PRESENTATION[result.result] ?? PRESENTATION.invalid;
   const genuine = result.result === 'genuine';
@@ -73,6 +73,13 @@ export default function ResultCard({ result, onCheckAnother }) {
           <p className="text-sm text-muted mb-8">
             Keep the pack and its packaging. Reporting it helps the manufacturer trace where it came
             from.
+          </p>
+        )}
+
+        {/* Someone told not to use their medicine needs a person to talk to. */}
+        {!genuine && supportPhone && (
+          <p className="text-sm mb-8">
+            Questions? Call <strong className="mono">{supportPhone}</strong>.
           </p>
         )}
 
