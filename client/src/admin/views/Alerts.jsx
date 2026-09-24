@@ -195,6 +195,43 @@ function AlertActions({ alert, drawer, reload }) {
     return <p className="text-sm text-muted">This alert is closed.</p>;
   }
 
+  /*
+   * Acting on the code closes the alert in the same step, server-side and in
+   * one transaction. The investigation note doubles as the reason, so these
+   * need a real one - five characters, the same floor as any code change.
+   */
+  async function actOnCode(kind) {
+    const reason = document.getElementById('alertNote')?.value.trim() ?? '';
+    if (reason.length < 5) {
+      toast('Write in the investigation note why - it is recorded as the reason.', 'error');
+      document.getElementById('alertNote')?.focus();
+      return;
+    }
+    if (
+      kind === 'void-code' &&
+      !window.confirm('Void this code? Every future scan of it will be refused. This cannot be undone here.')
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await api(`/api/admin/alerts/${alert.id}/${kind}`, { method: 'POST', body: { reason } });
+      toast(kind === 'void-code' ? 'Code voided and alert resolved.' : 'Resolved as a false positive.', 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      toast(err.message, 'error');
+      setBusy(false);
+    }
+  }
+
+  // Only offered where they mean something: the alert must point at a code,
+  // and a voided code cannot be cleared.
+  const hasCode = Boolean(alert.code_id);
+  const canClear = hasCode && alert.code_status !== 'void';
+  const canVoid = hasCode && alert.code_status !== 'void';
+
   async function act(status) {
     // The note lives in the drawer body, which is a sibling subtree; reading
     // it from the DOM keeps the textarea uncontrolled and avoids re-rendering
@@ -233,6 +270,26 @@ function AlertActions({ alert, drawer, reload }) {
       <button className="btn btn-sm" disabled={busy} onClick={() => act('dismissed')}>
         Dismiss
       </button>
+      {canClear && (
+        <button
+          className="btn btn-sm"
+          disabled={busy}
+          onClick={() => actOnCode('false-positive')}
+          title="The pack is genuine. Clears the code's flag and resolves this alert. A later scan from another device is still flagged as a duplicate."
+        >
+          Resolve as false positive
+        </button>
+      )}
+      {canVoid && (
+        <button
+          className="btn btn-sm btn-danger"
+          disabled={busy}
+          onClick={() => actOnCode('void-code')}
+          title="The pack is counterfeit, destroyed or stolen. Every future scan of this code is refused."
+        >
+          Void this code
+        </button>
+      )}
     </div>
   );
 }
