@@ -160,7 +160,26 @@ router.patch('/products/:id', requirePermission('products:write'), async (req, r
   res.json(await db.get('SELECT * FROM products WHERE id = ?', [product.id]));
 });
 
-/** Publish a new leaflet version for a product. */
+/**
+ * Publish a new leaflet version for a product - and for the other products
+ * the same document covers.
+ *
+ * One real-world leaflet routinely spans several strengths of a medicine:
+ * Beltro-25 and Beltro-50 share a single document. But a leaflet row belongs
+ * to one product. So a publish may name the other products the document
+ * covers, and writes one row per product with identical version, language
+ * and content, in ONE transaction - either every strength gets the new
+ * version or none does, so two strengths of one medicine can never end up
+ * telling patients different things.
+ *
+ * The grouping is not stored: the shared version string IS the grouping.
+ * That keeps the schema unchanged, and the form reconstructs the set on the
+ * next revision from whichever products share the current version.
+ *
+ * A reason is required and goes into the audit trail. Whoever operates this
+ * after handover will be asked by an inspector who changed a leaflet and why,
+ * and the answer has to already be in the log.
+ */
 router.post('/products/:id/leaflets', requirePermission('products:write'), async (req, res) => {
   const product = await db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
   if (!product) throw notFound('Product not found');
@@ -169,19 +188,79 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
     version: { type: 'string', required: true, max: 20 },
     language: { type: 'string', max: 8, default: 'en' },
     sections: { type: 'array', required: true, max: 40 },
+    // Same bounds as a code void: long enough to mean something, short enough
+    // to read in the audit log.
+    reason: { type: 'string', required: true, min: 5, max: 300 },
+    alsoApplyTo: { type: 'array', max: 50 },
   });
 
   for (const s of data.sections) {
     if (!s?.heading || !s?.body) throw badRequest('Every leaflet section needs a heading and a body.');
   }
 
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?,?,?,?)`,
-    [product.id, data.version, data.language, JSON.stringify(data.sections)]
-  );
+  // Every product this document covers: the named one first, no repeats.
+  const extraIds = (data.alsoApplyTo ?? []).map((v) => Number.parseInt(v, 10));
+  if (extraIds.some((n) => !Number.isInteger(n) || n <= 0)) {
+    throw badRequest('alsoApplyTo must be a list of product ids.');
+  }
+  const ids = [...new Set([product.id, ...extraIds])];
+  const marks = ids.map(() => '?').join(',');
 
-  await audit.record({ actor: req.user, req, action: 'leaflet.publish', entityType: 'leaflet', entityId: lastInsertRowid, detail: { sku: product.sku, version: data.version } });
-  res.status(201).json(await db.get('SELECT * FROM leaflets WHERE id = ?', [lastInsertRowid]));
+  const products = await db.all(`SELECT id, sku FROM products WHERE id IN (${marks})`, ids);
+  if (products.length !== ids.length) {
+    throw badRequest('One of the products to publish to does not exist.');
+  }
+  products.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+
+  /*
+   * Checked up front and named, rather than left to the UNIQUE constraint:
+   * a constraint failure would be a 500 that says nothing about which
+   * strength already had the version, and with several products in one
+   * publish that is the first thing the person needs to know.
+   */
+  const taken = await db.all(
+    `SELECT p.sku FROM leaflets l JOIN products p ON p.id = l.product_id
+      WHERE l.product_id IN (${marks}) AND l.version = ? AND l.language = ?`,
+    [...ids, data.version, data.language]
+  );
+  if (taken.length) {
+    throw conflict(
+      `Version ${data.version} (${data.language}) already exists for ` +
+        `${taken.map((t) => t.sku).join(', ')}. Use a new version number.`
+    );
+  }
+
+  const sectionsJson = JSON.stringify(data.sections);
+  const coverage = await db.tx(async () => {
+    const rows = [];
+    for (const p of products) {
+      const { lastInsertRowid } = await db.run(
+        `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?,?,?,?)`,
+        [p.id, data.version, data.language, sectionsJson]
+      );
+      rows.push({ leafletId: lastInsertRowid, productId: p.id, sku: p.sku });
+    }
+    return rows;
+  });
+
+  // One entry per product, so the trail for any single SKU is complete on its
+  // own - and each names the whole set, so the grouping is on record even
+  // though the schema does not store it.
+  const covers = coverage.map((c) => c.sku);
+  for (const c of coverage) {
+    await audit.record({
+      actor: req.user,
+      req,
+      action: 'leaflet.publish',
+      entityType: 'leaflet',
+      entityId: c.leafletId,
+      detail: { sku: c.sku, version: data.version, language: data.language, reason: data.reason, covers },
+    });
+  }
+
+  // The named product's row, as before, plus what else was written.
+  const primary = await db.get('SELECT * FROM leaflets WHERE id = ?', [coverage[0].leafletId]);
+  res.status(201).json({ ...primary, coverage });
 });
 
 // ===========================================================================

@@ -4,10 +4,10 @@
  * The SKU is immutable once created: it is embedded in every code already
  * printed on packs, so changing it would orphan them.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { api } from '../../lib/api.js';
-import { useApi, usePermission, useToast } from '../../lib/hooks.jsx';
+import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
@@ -253,8 +253,45 @@ function PublishLeafletForm({ product, drawer, reload }) {
   const [version, setVersion] = useState('');
   const [language, setLanguage] = useState('en');
   const [sections, setSections] = useState([emptySection()]);
+  const [reason, setReason] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  /*
+   * The other products this document covers. One leaflet usually spans every
+   * strength of a medicine, and the product list with each one's current
+   * version is what lets the form pre-tick the siblings: whichever products
+   * share this product's current version were published together last time.
+   *
+   * `null` until that list arrives, so the pre-selection is applied exactly
+   * once and a later refetch (the language changed) never overwrites what
+   * the person has since ticked or unticked.
+   */
+  const [extra, setExtra] = useState(null);
+  const lang = useDebounced(language.trim() || 'en');
+  const { data: list, error: listError, loading: listLoading } = useApi(
+    '/api/admin/leaflet-codes',
+    { query: { lang } },
+    [lang]
+  );
+
+  useEffect(() => {
+    if (extra !== null || !list) return;
+    const mine = list.items.find((p) => p.id === product.id)?.leaflet_version ?? null;
+    const siblings = mine
+      ? list.items.filter((p) => p.id !== product.id && p.leaflet_version === mine).map((p) => p.id)
+      : [];
+    setExtra(new Set(siblings));
+  }, [list, extra, product.id]);
+
+  const selected = extra ?? new Set();
+  const toggle = (id, on) =>
+    setExtra((s) => {
+      const next = new Set(s ?? []);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   const setSection = (i, key, value) =>
     setSections((s) => s.map((row, n) => (n === i ? { ...row, [key]: value } : row)));
@@ -277,12 +314,22 @@ function PublishLeafletForm({ product, drawer, reload }) {
       setError('Every section needs both a heading and a body.');
       return;
     }
+    if (reason.trim().length < 5) {
+      setError('Say why this version is being published - it goes in the audit log.');
+      return;
+    }
 
     setBusy(true);
     try {
       await api(`/api/admin/products/${product.id}/leaflets`, {
         method: 'POST',
-        body: { version: version.trim(), language: language.trim() || 'en', sections: cleaned },
+        body: {
+          version: version.trim(),
+          language: language.trim() || 'en',
+          sections: cleaned,
+          reason: reason.trim(),
+          alsoApplyTo: [...selected],
+        },
       });
       toast('Leaflet published.', 'success');
       drawer.close();
@@ -375,14 +422,70 @@ function PublishLeafletForm({ product, drawer, reload }) {
         )}
       </div>
 
+      <div className="field">
+        <label className="label">Also applies to</label>
+        <p className="hint mb-8">
+          One leaflet usually covers every strength of a medicine. Tick the other products this
+          document covers and they all receive this version together, so no two strengths can end
+          up saying different things. Products already sharing the current version are ticked for
+          you.
+        </p>
+        {listLoading && !list && <p className="text-sm text-muted">Loading products...</p>}
+        {listError && (
+          <p className="text-sm text-muted">
+            The product list could not be loaded, so this publishes to {product.sku} only.
+          </p>
+        )}
+        {list &&
+          list.items
+            .filter((p) => p.id !== product.id)
+            .map((p) => (
+              <label className="row text-sm" key={p.id}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(p.id)}
+                  onChange={(e) => toggle(p.id, e.target.checked)}
+                />{' '}
+                <span className="mono">{p.sku}</span> {p.name}
+                {p.strength ? ` ${p.strength}` : ''}
+                <span className="text-muted">
+                  {p.leaflet_version ? ` - currently v${p.leaflet_version}` : ' - no leaflet yet'}
+                </span>
+              </label>
+            ))}
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="lf-reason">Reason for this version</label>
+        <textarea
+          className="textarea"
+          id="lf-reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={300}
+          placeholder="What changed and why - a corrected dose, a new warning, a regulatory update."
+        />
+        <p className="hint">
+          Recorded in the audit log against your account. It is what an inspector will read.
+        </p>
+      </div>
+
       <p className="hint">
         Publishing takes effect immediately: the leaflet QR already printed for this medicine points
-        at a fixed address, so it will start opening this version. Existing versions are kept.
+        at a fixed address, so it will start opening this version. Existing versions are kept and
+        stay readable, marked as superseded.
       </p>
 
       {error && <p className="field-error" role="alert">{error}</p>}
 
-      <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
+      {/* Held until the product list has loaded (or failed), so a quick
+          submit cannot skip the pre-ticked siblings and split a medicine's
+          strengths onto different versions. */}
+      <button
+        className="btn btn-primary btn-block"
+        type="submit"
+        disabled={busy || (listLoading && !list && !listError)}
+      >
         {busy ? 'Publishing...' : 'Publish leaflet'}
       </button>
     </form>
