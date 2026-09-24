@@ -9,10 +9,30 @@
 // MUST be first: it sets the test environment before config.js is evaluated.
 import './setup-env.js';
 
+import { after } from 'node:test';
+
 import * as db from '../src/db/index.js';
 import { config } from '../src/config.js';
 import { hashPassword } from '../src/lib/crypto.js';
 import * as serialization from '../src/services/serialization.js';
+
+/*
+ * Close the database when a test file finishes.
+ *
+ * freshDb() closes the previous connection before opening the next, but
+ * nothing closed the last one, so every test process exited holding a live
+ * native libSQL connection - and occasionally segfaulted tearing it down
+ * (exit 139 after every test had passed, reported only as 'test failed').
+ * Seen in about 1 full-suite run in 5, and only under load: 3 crashes in 96
+ * parallel runs of verification.test.js as it was, 0 in 96 with this.
+ *
+ * Registered here, at the top level of the shared helper, so it applies once
+ * to every file that imports it - which is every file that opens a database.
+ * Closing is idempotent, so files that close things themselves are unaffected.
+ */
+after(async () => {
+  await db.close();
+});
 
 /**
  * A clean database for one test.
