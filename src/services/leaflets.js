@@ -25,6 +25,23 @@ import { config, LOCAL_BASE_URL_WARNING } from '../config.js';
 import { notFound } from '../lib/errors.js';
 import logger from '../lib/logger.js';
 
+/**
+ * The id of a product's current leaflet, or null if none is published.
+ *
+ * Recorded on a batch when it is created, as the version it shipped with -
+ * whether the batch is created in the dashboard or imported from a sheet, so
+ * both paths agree. Same ordering as the public page, so "current" means the
+ * same thing everywhere.
+ */
+export async function currentLeafletId(productId, { lang = 'en' } = {}) {
+  const row = await db.get(
+    `SELECT id FROM leaflets WHERE product_id = ? AND language = ?
+      ORDER BY effective_from DESC, id DESC LIMIT 1`,
+    [productId, lang]
+  );
+  return row?.id ?? null;
+}
+
 /** The public address a leaflet QR points at. */
 export function leafletUrl(sku, { lang } = {}) {
   const base = `${config.publicBaseUrl}/leaflet/${encodeURIComponent(String(sku).toUpperCase())}`;
@@ -123,4 +140,4 @@ export async function leafletSheet({ lang = 'en' } = {}) {
   );
 }
 
-export default { leafletUrl, listLeafletCodes, leafletQrSvg, leafletQrDataUrl, leafletSheet };
+export default { currentLeafletId, leafletUrl, listLeafletCodes, leafletQrSvg, leafletQrDataUrl, leafletSheet };

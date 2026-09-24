@@ -7,7 +7,7 @@ import * as authService from '../services/auth.js';
 import { validate } from '../lib/validate.js';
 import { createLimiter, rateLimit } from '../lib/ratelimit.js';
 import { requireAuth, requireCsrf } from '../middleware/auth.js';
-import { badRequest } from '../lib/errors.js';
+import { badRequest, validationFailed } from '../lib/errors.js';
 
 const router = Router();
 
@@ -137,8 +137,18 @@ function checkAvatar(value) {
 }
 
 router.patch('/profile', requireAuth, requireCsrf, async (req, res) => {
+  /*
+   * A name cannot be blanked. The form already says so, but the endpoint is
+   * reachable directly. Two cases: a name of only spaces is trimmed to
+   * nothing, which `min` catches; an empty string counts as "not supplied" to
+   * validate() and would be silently ignored, so it is refused here instead -
+   * someone clearing their name should be told no, not shown a success.
+   */
+  if (typeof req.body?.fullName === 'string' && req.body.fullName.trim() === '') {
+    throw validationFailed([{ field: 'fullName', message: 'cannot be empty' }]);
+  }
   const data = validate(req.body, {
-    fullName: { type: 'string', max: 120 },
+    fullName: { type: 'string', min: 1, max: 120 },
     // `avatar` is handled outside validate(): it is a data URL, not a field
     // shape the validator knows about.
   });

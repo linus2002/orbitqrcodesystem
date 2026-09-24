@@ -22,6 +22,7 @@ import * as audit from './audit.js';
 import { validate } from '../lib/validate.js';
 import { cellText, cellDate, cellInt, cellBool } from '../lib/spreadsheet.js';
 import { MAX_BATCH_QUANTITY } from './serialization.js';
+import { currentLeafletId } from './leaflets.js';
 
 /**
  * Column headings accepted for each field.
@@ -291,11 +292,13 @@ export async function importBatches(sheetRows, { actor, req, dryRun = false } = 
 
   let created = 0;
   for (const p of planned) {
+    // Recorded the same way as a batch created in the dashboard: the
+    // product's current leaflet, as the one this batch shipped with.
     await db.run(
-      `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, notes)
-       VALUES (?,?,?,?,?,?,?)`,
+      `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, notes, leaflet_id)
+       VALUES (?,?,?,?,?,?,?,?)`,
       [p.data.batchNumber, p.productId, p.data.mfgDate, p.data.expiryDate,
-       p.data.quantity, p.isTest ? 1 : 0, p.notes || null]
+       p.data.quantity, p.isTest ? 1 : 0, p.notes || null, await currentLeafletId(p.productId)]
     );
     created += 1;
   }

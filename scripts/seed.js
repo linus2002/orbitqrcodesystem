@@ -451,13 +451,15 @@ console.log(`\n  Live verification test: ${liveCode.code} -> ${liveResult.result
 // Summary
 // ---------------------------------------------------------------------------
 console.log('\n' + '-'.repeat(62));
-console.log('  Sign in at http://localhost:3000/login');
+// The configured address, not a fixed port: with PORT=4000 a hardcoded
+// localhost:3000 sent people to a dead port straight after the credentials.
+console.log(`  Sign in at ${config.publicBaseUrl}/login`);
 console.log('-'.repeat(62));
 for (const u of users) {
   console.log(`  ${u.role.padEnd(10)} ${u.email.padEnd(32)} ${u.password}`);
 }
 console.log('-'.repeat(62));
-console.log('\n  Try these codes on the public portal at http://localhost:3000\n');
+console.log(`\n  Try these codes on the public portal at ${config.publicBaseUrl}\n`);
 const samples = [
   ['GENUINE (unused)', (await codesOf('AMX25-2608A', 1, 1100))[0].code],
   ['GENUINE (unused)', (await codesOf('PCM50-2609A', 1, 800))[0].code],

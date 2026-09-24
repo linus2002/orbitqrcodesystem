@@ -132,6 +132,36 @@ test('batches resolve their product by SKU and accept a comma in the quantity', 
   assert.equal(await db.scalar('SELECT status FROM batches'), 'planned');
 });
 
+test('an imported batch records the product\'s current leaflet, as a dashboard batch does', async () => {
+  await importProducts(
+    await sheetFrom(['SKU', 'Name', 'Manufacturer'], [['AMX25', 'Amoxicillin', 'North'], ['NOLF1', 'No Leaflet', 'North']]),
+    {}
+  );
+  const amx = await db.scalar(`SELECT id FROM products WHERE sku = 'AMX25'`);
+  await db.run(
+    `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?, '1.0', 'en', '[{"heading":"H","body":"B"}]')`,
+    [amx]
+  );
+  const leaflet = await db.scalar('SELECT id FROM leaflets');
+
+  const rows = await sheetFrom(
+    ['Product SKU', 'Batch number', 'Manufacturing date', 'Expiry date', 'Quantity'],
+    [
+      ['AMX25', 'AMX25-2609A', '2026-09-01', '2028-09-01', 100],
+      ['NOLF1', 'NOLF1-2609A', '2026-09-01', '2028-09-01', 100],
+    ]
+  );
+  const result = await importBatches(rows, {});
+
+  assert.equal(result.created, 2, result.errors.map((e) => e.message).join('; '));
+  assert.equal(await db.scalar(`SELECT leaflet_id FROM batches WHERE batch_number = 'AMX25-2609A'`), leaflet);
+  assert.equal(
+    await db.scalar(`SELECT leaflet_id FROM batches WHERE batch_number = 'NOLF1-2609A'`),
+    null,
+    'a product with no leaflet still imports, with none'
+  );
+});
+
 test('a batch for an unknown product is refused with a usable message', async () => {
   const rows = await sheetFrom(
     ['Product SKU', 'Batch number', 'Manufacturing date', 'Expiry date', 'Quantity'],
