@@ -100,15 +100,28 @@ function daysUntil(isoDate) {
   return Math.ceil((target - Date.now()) / 86400000);
 }
 
-/** Shape the public leaflet payload. */
+/**
+ * Shape the public leaflet payload: the CURRENT leaflet for the medicine.
+ *
+ * Deliberately not the one pinned on the batch. A leaflet correction has to
+ * reach everyone holding the medicine, including packs printed before it -
+ * a newly added warning is for exactly the people holding the older stock,
+ * and showing them the leaflet as it stood when their box was packed would
+ * hide it from them. So a scan of any batch, however old, opens the newest
+ * version, the same one the leaflet QR on the carton opens.
+ *
+ * `batches.leaflet_id` is kept and still written: it records which version
+ * shipped with a batch, which is an audit question, not a display one.
+ *
+ * English only here, as it was: a pack scan carries no language, and the
+ * leaflet page is where a reader chooses one.
+ */
 async function loadLeaflet(batch) {
-  const leaflet = batch.leaflet_id
-    ? await db.get('SELECT * FROM leaflets WHERE id = ?', [batch.leaflet_id])
-    : await db.get(
-        `SELECT * FROM leaflets WHERE product_id = ? AND language = 'en'
-          ORDER BY effective_from DESC LIMIT 1`,
-        [batch.product_id]
-      );
+  const leaflet = await db.get(
+    `SELECT * FROM leaflets WHERE product_id = ? AND language = 'en'
+      ORDER BY effective_from DESC, id DESC LIMIT 1`,
+    [batch.product_id]
+  );
   if (!leaflet) return null;
   let sections = [];
   try {

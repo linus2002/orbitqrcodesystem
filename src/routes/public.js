@@ -205,12 +205,39 @@ router.get('/product/:sku/leaflet', async (req, res) => {
   ]);
   if (!product) throw notFound('Product not found');
 
-  const leaflet = await db.get(
-    `SELECT * FROM leaflets WHERE product_id = ? AND language = ?
-      ORDER BY effective_from DESC LIMIT 1`,
-    [product.id, String(req.query.lang ?? 'en')]
+  const lang = String(req.query.lang ?? 'en');
+
+  /*
+   * Every version for this medicine and language, newest first. The newest
+   * IS the current one: publishing a new version is what supersedes the old,
+   * and the dates already say which is which, so nothing has to mark it.
+   *
+   * The current version is the default and the only thing a QR ever opens -
+   * a safety correction has to reach everyone holding the medicine, including
+   * packs printed before it. Older versions stay reachable by ?version= so a
+   * patient or an inspector can see what the leaflet said before, and they
+   * come back flagged as superseded so nobody reads outdated dosing without
+   * being told.
+   *
+   * Metadata only here; the full text is fetched for the one version shown.
+   * A patient may be on a slow connection, and every past version is weight
+   * they did not ask for.
+   */
+  const versions = await db.all(
+    `SELECT id, version, effective_from FROM leaflets
+      WHERE product_id = ? AND language = ?
+      ORDER BY effective_from DESC, id DESC`,
+    [product.id, lang]
   );
-  if (!leaflet) throw notFound('No leaflet is published for this product');
+  if (!versions.length) throw notFound('No leaflet is published for this product');
+
+  const wanted =
+    req.query.version === undefined
+      ? versions[0]
+      : versions.find((v) => v.version === String(req.query.version));
+  if (!wanted) throw notFound('That version of the leaflet does not exist');
+
+  const leaflet = await db.get('SELECT * FROM leaflets WHERE id = ?', [wanted.id]);
 
   res.json({
     product: {
@@ -225,7 +252,15 @@ router.get('/product/:sku/leaflet', async (req, res) => {
       language: leaflet.language,
       effectiveFrom: leaflet.effective_from,
       sections: JSON.parse(leaflet.sections_json),
+      // Said explicitly rather than left for the page to work out from the
+      // history: it drives a warning the reader must see before the content.
+      superseded: wanted.id !== versions[0].id,
     },
+    history: versions.map((v, i) => ({
+      version: v.version,
+      effectiveFrom: v.effective_from,
+      current: i === 0,
+    })),
   });
 });
 

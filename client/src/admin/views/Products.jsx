@@ -4,10 +4,10 @@
  * The SKU is immutable once created: it is embedded in every code already
  * printed on packs, so changing it would orphan them.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { api } from '../../lib/api.js';
-import { useApi, usePermission, useToast } from '../../lib/hooks.jsx';
+import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
@@ -60,7 +60,7 @@ export default function Products() {
           loading={loading}
           rows={data?.items}
           empty="No products yet."
-          onRowClick={(row) => openProduct(row.id, drawer)}
+          onRowClick={(row) => openProduct(row.id, drawer, reload, canWrite)}
           columns={[
             {
               label: 'Product',
@@ -84,7 +84,7 @@ export default function Products() {
   );
 }
 
-async function openProduct(id, drawer) {
+async function openProduct(id, drawer, reload, canWrite) {
   const p = await api(`/api/admin/products/${id}`);
   drawer.open({
     title: p.name,
@@ -117,6 +117,14 @@ async function openProduct(id, drawer) {
             <p className="text-muted text-sm">
               No leaflet published. Patients will see no dosing information on a genuine result.
             </p>
+          )}
+          {canWrite && (
+            <button
+              className="btn btn-sm mt-8"
+              onClick={() => openPublishLeaflet(p, drawer, reload)}
+            >
+              {p.leaflets.length ? 'Publish new version' : 'Publish leaflet'}
+            </button>
           )}
         </div>
 
@@ -215,6 +223,270 @@ function NewProductForm({ drawer, reload }) {
 
       <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
         {busy ? 'Creating...' : 'Create product'}
+      </button>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Publishing a leaflet
+//
+// The endpoint this posts to has existed since the leaflet QR landed; until
+// now nothing called it, so a leaflet could only be created by the seed. A
+// leaflet QR printed for a medicine with no leaflet opens a page saying there
+// is none, which is why the Leaflet QR screen counts those separately.
+// ---------------------------------------------------------------------------
+
+function openPublishLeaflet(product, drawer, reload) {
+  drawer.open({
+    title: `Publish a leaflet for ${product.name}`,
+    subtitle: `${product.sku} - this becomes what the leaflet QR opens`,
+    body: <PublishLeafletForm product={product} drawer={drawer} reload={reload} />,
+  });
+}
+
+/** One empty section. Kept as a factory so each row gets its own object. */
+const emptySection = () => ({ heading: '', body: '' });
+
+function PublishLeafletForm({ product, drawer, reload }) {
+  const toast = useToast();
+  const [version, setVersion] = useState('');
+  const [language, setLanguage] = useState('en');
+  const [sections, setSections] = useState([emptySection()]);
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  /*
+   * The other products this document covers. One leaflet usually spans every
+   * strength of a medicine, and the product list with each one's current
+   * version is what lets the form pre-tick the siblings: whichever products
+   * share this product's current version were published together last time.
+   *
+   * `null` until that list arrives, so the pre-selection is applied exactly
+   * once and a later refetch (the language changed) never overwrites what
+   * the person has since ticked or unticked.
+   */
+  const [extra, setExtra] = useState(null);
+  const lang = useDebounced(language.trim() || 'en');
+  const { data: list, error: listError, loading: listLoading } = useApi(
+    '/api/admin/leaflet-codes',
+    { query: { lang } },
+    [lang]
+  );
+
+  useEffect(() => {
+    if (extra !== null || !list) return;
+    const mine = list.items.find((p) => p.id === product.id)?.leaflet_version ?? null;
+    const siblings = mine
+      ? list.items.filter((p) => p.id !== product.id && p.leaflet_version === mine).map((p) => p.id)
+      : [];
+    setExtra(new Set(siblings));
+  }, [list, extra, product.id]);
+
+  const selected = extra ?? new Set();
+  const toggle = (id, on) =>
+    setExtra((s) => {
+      const next = new Set(s ?? []);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const setSection = (i, key, value) =>
+    setSections((s) => s.map((row, n) => (n === i ? { ...row, [key]: value } : row)));
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(null);
+
+    const cleaned = sections
+      .map((s) => ({ heading: s.heading.trim(), body: s.body.trim() }))
+      .filter((s) => s.heading || s.body);
+
+    // Checked here as well as on the server: the server's message names the
+    // fault but not which section, and a half-filled row is the likely slip.
+    if (!cleaned.length) {
+      setError('A leaflet needs at least one section.');
+      return;
+    }
+    if (cleaned.some((s) => !s.heading || !s.body)) {
+      setError('Every section needs both a heading and a body.');
+      return;
+    }
+    if (reason.trim().length < 5) {
+      setError('Say why this version is being published - it goes in the audit log.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await api(`/api/admin/products/${product.id}/leaflets`, {
+        method: 'POST',
+        body: {
+          version: version.trim(),
+          language: language.trim() || 'en',
+          sections: cleaned,
+          reason: reason.trim(),
+          alsoApplyTo: [...selected],
+        },
+      });
+      toast('Leaflet published.', 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      setError(err.formMessage);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="stack" onSubmit={submit} noValidate>
+      <div className="field">
+        <label className="label" htmlFor="lf-version">Version</label>
+        <input
+          className="input mono"
+          id="lf-version"
+          value={version}
+          onChange={(e) => setVersion(e.target.value)}
+          maxLength={20}
+          placeholder="1.0"
+          spellCheck={false}
+        />
+        <p className="hint">
+          Your own reference for this revision. A product may not have two leaflets with the same
+          version and language.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="lf-language">Language</label>
+        <input
+          className="input mono"
+          id="lf-language"
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          maxLength={8}
+          placeholder="en"
+          spellCheck={false}
+        />
+        <p className="hint">
+          A short language code. English is what the QR opens by default; any other code is reached
+          only through a language link.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="label">Sections</label>
+        <p className="hint mb-8">
+          Each becomes one heading a patient can open. Write them in the order they should be read.
+        </p>
+
+        {sections.map((s, i) => (
+          <div className="stack mb-8" key={i}>
+            <input
+              className="input"
+              value={s.heading}
+              onChange={(e) => setSection(i, 'heading', e.target.value)}
+              maxLength={160}
+              placeholder={i === 0 ? 'What this medicine is for' : 'Heading'}
+              aria-label={`Section ${i + 1} heading`}
+            />
+            <textarea
+              className="textarea"
+              value={s.body}
+              onChange={(e) => setSection(i, 'body', e.target.value)}
+              placeholder="The text a patient reads under this heading."
+              aria-label={`Section ${i + 1} body`}
+            />
+            {sections.length > 1 && (
+              <button
+                className="btn btn-sm btn-quiet"
+                type="button"
+                onClick={() => setSections((all) => all.filter((_, n) => n !== i))}
+              >
+                Remove this section
+              </button>
+            )}
+          </div>
+        ))}
+
+        {sections.length < 40 && (
+          <button
+            className="btn btn-sm"
+            type="button"
+            onClick={() => setSections((all) => [...all, emptySection()])}
+          >
+            Add a section
+          </button>
+        )}
+      </div>
+
+      <div className="field">
+        <label className="label">Also applies to</label>
+        <p className="hint mb-8">
+          One leaflet usually covers every strength of a medicine. Tick the other products this
+          document covers and they all receive this version together, so no two strengths can end
+          up saying different things. Products already sharing the current version are ticked for
+          you.
+        </p>
+        {listLoading && !list && <p className="text-sm text-muted">Loading products...</p>}
+        {listError && (
+          <p className="text-sm text-muted">
+            The product list could not be loaded, so this publishes to {product.sku} only.
+          </p>
+        )}
+        {list &&
+          list.items
+            .filter((p) => p.id !== product.id)
+            .map((p) => (
+              <label className="row text-sm" key={p.id}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(p.id)}
+                  onChange={(e) => toggle(p.id, e.target.checked)}
+                />{' '}
+                <span className="mono">{p.sku}</span> {p.name}
+                {p.strength ? ` ${p.strength}` : ''}
+                <span className="text-muted">
+                  {p.leaflet_version ? ` - currently v${p.leaflet_version}` : ' - no leaflet yet'}
+                </span>
+              </label>
+            ))}
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="lf-reason">Reason for this version</label>
+        <textarea
+          className="textarea"
+          id="lf-reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={300}
+          placeholder="What changed and why - a corrected dose, a new warning, a regulatory update."
+        />
+        <p className="hint">
+          Recorded in the audit log against your account. It is what an inspector will read.
+        </p>
+      </div>
+
+      <p className="hint">
+        Publishing takes effect immediately: the leaflet QR already printed for this medicine points
+        at a fixed address, so it will start opening this version. Existing versions are kept and
+        stay readable, marked as superseded.
+      </p>
+
+      {error && <p className="field-error" role="alert">{error}</p>}
+
+      {/* Held until the product list has loaded (or failed), so a quick
+          submit cannot skip the pre-ticked siblings and split a medicine's
+          strengths onto different versions. */}
+      <button
+        className="btn btn-primary btn-block"
+        type="submit"
+        disabled={busy || (listLoading && !list && !listError)}
+      >
+        {busy ? 'Publishing...' : 'Publish leaflet'}
       </button>
     </form>
   );
