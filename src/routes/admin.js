@@ -315,11 +315,11 @@ router.post('/batches', requirePermission('batches:write'), async (req, res) => 
     throw conflict(`Batch ${data.batchNumber} already exists.`);
   }
 
-  // Default to the product's newest leaflet, so a batch always has one.
-  const leafletId =
-    data.leafletId ??
-    await db.get('SELECT id FROM leaflets WHERE product_id = ? ORDER BY effective_from DESC LIMIT 1', [product.id])?.id ??
-    null;
+  // Record the product's newest leaflet as the one this batch shipped with.
+  // (It was always null: `await db.get(...)?.id` applied `?.id` to the
+  // Promise, not the row, because `await` binds looser than `?.`.) Display
+  // does not use this - a scan shows the current leaflet - it is the record.
+  const leafletId = data.leafletId ?? (await leaflets.currentLeafletId(product.id));
 
   const { lastInsertRowid } = await db.run(
     `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, leaflet_id, notes, created_by)
