@@ -12,8 +12,9 @@ import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
 import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
+import { Icon } from '../../components/Icons.jsx';
 import {
-  TableCard, Table, Toolbar, Spacer, KV, Timeline, TimelineItem, StatusBadge, ErrorNote,
+  TableCard, Table, Toolbar, Spacer, KV, Timeline, TimelineItem, StatusBadge, ErrorNote, Pager,
 } from '../components/ui.jsx';
 
 export default function Products() {
@@ -149,9 +150,161 @@ async function openProduct(id, drawer, reload, canWrite) {
             <p className="text-muted text-sm">No batches yet.</p>
           )}
         </div>
+
+        <ProductCodes product={p} />
       </>
     ),
   });
+}
+
+/**
+ * The pack codes of this product, batch by batch.
+ *
+ * A code belongs to a batch, and this is the one screen where an admin can
+ * see the codes printed on this product's packs without leaving the product:
+ * each batch's codes, each with its QR, and the CSV that goes to the
+ * packaging line. Hidden from a role without codes:read (the regulator).
+ */
+function ProductCodes({ product }) {
+  const canRead = usePermission('codes:read');
+  const canExport = usePermission('codes:export');
+  const [open, setOpen] = useState(null);
+
+  if (!canRead) return null;
+  const withCodes = product.batches.filter((b) => b.codes_issued > 0);
+
+  return (
+    <div>
+      <h3 className="mb-8">Pack codes</h3>
+      {!withCodes.length ? (
+        <p className="text-muted text-sm">
+          No codes yet. Codes are created per batch: create a batch for this product under
+          Batches &amp; codes, then issue its codes. Each pack then gets one unique code, and the
+          code is what the customer scans or types.
+        </p>
+      ) : (
+        <div className="stack-sm">
+          {withCodes.map((b) => (
+            <div key={b.id}>
+              <div className="row row-wrap">
+                <span className="mono">{b.batch_number}</span>
+                <StatusBadge status={b.status} />
+                <span className="text-sm text-muted">{fmtNumber(b.codes_issued)} codes</span>
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  onClick={() => setOpen(open === b.id ? null : b.id)}
+                >
+                  {open === b.id ? 'Hide codes' : 'View codes'}
+                </button>
+                {canExport && (
+                  <a className="btn btn-sm" href={`/api/admin/batches/${b.id}/codes.csv`} download>
+                    <Icon name="down" /> CSV
+                  </a>
+                )}
+              </div>
+              {open === b.id && <BatchCodeList batchId={b.id} />}
+            </div>
+          ))}
+          <p className="text-sm text-muted">
+            Until a batch is released, every scan of its codes says do not use. Label sheets are
+            printed from Batches &amp; codes.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One batch's codes, paged, with a QR for each and a copy button. */
+function BatchCodeList({ batchId }) {
+  const toast = useToast();
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const term = useDebounced(search, 300);
+  const { data, error, loading } = useApi(`/api/admin/batches/${batchId}/codes`, {
+    query: { page, pageSize: 10, search: term || undefined },
+  });
+
+  async function copy(code) {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast(`Copied ${code}`, 'success');
+    } catch {
+      toast('Could not copy - select the code and copy it by hand.', 'error');
+    }
+  }
+
+  if (error) return <ErrorNote error={error} />;
+
+  return (
+    <div className="mt-8">
+      <input
+        className="input input-inline mb-8"
+        type="search"
+        placeholder="Find a code or serial"
+        aria-label="Find a code"
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(1);
+        }}
+      />
+      <Table
+        loading={loading}
+        rows={data?.items}
+        empty="No codes match."
+        columns={[
+          {
+            label: 'Code',
+            className: 'code',
+            render: (c) => (
+              <span className="row">
+                <span className="mono">{c.code}</span>
+                <button
+                  className="btn btn-sm btn-quiet"
+                  type="button"
+                  onClick={() => copy(c.code)}
+                  aria-label={`Copy ${c.code}`}
+                >
+                  Copy
+                </button>
+              </span>
+            ),
+          },
+          { label: 'Unit', render: (c) => fmtNumber(c.unit_index + 1) },
+          {
+            label: 'Status',
+            render: (c) => (
+              <>
+                <StatusBadge status={c.status} />
+                {c.scan_count > 0 && (
+                  <span className="text-sm text-muted"> {fmtNumber(c.scan_count)} scans</span>
+                )}
+              </>
+            ),
+          },
+          {
+            label: 'QR',
+            render: (c) => (
+              <a
+                className="code-qr"
+                href={`/api/admin/codes/${c.id}/qr.svg`}
+                target="_blank"
+                rel="noopener"
+                aria-label={`Open the QR for ${c.code}`}
+              >
+                <Icon name="qr" />
+              </a>
+            ),
+          },
+        ]}
+      />
+      {data && data.total > data.pageSize && (
+        <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
+      )}
+    </div>
+  );
 }
 
 function openNew(drawer, reload) {

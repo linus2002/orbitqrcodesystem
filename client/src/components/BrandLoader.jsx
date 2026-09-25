@@ -1,7 +1,7 @@
 /**
  * The loading state, built from the system's own mark.
  *
- * The name is Orbit, so the wait is drawn as one: the mark holds still while
+ * The wait is drawn as an orbit: the Getmeds cross holds still while
  * two arcs travel around it, one in each brand colour, turning in opposite
  * directions at different speeds. A generic spinner says "something is
  * happening"; this says which system is doing it - which is worth something at

@@ -6,7 +6,7 @@ export default function NotFound() {
     <main className="login-shell">
       <div className="login-card card text-center">
         <h1>Page not found</h1>
-        <p className="text-muted mt-8">That address does not exist on Orbit.</p>
+        <p className="text-muted mt-8">That address does not exist on Getmeds.</p>
         <Link className="btn btn-primary btn-block mt-16" to="/">
           Check a medicine pack
         </Link>

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Orbit - shared design system
+   Getmeds - shared design system
    Used by the public verification portal, the login page and the dashboard.
 
    Colour notes:
@@ -38,7 +38,8 @@
   --brand-contrast: #ffffff;
 
   /* Logo */
-  --logo-blue: #1d9fda;
+  --logo-blue: #1ea0da; /* the blue of the Getmeds cross and "MEDS" */
+  --logo-green: #61a644; /* the green of the cross and "Get" */
 
   /* Scrollbars */
   --scroll-thumb: #cdd5df;
@@ -406,7 +407,31 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 }
 .input[aria-invalid="true"] { border-color: var(--danger); }
 .textarea { min-height: 110px; resize: vertical; line-height: 1.55; }
-.select { appearance: none; padding-right: 34px; background-image: none; cursor: pointer; }
+/* A native select with the browser chrome stripped, so it needs its own
+   arrow: a chevron drawn as a data URL (allowed by img-src), mid-grey so it
+   reads on both the light and the dark surface. */
+.select {
+  appearance: none; padding-right: 34px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237b8a9c' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 16px 16px;
+}
+
+/* A password field with its show/hide eye. The wrapper takes the input as it
+   is styled by its page (.input or .signin-input) and only adds the button. */
+.pw-field { position: relative; }
+.pw-field > input { padding-right: 46px; width: 100%; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 8px;
+  background: none; border: 0; padding: 0;
+  color: var(--ink-muted); cursor: pointer;
+}
+.pw-toggle:hover { color: var(--ink); background: var(--surface-2); }
+.pw-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.pw-toggle svg { width: 20px; height: 20px; }
 
 /* The code entry field: monospace, spaced, uppercase - it is a serial number. */
 .input-code {
@@ -448,18 +473,32 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
   white-space: nowrap;
 }
 
-/* Sizes: the mark tracks the cap height of the two lines together. */
-.logo-sm .logo-mark { height: 30px; }
+/* Sizes: the logo is a wide lockup with its own wordmark, so it gets a little
+   more height than the two text lines, enough for that wordmark to read. */
+.logo-sm .logo-mark { height: 34px; }
 .logo-sm .logo-name { font-size: 1.05rem; }
 .logo-sm .logo-sub { font-size: 0.56rem; }
 
-.logo-md .logo-mark { height: 38px; }
+.logo-md .logo-mark { height: 44px; }
 .logo-md .logo-name { font-size: 1.35rem; }
 .logo-md .logo-sub { font-size: 0.66rem; }
 
-.logo-lg .logo-mark { height: 48px; }
+.logo-lg .logo-mark { height: 58px; }
 .logo-lg .logo-name { font-size: 1.7rem; }
 .logo-lg .logo-sub { font-size: 0.78rem; }
+
+/* The customer page: the lockup stands above the heading as the page's
+   masthead, so it is sized like one. */
+.logo-xl { gap: 18px; }
+.logo-xl .logo-mark { height: 104px; }
+.logo-xl .logo-name { font-size: 1.8rem; }
+.logo-xl .logo-sub { font-size: 0.85rem; }
+@media (max-width: 640px) {
+  .logo-xl { gap: 12px; }
+  .logo-xl .logo-mark { height: 72px; }
+  .logo-xl .logo-name { font-size: 1.4rem; }
+  .logo-xl .logo-sub { font-size: 0.7rem; }
+}
 
 /* --------------------------------------------------------------------------
    Badges + pills
@@ -637,18 +676,60 @@ table.data .badge-neutral { background: #4a5a6b; } /* white 6.3:1 */
    page colour.
    -------------------------------------------------------------------------- */
 
-.page-white { background: #ffffff; }
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .page-white { background: var(--page); }
+/*
+ * The customer side carries the company's photo as its page background: a
+ * light scene with the subject on the right, kept pinned to the viewport so
+ * the page scrolls over it. Content that sits straight on the page (the hero,
+ * the footer) gets a translucent panel in portal.css so it stays readable
+ * whatever part of the photo ends up behind it. In dark mode the same photo
+ * is shown under a dark tint, so light text keeps its contrast.
+ */
+/* The page itself is transparent: a fixed layer beneath it carries the colour
+   and the photo. (A fixed background attachment would be simpler, but iOS
+   ignores it and desktop browsers repaint it on every scroll.) The layer sits
+   at z-index -1, below the body's content; the body must therefore paint no
+   background of its own, or it would cover the layer. */
+.page-white { background: transparent; overflow-x: clip; }
+.page-white::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1;
+  background-color: #ffffff;
+  background-image: url("/img/backgroundcustomer.webp");
+  background-size: cover;
+  background-position: right center;
+  background-repeat: no-repeat;
+  pointer-events: none;
 }
-:root[data-theme="dark"] .page-white { background: var(--page); }
+/* A phone shows a narrow slice of the photo: keep it to the open side, so
+   the words at the top are not laid over the subject's face. */
+@media (max-width: 900px) {
+  .page-white::before { background-position: 32% top; }
+}
 
-/* On white, a white card has nothing to separate it from the page, so it
-   needs a more definite edge than the usual hairline. */
-:root:not([data-theme="dark"]) .page-white .card { border-color: var(--line-strong); }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .page-white .card { border-color: var(--line); }
+  :root:not([data-theme="light"]) .page-white::before {
+    background-color: var(--page);
+    background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/backgroundcustomer.webp");
+  }
+}
+:root[data-theme="dark"] .page-white::before {
+  background-color: var(--page);
+  background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/backgroundcustomer.webp");
+}
+
+/* On the customer page a card has no border line: a soft shadow lifts it
+   off the photo instead, in both themes. */
+:root .page-white .card {
+  border: 0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 10px 30px rgba(15, 23, 42, 0.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .page-white .card {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+}
+:root[data-theme="dark"] .page-white .card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
 /* --------------------------------------------------------------------------

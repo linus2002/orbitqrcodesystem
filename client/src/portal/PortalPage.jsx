@@ -14,11 +14,11 @@
  * the verdict, and every verdict is icon + word + colour, never colour alone.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import { api, ApiError } from '../lib/api.js';
 import { formatCodeInput } from '../lib/format.js';
-import { useBodyClass, useTheme } from '../lib/hooks.jsx';
+import { useBodyClass } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
 import { Logo } from '../components/Logo.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
@@ -29,7 +29,6 @@ import DetailsForm from './DetailsForm.jsx';
 export default function PortalPage() {
   const { code: deepLinkCode } = useParams();
   const navigate = useNavigate();
-  const { toggle: toggleTheme } = useTheme();
 
   useBodyClass('page-white');
 
@@ -178,31 +177,20 @@ export default function PortalPage() {
 
   return (
     <>
-      <header className="portal-header">
-        <div className="wrap">
-          <Link className="brand" to="/" aria-label="Orbit - check your medicine">
-            <Logo size="sm" />
-          </Link>
-          {/* No staff link here by design. Patients and pharmacists never
-              need an account, so a sign-in door on the page they use adds
-              nothing for them and advertises the admin surface to everyone
-              who scans a pack. Staff reach /login directly. */}
-          <div className="row">
-            <button
-              className="icon-btn"
-              type="button"
-              onClick={toggleTheme}
-              aria-label="Switch between light and dark theme"
-            >
-              <Icon name="sun" className="icon-sun" />
-              <Icon name="moon" className="icon-moon" />
-            </button>
-          </div>
-        </div>
-      </header>
-
+      {/* No header bar on this page: the photo behind it carries the brand,
+          and the theme follows the phone's setting. There is no staff link
+          by design - patients and pharmacists never need an account, and a
+          sign-in door here would only advertise the admin surface to everyone
+          who scans a pack. Staff reach /login directly. */}
       <main id="main" className="portal-main">
         <div className="wrap portal-wrap">
+          {/* The masthead: the company logo, large, above the heading - the
+              page has no header bar, and the logo's own wordmark carries the
+              name, so no text is set beside it. */}
+          <div className="portal-brand">
+            <Logo size="xl" text={false} />
+          </div>
+
           <section className="hero">
             <h1>Is your medicine genuine?</h1>
             <p>
@@ -407,8 +395,8 @@ export default function PortalPage() {
       <footer className="portal-footer">
         <div className="wrap portal-wrap">
           <p>
-            <strong>Orbit</strong> verifies that the pack in your hand matches a real,
-            serialized unit made by the manufacturer.
+            <strong>Getmeds</strong> verifies that the pack in your hand matches a real, serialized
+            unit made by the manufacturer.
           </p>
           <p className="mt-8">
             A genuine result is not medical advice. Always follow the leaflet and your pharmacist's

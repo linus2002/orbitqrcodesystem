@@ -146,7 +146,7 @@ export async function readSheet(buffer, { sheetName } = {}) {
  */
 export async function buildWorkbook(sheets) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Orbit QR Counterfeit System';
+  wb.creator = 'Getmeds QR Counterfeit System';
   wb.created = new Date();
 
   for (const sheet of sheets) {

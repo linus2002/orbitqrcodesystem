@@ -924,3 +924,7 @@
   border-radius: 50%;
   display: block;
 }
+
+/* The QR link in a product's code list: an icon, sized like a button icon. */
+.code-qr { display: inline-flex; color: var(--brand); }
+.code-qr svg { width: 22px; height: 22px; }

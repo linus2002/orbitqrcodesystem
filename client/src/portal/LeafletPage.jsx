@@ -68,7 +68,7 @@ export default function LeafletPage() {
     <>
       <header className="portal-header">
         <div className="wrap">
-          <Link className="brand" to="/" aria-label="Orbit - check your medicine">
+          <Link className="brand" to="/" aria-label="Getmeds - check your medicine">
             <Logo size="sm" />
           </Link>
         </div>

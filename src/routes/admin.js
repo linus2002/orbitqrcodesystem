@@ -134,6 +134,10 @@ router.get('/products/:id', requirePermission('products:read'), async (req, res)
     batches: await db.findMany('batch', { product_id: product.id }, {
       order: 'created_at desc',
       fields: ['id', 'batch_number', 'status', 'mfg_date', 'expiry_date', 'quantity', 'is_test'],
+      // How many pack codes exist for the batch: the product screen lists its
+      // codes from here, so an admin can find a pack's code without leaving
+      // the product.
+      extra: { codes_issued: 'count(*[_type == "code" && batch_id == ^.id])' },
     }),
   });
 });

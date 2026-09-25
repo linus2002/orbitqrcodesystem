@@ -264,7 +264,7 @@ export default function DetailsForm({ pendingCode, onDone, supportPhone }) {
               aria-describedby={errors.consent ? 'dConsentErr dConsentHint' : 'dConsentHint'}
             />
             <span>
-              I have read the privacy notice and agree that Orbit may keep these details and
+              I have read the privacy notice and agree that Getmeds may keep these details and
               contact me by SMS or email about the medicines I check. <Required />
             </span>
           </label>

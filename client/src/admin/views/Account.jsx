@@ -18,6 +18,7 @@ import { api } from '../../lib/api.js';
 import { useSession, useToast } from '../../lib/hooks.jsx';
 import { fmtDate } from '../../lib/format.js';
 import { KV, Timeline, TimelineItem } from '../components/ui.jsx';
+import PasswordField from '../../components/PasswordField.jsx';
 
 export default function Account() {
   const { user } = useSession();
@@ -75,10 +76,8 @@ export default function Account() {
             <label className="label" htmlFor="curPw">
               Current password
             </label>
-            <input
-              className="input"
+            <PasswordField
               id="curPw"
-              type="password"
               autoComplete="current-password"
               value={form.currentPassword}
               onChange={(e) => setForm((f) => ({ ...f, currentPassword: e.target.value }))}
@@ -88,10 +87,8 @@ export default function Account() {
             <label className="label" htmlFor="newPw">
               New password
             </label>
-            <input
-              className="input"
+            <PasswordField
               id="newPw"
-              type="password"
               autoComplete="new-password"
               value={form.newPassword}
               onChange={(e) => setForm((f) => ({ ...f, newPassword: e.target.value }))}

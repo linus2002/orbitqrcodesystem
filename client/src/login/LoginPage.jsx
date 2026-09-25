@@ -19,6 +19,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../lib/api.js';
 import { useBodyClass, useSession } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
+import PasswordField from '../components/PasswordField.jsx';
 import { Logo } from '../components/Logo.jsx';
 import SignInShowcase from './SignInShowcase.jsx';
 
@@ -94,7 +95,7 @@ export default function LoginPage() {
         </div>
 
         <div className="signin-body">
-          <h1 className="signin-title">Access your Orbit account</h1>
+          <h1 className="signin-title">Access your Getmeds account</h1>
           <p className="signin-sub">
             Sign in to manage serialization, investigate flagged packs and work the alert queue.
           </p>
@@ -142,11 +143,10 @@ export default function LoginPage() {
               <label className="signin-label" htmlFor="password">
                 Enter your password
               </label>
-              <input
+              <PasswordField
                 className="signin-input"
                 id="password"
                 ref={passwordRef}
-                type="password"
                 autoComplete="current-password"
                 placeholder="Password"
                 value={password}
