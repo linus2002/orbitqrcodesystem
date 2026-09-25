@@ -73,7 +73,7 @@ test('paging covers the batch exactly once, in order', async () => {
   assert.equal(new Set(seen).size, QUANTITY, 'and none appears twice');
 
   const expected = (
-    await db.all('SELECT code FROM codes WHERE batch_id = 1 ORDER BY unit_index')
+    await db.findMany('code', { batch_id: 1 }, { order: 'unit_index asc' })
   ).map((c) => c.code);
   assert.deepEqual(seen, expected, 'in unit_index order, so the sheet matches the CSV');
 });
@@ -105,9 +105,7 @@ test('a negative offset is treated as the start, not as a backwards slice', asyn
 
   assert.equal(res.status, 200);
   assert.equal(res.body.items.length, 5);
-  const firstCode = await db.scalar(
-    'SELECT code FROM codes WHERE batch_id = 1 ORDER BY unit_index LIMIT 1'
-  );
+  const firstCode = (await db.findOne('code', { batch_id: 1 }, { order: 'unit_index asc' })).code;
   assert.equal(res.body.items[0].code, firstCode);
 });
 

@@ -7,8 +7,8 @@
  * their medicine.
  *
  * Session model: a signed, short-lived token (in an httpOnly cookie) that
- * carries a session id, plus a server-side `sessions` row. The token proves
- * integrity; the row makes revocation real. Deleting the row kills the token
+ * carries a session id, plus a server-side session document. The token proves
+ * integrity; the document makes revocation real. Revoking it kills the token
  * instantly, which a stateless JWT cannot do.
  */
 import * as db from '../db/index.js';
@@ -87,7 +87,7 @@ export function publicUser(row) {
  * enumerate which email addresses exist.
  */
 export async function login(email, password, req) {
-  const user = await db.get('SELECT * FROM users WHERE email = ?', [String(email).trim().toLowerCase()]);
+  const user = await db.findOne('user', { email: String(email).trim().toLowerCase() });
 
   // Lockout is checked before the password, so a locked account cannot be
   // probed further even with the correct password.
@@ -114,35 +114,24 @@ export async function login(email, password, req) {
   }
 
   // Success: clear the failure counter and open a session.
-  await db.run(
-    `UPDATE users SET failed_attempts = 0, locked_until = NULL,
-            last_login_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [user.id]
-  );
+  await db.update('user', user, { failed_attempts: 0, locked_until: null, last_login_at: db.now() });
 
   const session = await createSession(user, req);
   await audit.record({ actor: user, req, action: 'auth.login', entityType: 'user', entityId: user.id });
   logger.info('login', { userId: user.id, role: user.role });
 
-  return { user: publicUser(await db.get('SELECT * FROM users WHERE id = ?', [user.id])), ...session };
+  return { user: publicUser(await db.get('user', user.id)), ...session };
 }
 
 /** Record a failed attempt and lock the account once the threshold is hit. */
 async function registerFailure(user) {
   const attempts = user.failed_attempts + 1;
   const lock = attempts >= config.auth.maxFailures;
-  await db.run(
-    `UPDATE users SET failed_attempts = ?, locked_until = ?,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [
-      lock ? 0 : attempts, // reset the counter when we lock, so the next lock needs a fresh run
-      lock ? new Date(Date.now() + config.auth.lockoutMinutes * 60000).toISOString() : null,
-      user.id,
-    ]
-  );
+  await db.update('user', user, {
+    // Reset the counter when we lock, so the next lock needs a fresh run.
+    failed_attempts: lock ? 0 : attempts,
+    locked_until: lock ? new Date(Date.now() + config.auth.lockoutMinutes * 60000).toISOString() : null,
+  });
   if (lock) {
     logger.warn('account locked after repeated failures', { userId: user.id });
     await audit.record({
@@ -155,17 +144,20 @@ async function registerFailure(user) {
   }
 }
 
-/** Create the session row and its signed token. */
+/** Create the session document and its signed token. */
 async function createSession(user, req) {
   const sid = randomId(18);
   const csrfToken = randomToken(24);
   const expiresAt = new Date(Date.now() + config.session.ttlHours * 3600 * 1000).toISOString();
 
-  await db.run(
-    `INSERT INTO sessions (id, user_id, csrf_token, ip, user_agent, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [sid, user.id, csrfToken, req?.clientIp ?? null, req?.get?.('user-agent')?.slice(0, 300) ?? null, expiresAt]
-  );
+  await db.insert('session', {
+    id: sid,
+    user_id: user.id,
+    csrf_token: csrfToken,
+    ip: req?.clientIp ?? null,
+    user_agent: req?.get?.('user-agent')?.slice(0, 300) ?? null,
+    expires_at: expiresAt,
+  });
 
   const token = signToken(
     { sub: user.id, sid, role: user.role },
@@ -180,11 +172,11 @@ export async function resolveSession(token) {
   const payload = verifyToken(token, config.secrets.session);
   if (!payload?.sid) return null;
 
-  const session = await db.get('SELECT * FROM sessions WHERE id = ?', [payload.sid]);
+  const session = await db.get('session', payload.sid);
   if (!session || session.revoked_at) return null;
   if (new Date(session.expires_at) <= new Date()) return null;
 
-  const user = await db.get('SELECT * FROM users WHERE id = ?', [session.user_id]);
+  const user = await db.get('user', session.user_id);
   if (!user || user.status !== 'active') return null;
 
   return { user, session };
@@ -193,26 +185,21 @@ export async function resolveSession(token) {
 /** Revoke one session (logout). */
 export async function logout(sessionId, { actor, req } = {}) {
   if (!sessionId) return;
-  await db.run(
-    `UPDATE sessions SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-    [sessionId]
-  );
+  if (await db.get('session', sessionId)) {
+    await db.update('session', sessionId, { revoked_at: db.now() });
+  }
   await audit.record({ actor, req, action: 'auth.logout', entityType: 'session', entityId: sessionId });
 }
 
 /** Revoke every session belonging to a user (password change, suspension). */
 export async function revokeAllSessions(userId) {
-  await db.run(
-    `UPDATE sessions SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE user_id = ? AND revoked_at IS NULL`,
-    [userId]
-  );
+  await db.updateWhere('session', { user_id: Number(userId), revoked_at: null }, { revoked_at: db.now() });
 }
 
 /** Housekeeping: drop sessions that expired more than a day ago. */
 export async function pruneSessions() {
   const cutoff = new Date(Date.now() - 86400000).toISOString();
-  const { changes } = await db.run('DELETE FROM sessions WHERE expires_at < ?', [cutoff]);
+  const changes = await db.removeWhere('session', { expires_at: { lt: cutoff } });
   if (changes) logger.debug('pruned expired sessions', { count: changes });
   return changes;
 }
@@ -222,7 +209,7 @@ export async function pruneSessions() {
 // ---------------------------------------------------------------------------
 
 export async function listUsers() {
-  const rows = await db.all('SELECT * FROM users ORDER BY role, full_name');
+  const rows = await db.findMany('user', {}, { order: ['role asc', 'full_name asc'] });
   return rows.map(publicUser);
 }
 
@@ -236,31 +223,17 @@ export async function listUsers() {
  * this endpoint into privilege escalation.
  */
 export async function updateProfile(userId, { fullName, avatar }, { req } = {}) {
-  const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
+  const user = await db.get('user', userId);
   if (!user) throw notFound('Account not found');
 
-  const changes = [];
-  const params = [];
+  const changes = {};
+  if (fullName !== undefined) changes.full_name = fullName;
+  // null clears it; anything else has already been validated by the route.
+  if (avatar !== undefined) changes.avatar = avatar;
 
-  if (fullName !== undefined) {
-    changes.push('full_name = ?');
-    params.push(fullName);
-  }
+  if (!Object.keys(changes).length) return publicUser(user);
 
-  if (avatar !== undefined) {
-    // null clears it; anything else has already been validated by the route.
-    changes.push('avatar = ?');
-    params.push(avatar);
-  }
-
-  if (!changes.length) return publicUser(user);
-
-  await db.run(
-    `UPDATE users SET ${changes.join(', ')},
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [...params, userId]
-  );
+  await db.update('user', user, changes);
 
   await audit.record({
     actor: user,
@@ -275,7 +248,7 @@ export async function updateProfile(userId, { fullName, avatar }, { req } = {}) 
     },
   });
 
-  return publicUser(await db.get('SELECT * FROM users WHERE id = ?', [userId]));
+  return publicUser(await db.get('user', userId));
 }
 
 export async function createUser({ email, fullName, role, password, mustChangePassword = true }, { actor, req } = {}) {
@@ -284,49 +257,50 @@ export async function createUser({ email, fullName, role, password, mustChangePa
 
   if (!PERMISSIONS[role]) throw badRequest(`Unknown role "${role}"`);
 
-  const existing = await db.get('SELECT id FROM users WHERE email = ?', [email.toLowerCase()]);
+  const existing = await db.findOne('user', { email: email.toLowerCase() }, { fields: ['id'] });
   if (existing) throw conflict('A user with that email address already exists.');
 
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO users (email, full_name, password_hash, role, must_change_pw, created_by)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [email.toLowerCase(), fullName, hashPassword(password), role, mustChangePassword ? 1 : 0, actor?.id ?? null]
-  );
+  // The unique claim on email makes a simultaneous duplicate fail here too.
+  const created = await db.insert('user', {
+    email: email.toLowerCase(),
+    full_name: fullName,
+    password_hash: hashPassword(password),
+    role,
+    must_change_pw: mustChangePassword ? 1 : 0,
+    created_by: actor?.id ?? null,
+  });
 
   await audit.record({
     actor, req,
     action: 'user.create',
     entityType: 'user',
-    entityId: lastInsertRowid,
+    entityId: created.id,
     detail: { email: email.toLowerCase(), role },
   });
-  return publicUser(await db.get('SELECT * FROM users WHERE id = ?', [lastInsertRowid]));
+  return publicUser(created);
 }
 
 export async function updateUser(id, { fullName, role, status }, { actor, req } = {}) {
-  const user = await db.get('SELECT * FROM users WHERE id = ?', [id]);
+  const user = await db.get('user', id);
   if (!user) throw notFound('User not found');
 
   // Guard rail: never let the last active admin be demoted or suspended, or
   // the system locks everyone out of its own administration.
   const losingAdmin = user.role === 'admin' && ((role && role !== 'admin') || status === 'suspended');
   if (losingAdmin) {
-    const otherAdmins = await db.scalar(
-      `SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active' AND id <> ?`,
-      [id]
-    );
+    const otherAdmins = await db.count('user', { role: 'admin', status: 'active', id: { ne: user.id } });
     if (otherAdmins === 0) throw conflict('This is the last active administrator account.');
   }
 
-  await db.run(
-    `UPDATE users SET full_name = COALESCE(?, full_name), role = COALESCE(?, role),
-            status = COALESCE(?, status), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [fullName ?? null, role ?? null, status ?? null, id]
-  );
+  // Only the fields supplied change.
+  await db.update('user', user, {
+    full_name: fullName ?? undefined,
+    role: role ?? undefined,
+    status: status ?? undefined,
+  });
 
   // A suspended user must lose access immediately, not at token expiry.
-  if (status === 'suspended') await revokeAllSessions(id);
+  if (status === 'suspended') await revokeAllSessions(user.id);
 
   await audit.record({
     actor, req,
@@ -335,12 +309,12 @@ export async function updateUser(id, { fullName, role, status }, { actor, req } 
     entityId: id,
     detail: { fullName, role, status },
   });
-  return publicUser(await db.get('SELECT * FROM users WHERE id = ?', [id]));
+  return publicUser(await db.get('user', id));
 }
 
 /** Change your own password. Requires the current one, and re-keys sessions. */
 export async function changePassword(userId, currentPassword, newPassword, { req, currentSessionId } = {}) {
-  const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
+  const user = await db.get('user', userId);
   if (!user) throw notFound('User not found');
   if (!verifyPassword(currentPassword, user.password_hash)) {
     throw unauthorized('Your current password is incorrect.');
@@ -352,19 +326,14 @@ export async function changePassword(userId, currentPassword, newPassword, { req
     throw validationFailed([{ field: 'newPassword', message: 'must be different from your current password' }]);
   }
 
-  await db.run(
-    `UPDATE users SET password_hash = ?, must_change_pw = 0,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [hashPassword(newPassword), userId]
-  );
+  await db.update('user', user, { password_hash: hashPassword(newPassword), must_change_pw: 0 });
 
   // Kill every other session: a password change is often a response to
   // suspected compromise, so other devices must be signed out.
-  await db.run(
-    `UPDATE sessions SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE user_id = ? AND revoked_at IS NULL AND id <> ?`,
-    [userId, currentSessionId ?? '']
+  await db.updateWhere(
+    'session',
+    { user_id: user.id, revoked_at: null, id: { ne: currentSessionId ?? '' } },
+    { revoked_at: db.now() }
   );
 
   await audit.record({ actor: user, req, action: 'user.password_change', entityType: 'user', entityId: userId });
@@ -373,18 +342,18 @@ export async function changePassword(userId, currentPassword, newPassword, { req
 
 /** Admin-initiated password reset. Returns the temporary password once. */
 export async function resetPassword(id, { actor, req } = {}) {
-  const user = await db.get('SELECT * FROM users WHERE id = ?', [id]);
+  const user = await db.get('user', id);
   if (!user) throw notFound('User not found');
 
   // Generated, not chosen: an admin should never pick another user's password.
   const temporary = `Qs-${randomToken(9)}-${new Date().getFullYear()}`;
-  await db.run(
-    `UPDATE users SET password_hash = ?, must_change_pw = 1, failed_attempts = 0,
-            locked_until = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [hashPassword(temporary), id]
-  );
-  await revokeAllSessions(id);
+  await db.update('user', user, {
+    password_hash: hashPassword(temporary),
+    must_change_pw: 1,
+    failed_attempts: 0,
+    locked_until: null,
+  });
+  await revokeAllSessions(user.id);
 
   await audit.record({ actor, req, action: 'user.password_reset', entityType: 'user', entityId: id });
   return { temporaryPassword: temporary };
@@ -392,11 +361,11 @@ export async function resetPassword(id, { actor, req } = {}) {
 
 /** Sessions currently open for a user, for the "where am I signed in" view. */
 export async function listSessions(userId) {
-  return await db.all(
-    `SELECT id, ip, user_agent, created_at, expires_at, revoked_at
-       FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`,
-    [userId]
-  );
+  return await db.findMany('session', { user_id: Number(userId) }, {
+    order: 'created_at desc',
+    limit: 20,
+    fields: ['id', 'ip', 'user_agent', 'created_at', 'expires_at', 'revoked_at'],
+  });
 }
 
 export default {

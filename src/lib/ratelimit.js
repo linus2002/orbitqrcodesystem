@@ -9,13 +9,16 @@
  * STORE: `MemoryStore` is correct for one long-running process. On a
  * serverless platform each request may land on a different instance, so the
  * counters must be shared or the limits mean nothing - an attacker simply
- * spreads attempts across instances. `SqlStore` keeps them in the database
- * instead, and RATELIMIT_STORE=sql selects it.
+ * spreads attempts across instances. `DbStore` keeps them in the Sanity
+ * dataset instead, and RATELIMIT_STORE=db selects it (the default whenever
+ * Sanity is configured).
  *
  * Both implement the same four methods; nothing above this file changes.
  */
+import crypto from 'node:crypto';
 import * as db from '../db/index.js';
 import { config } from '../config.js';
+import { pseudonymize } from './crypto.js';
 import { tooManyRequests } from './errors.js';
 import logger from './logger.js';
 
@@ -60,41 +63,80 @@ class MemoryStore {
 }
 
 /**
- * The same window arithmetic, kept in the database so every instance sees the
- * same counters.
+ * The same window arithmetic, kept in the Sanity dataset so every instance
+ * sees the same counters.
+ *
+ * One document per limiter key, holding that key's recent hit times. A hit is
+ * a single request: create the bucket if it is new and append the hit, in one
+ * transaction, which hands back the bucket with every instance's hits in it.
+ * The append is performed by the Lake, so two instances recording at the same
+ * moment both land - neither overwrites the other.
+ *
+ * The key is stored only as a keyed digest. Limiter keys carry the client IP
+ * and, for login, the email typed; neither belongs in the dataset in clear.
  *
  * Each call is a round trip, so this is only worth paying on a platform that
  * actually runs more than one instance - hence the switch rather than a
  * replacement.
  */
-class SqlStore {
+class DbStore {
+  docId(key) {
+    return `rateLimit-${pseudonymize(key, config.secrets.session)}`;
+  }
+
   async hit(key, windowMs, now = Date.now()) {
+    const id = this.docId(key);
     const cutoff = now - windowMs;
-    await db.run('INSERT INTO rate_hits (key, ts) VALUES (?, ?)', [key, now]);
-    // Prune this key's expired rows as we go, so the table cannot grow
-    // without a separate sweeper process to own it.
-    await db.run('DELETE FROM rate_hits WHERE key = ? AND ts <= ?', [key, cutoff]);
-    return Number(await db.scalar('SELECT COUNT(*) FROM rate_hits WHERE key = ? AND ts > ?', [key, cutoff]));
+    const [, bucket] = await db.backend().mutate([
+      { createIfNotExists: { _id: id, _type: 'rateLimit', hits: [] } },
+      {
+        patch: {
+          id,
+          set: { last: now },
+          insert: { after: 'hits[-1]', items: [{ _key: crypto.randomBytes(6).toString('hex'), ts: now }] },
+        },
+      },
+    ]);
+
+    const hits = bucket?.hits ?? [];
+    const live = hits.filter((h) => h.ts > cutoff);
+
+    // Drop expired hits so a bucket cannot grow without bound. Guarded by the
+    // revision just read: if another instance appended meanwhile, this prune
+    // is skipped rather than allowed to erase that hit - the next one prunes.
+    if (live.length < hits.length) {
+      db.backend()
+        .mutate([{ patch: { id, ifRevisionID: bucket._rev, set: { hits: live } } }])
+        .catch(() => {});
+    }
+
+    // Now and then, clear out buckets nobody has touched in a day.
+    if (Math.random() < 0.01) this.sweep(24 * 3600 * 1000, now).catch(() => {});
+
+    return live.length;
   }
 
   async peek(key, windowMs, now = Date.now()) {
-    const cutoff = now - windowMs;
-    return Number(await db.scalar('SELECT COUNT(*) FROM rate_hits WHERE key = ? AND ts > ?', [key, cutoff]));
+    const bucket = await db.backend().getDocument(this.docId(key));
+    return (bucket?.hits ?? []).filter((h) => h.ts > now - windowMs).length;
   }
 
   async reset(key) {
-    await db.run('DELETE FROM rate_hits WHERE key = ?', [key]);
+    await db.backend().mutate([{ delete: { id: this.docId(key) } }]);
   }
 
   async sweep(maxWindowMs, now = Date.now()) {
-    await db.run('DELETE FROM rate_hits WHERE ts <= ?', [now - maxWindowMs]);
+    const ids = await db.backend().fetch('*[_type == "rateLimit" && last < $cutoff][0...200]._id', {
+      cutoff: now - maxWindowMs,
+    });
+    if (ids.length) await db.backend().mutate(ids.map((id) => ({ delete: { id } })));
   }
 }
 
-export const store = config.rateLimit.store === 'sql' ? new SqlStore() : new MemoryStore();
+export const store = config.rateLimit.store === 'db' ? new DbStore() : new MemoryStore();
 
-// Housekeeping for the in-memory store only: the SQL store prunes per key as
-// it goes, and a serverless instance is too short-lived to own a timer.
+// Housekeeping for the in-memory store only: the shared store prunes per key
+// as it goes, and a serverless instance is too short-lived to own a timer.
 if (store instanceof MemoryStore) {
   const SWEEP_MS = 5 * 60 * 1000;
   const sweeper = setInterval(() => store.sweep(60 * 60 * 1000), SWEEP_MS);

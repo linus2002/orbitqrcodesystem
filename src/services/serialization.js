@@ -14,6 +14,7 @@
  */
 import QRCode from 'qrcode';
 import * as db from '../db/index.js';
+import { TYPES } from '../db/schema.js';
 import { config, LOCAL_BASE_URL_WARNING } from '../config.js';
 import { generateBatchCodes, serialWidthFor, qrPayload } from '../lib/codes.js';
 import { conflict, notFound, badRequest } from '../lib/errors.js';
@@ -45,14 +46,19 @@ export function assertTransition(from, to) {
 /**
  * Generate and store every unit code for a batch.
  *
- * Runs in a single transaction so a failure part-way cannot leave a batch with
- * half its codes. Returns a summary plus a small preview of the codes.
+ * A batch can run to hundreds of thousands of units - far more than one
+ * Sanity transaction can carry - so the codes are written in chunks, and the
+ * batch only moves to `codes_issued` once every chunk has landed. What makes
+ * that safe is that issuance is DETERMINISTIC: the same batch always yields
+ * the same codes, and each is written with createIfNotExists under an id that
+ * is the code itself. An issuance interrupted part-way leaves the batch in
+ * `planned`; running it again rewrites nothing that exists and fills in the
+ * rest. A duplicate code cannot arise even from two runs at once.
+ *
+ * Returns a summary plus a small preview of the codes.
  */
 export async function issueCodes(batchId, { actor, req } = {}) {
-  const batch = await db.get(
-    `SELECT b.*, p.sku FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
-    [batchId]
-  );
+  const batch = await withProduct(await db.get('batch', batchId));
   if (!batch) throw notFound('Batch not found');
 
   if (batch.status !== 'planned') {
@@ -68,65 +74,42 @@ export async function issueCodes(batchId, { actor, req } = {}) {
   const width = serialWidthFor(batch.quantity);
   const started = Date.now();
 
-  const inserted = await db.tx(async () => {
-    /*
-     * Inserted in chunks rather than one statement at a time. Every statement
-     * is a network round trip to the database now, and a batch can run to
-     * hundreds of thousands of units - issuing them singly would take minutes
-     * of pure latency. CHUNK is a compromise between round trips and the size
-     * of a single request.
-     */
-    /*
-     * One statement per chunk, not one per code. Every statement is a network
-     * round trip to the database now, and a 1,200-unit batch issued one row at
-     * a time measured at 159 SECONDS against a hosted Postgres - well past the
-     * 30s a serverless function is given, so a real batch could never be
-     * issued at all.
-     *
-     * The chunk size is bounded by the parameter limit of the engine, not by
-     * the wire: Postgres allows 65535 per statement, SQLite far fewer, so the
-     * smaller number is used where it applies. Five columns per row.
-     */
-    const CHUNK = config.db.postgresUrl ? 500 : 150;
+  /*
+   * Generated lazily and written a slice at a time, so a 500,000-unit batch
+   * never sits in memory whole. Each slice is several Sanity transactions
+   * (db.insertMany chunks them); the slice only bounds memory.
+   */
+  const SLICE = 5000;
+  let inserted = 0;
+  let pending = [];
+  const flush = async () => {
+    if (!pending.length) return;
+    await db.insertMany('code', pending, {
+      ifNotExists: true,
+      // Two batches of one SKU made on the same day can, rarely, mint the same
+      // code. The first keeps it and this issuance stops, loudly.
+      accept: (existing) => existing.batch_id === batch.id,
+    });
+    inserted += pending.length;
+    pending = [];
+  };
 
-    let n = 0;
-    let pending = [];
-    const flush = async () => {
-      if (!pending.length) return;
-      const tuples = pending.map(() => "(?, ?, ?, ?, ?, 'issued')").join(', ');
-      await db.run(
-        `INSERT INTO codes (code, batch_id, product_id, unit_index, serial, status)
-         VALUES ${tuples}`,
-        pending.flat()
-      );
-      pending = [];
-    };
+  for (const { unitIndex, serial, code } of generateBatchCodes({
+    sku: batch.sku,
+    mfgDate: batch.mfg_date,
+    quantity: batch.quantity,
+    // Binding the permutation key to the batch means two batches of the same
+    // SKU on the same day still get completely different serial orderings.
+    batchKey: `${batch.batch_number}:${batch.id}`,
+    secret: config.secrets.code,
+  })) {
+    pending.push({ code, batch_id: batch.id, product_id: batch.product_id, unit_index: unitIndex, serial, status: 'issued' });
+    if (pending.length >= SLICE) await flush();
+  }
+  await flush();
 
-    for (const { unitIndex, serial, code } of generateBatchCodes({
-      sku: batch.sku,
-      mfgDate: batch.mfg_date,
-      quantity: batch.quantity,
-      // Binding the permutation key to the batch means two batches of the same
-      // SKU on the same day still get completely different serial orderings.
-      batchKey: `${batch.batch_number}:${batch.id}`,
-      secret: config.secrets.code,
-    })) {
-      pending.push([code, batch.id, batch.product_id, unitIndex, serial]);
-      if (pending.length >= CHUNK) await flush();
-      n += 1;
-    }
-    await flush();
-
-    await db.run(
-      `UPDATE batches
-          SET status = 'codes_issued', serial_width = ?,
-              codes_issued_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-        WHERE id = ?`,
-      [width, batch.id]
-    );
-    return n;
-  });
+  // Only now, with every code stored, does the batch say so.
+  await db.update('batch', batch, { status: 'codes_issued', serial_width: width, codes_issued_at: db.now() });
 
   const ms = Date.now() - started;
   logger.info('codes issued', { batch: batch.batch_number, count: inserted, ms });
@@ -146,10 +129,11 @@ export async function issueCodes(batchId, { actor, req } = {}) {
     issued: inserted,
     serialWidth: width,
     durationMs: ms,
-    preview: await db.all(
-      'SELECT code, serial, unit_index FROM codes WHERE batch_id = ? ORDER BY unit_index LIMIT 5',
-      [batch.id]
-    ),
+    preview: await db.findMany('code', { batch_id: batch.id }, {
+      order: 'unit_index asc',
+      limit: 5,
+      fields: ['code', 'serial', 'unit_index'],
+    }),
   };
 }
 
@@ -158,7 +142,7 @@ export async function issueCodes(batchId, { actor, req } = {}) {
  * status implies (e.g. releasing a batch releases its codes for scanning).
  */
 export async function transition(batchId, to, { actor, req, reason = null } = {}) {
-  const batch = await db.get('SELECT * FROM batches WHERE id = ?', [batchId]);
+  const batch = await db.get('batch', batchId);
   if (!batch) throw notFound('Batch not found');
   assertTransition(batch.status, to);
 
@@ -166,35 +150,30 @@ export async function transition(batchId, to, { actor, req, reason = null } = {}
     throw badRequest('A recall requires a reason - it is shown to every patient who scans the batch.');
   }
 
-  await db.tx(async () => {
-    const stamps = {
-      printed: 'printed_at',
-      released: 'released_at',
-      recalled: 'recalled_at',
-    };
-    const stampCol = stamps[to];
+  /*
+   * The codes first, then the batch. A batch's codes can outnumber what one
+   * transaction carries, so this is not atomic - and the order is what keeps
+   * that safe. Verification decides from the BATCH status (and a code's own
+   * void), never from the per-code label being propagated here, so a
+   * half-propagated set changes no scan result. If the propagation fails, the
+   * batch is still in its old status and the transition can simply be run
+   * again; every step below is idempotent.
+   */
+  if (to === 'printed') {
+    await db.updateWhere('code', { batch_id: batch.id, status: 'issued' }, { status: 'printed' });
+  } else if (to === 'released') {
+    await db.updateWhere('code', { batch_id: batch.id, status: { in: ['issued', 'printed'] } }, { status: 'released' });
+  } else if (to === 'recalled') {
+    // Every not-yet-flagged code in the batch becomes recalled, so any
+    // future scan warns the patient immediately.
+    await db.updateWhere('code', { batch_id: batch.id, status: { ne: 'flagged' } }, { status: 'recalled' });
+  }
 
-    await db.run(
-      `UPDATE batches
-          SET status = ?,
-              ${stampCol ? `${stampCol} = strftime('%Y-%m-%dT%H:%M:%fZ','now'),` : ''}
-              recall_reason = COALESCE(?, recall_reason),
-              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-        WHERE id = ?`,
-      [to, to === 'recalled' ? reason : null, batchId]
-    );
-
-    // Propagate the states that individual codes care about.
-    if (to === 'printed') {
-      await db.run(`UPDATE codes SET status = 'printed' WHERE batch_id = ? AND status = 'issued'`, [batchId]);
-    } else if (to === 'released') {
-      await db.run(`UPDATE codes SET status = 'released' WHERE batch_id = ? AND status IN ('issued','printed')`, [batchId]);
-    } else if (to === 'recalled') {
-      // Every not-yet-flagged code in the batch becomes recalled, so any
-      // future scan warns the patient immediately.
-      await db.run(`UPDATE codes SET status = 'recalled' WHERE batch_id = ? AND status <> 'flagged'`, [batchId]);
-    }
-  });
+  const stamps = { printed: 'printed_at', released: 'released_at', recalled: 'recalled_at' };
+  const changes = { status: to };
+  if (stamps[to]) changes[stamps[to]] = db.now();
+  if (to === 'recalled') changes.recall_reason = reason;
+  await db.update('batch', batch, changes);
 
   await audit.record({
     actor,
@@ -206,51 +185,55 @@ export async function transition(batchId, to, { actor, req, reason = null } = {}
   });
 
   logger.info('batch transition', { batch: batch.batch_number, from: batch.status, to });
-  return await db.get('SELECT * FROM batches WHERE id = ?', [batchId]);
+  return await db.get('batch', batchId);
 }
 
 /** Per-batch code statistics for the dashboard. */
 export async function batchStats(batchId) {
-  const rows = await db.all('SELECT status, COUNT(*) AS n FROM codes WHERE batch_id = ? GROUP BY status', [batchId]);
-  const byStatus = Object.fromEntries(rows.map((r) => [r.status, r.n]));
-  const scans = await db.get(
-    `SELECT COUNT(*) AS total,
-            SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
-            SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged
-       FROM scans WHERE batch_id = ?`,
-    [batchId]
+  // Every count in one request, computed by the Lake rather than by fetching
+  // the codes - a batch can hold hundreds of thousands.
+  const statuses = TYPES.code.fields.status.enum;
+  const codeCounts = statuses
+    .map((st) => `"${st}": count(*[_type == "code" && batch_id == $id && status == "${st}"])`)
+    .join(', ');
+  const r = await db.query(
+    `{
+       "codes": {${codeCounts}},
+       "scans": {
+         "total": count(*[_type == "scan" && batch_id == $id]),
+         "genuine": count(*[_type == "scan" && batch_id == $id && result == "genuine"]),
+         "flagged": count(*[_type == "scan" && batch_id == $id && result == "flagged"])
+       }
+     }`,
+    { id: Number(batchId) }
   );
+  // Statuses with no codes are left out, as GROUP BY left them out.
+  const byStatus = Object.fromEntries(Object.entries(r.codes).filter(([, n]) => n > 0));
   return {
     codes: byStatus,
-    totalCodes: rows.reduce((a, r) => a + r.n, 0),
-    scans: { total: scans?.total ?? 0, genuine: scans?.genuine ?? 0, flagged: scans?.flagged ?? 0 },
+    totalCodes: Object.values(byStatus).reduce((a, n) => a + n, 0),
+    scans: r.scans,
   };
 }
 
 /** Paged code listing for a batch. */
 export async function listCodes(batchId, { page, pageSize, status, search } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
-  const where = ['c.batch_id = ?'];
-  const params = [batchId];
+  const where = {
+    batch_id: Number(batchId),
+    status: status || undefined,
+    // GROQ's match is word-based: the code's segments are its words, so a
+    // serial or a segment prefix finds it, as LIKE '%...%' mostly did.
+    code: search ? { match: `*${String(search).toUpperCase().replace(/[*"\\]/g, '')}*` } : undefined,
+  };
 
-  if (status) {
-    where.push('c.status = ?');
-    params.push(status);
-  }
-  if (search) {
-    where.push('c.code LIKE ?');
-    params.push(`%${String(search).toUpperCase()}%`);
-  }
-
-  const clause = `WHERE ${where.join(' AND ')}`;
-  const total = await db.scalar(`SELECT COUNT(*) FROM codes c ${clause}`, params);
-  const items = await db.all(
-    `SELECT c.id, c.code, c.serial, c.unit_index, c.status, c.scan_count,
-            c.first_scan_at, c.last_scan_at
-       FROM codes c ${clause}
-      ORDER BY c.unit_index LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+  const total = await db.count('code', where);
+  const items = await db.findMany('code', where, {
+    order: 'unit_index asc',
+    limit,
+    offset,
+    fields: ['code', 'serial', 'unit_index', 'status', 'scan_count', 'first_scan_at', 'last_scan_at'],
+  });
   return { items, total, ...meta };
 }
 
@@ -283,13 +266,19 @@ export async function qrDataUrl(code) {
  * physical supply chain.
  */
 export async function exportCsv(batchId) {
-  const batch = await db.get(
-    `SELECT b.*, p.sku, p.name FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
-    [batchId]
-  );
+  const batch = await withProduct(await db.get('batch', batchId));
   if (!batch) throw notFound('Batch not found');
 
-  const rows = await db.all('SELECT code, serial, unit_index FROM codes WHERE batch_id = ? ORDER BY unit_index', [batchId]);
+  // Paged by unit index, so a very large batch is never one enormous response.
+  const rows = [];
+  for (let from = 0; from < batch.quantity; from += 5000) {
+    rows.push(
+      ...(await db.findMany('code', { batch_id: batch.id, unit_index: { gte: from, lt: from + 5000 } }, {
+        order: 'unit_index asc',
+        fields: ['code', 'serial', 'unit_index'],
+      }))
+    );
+  }
   const header = 'unit_index,code,serial,qr_payload,batch_number,product_sku,mfg_date,expiry_date';
   const lines = rows.map((r) =>
     [
@@ -321,6 +310,13 @@ export async function exportCsv(batchId) {
     csv: [header, ...lines].join('\n'),
     warning: config.publicBaseUrlIsLocal ? LOCAL_BASE_URL_WARNING : undefined,
   };
+}
+
+/** A batch row with its product's sku and name alongside, as the old join gave. */
+async function withProduct(batch) {
+  if (!batch) return batch;
+  const product = await db.get('product', batch.product_id);
+  return { ...batch, sku: product?.sku ?? null, name: product?.name ?? null };
 }
 
 export default {

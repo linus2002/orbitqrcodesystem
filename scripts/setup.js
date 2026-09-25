@@ -48,8 +48,18 @@ PUBLIC_BASE_URL=http://localhost:3000
 SESSION_SECRET=${s()}
 CODE_SECRET=${s()}
 
-# --- Database --------------------------------------------------------------
-DB_FILE=./data/qrshield.db
+# --- Database: Sanity ------------------------------------------------------
+# All data lives in a Sanity dataset. These are read by the server only and
+# are never sent to the browser. Keep the dataset PRIVATE.
+#   SANITY_API_TOKEN: sanity.io/manage -> your project -> API -> Tokens ->
+#   Add API token, with Editor permissions. Treat it like a password.
+# Leave any of them empty to run on the local file below instead.
+SANITY_PROJECT_ID=
+SANITY_DATASET=production
+SANITY_API_TOKEN=
+
+# Local fallback store, used when Sanity is not configured.
+DB_FILE=./data/qrshield.json
 
 # --- Sessions --------------------------------------------------------------
 SESSION_TTL_HOURS=8
@@ -96,7 +106,7 @@ if (fs.existsSync(ENV_PATH)) {
   console.log('  SMS_WEBHOOK_SECRET give this to your SMS gateway');
 }
 
-console.log('\nApplying the database schema and demo data...\n');
+console.log('\nLoading the demo data...\n');
 const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'seed.js')], {
   stdio: 'inherit',
   cwd: ROOT,

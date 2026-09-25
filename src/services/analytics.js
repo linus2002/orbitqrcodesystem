@@ -14,13 +14,22 @@
  *
  * Every query here excludes sandbox/test batches by default, so pilot traffic
  * can never distort the live figures.
+ *
+ * GROQ has no GROUP BY. A figure broken down by day, country or batch selects
+ * the window's scans ONCE, as a short projected list, and counts within that
+ * list in the same request:
+ *
+ *   {"s": *[window]{created_at, result}} { "day1": count(s[...]), ... }
+ *
+ * so the dataset is scanned once per request, not once per figure. Only the
+ * narrow projection travels, never whole scan documents.
  */
 import * as db from '../db/index.js';
+import { TYPES } from '../db/schema.js';
 
-/** SQL fragment excluding test-batch traffic. */
-const LIVE_ONLY = 'is_test = 0';
+/** GROQ filter for live (non-test) scans. */
+const LIVE_SCANS = '_type == "scan" && is_test == 0';
 
-/** Headline numbers for the dashboard. */
 /**
  * Percentage change, or null when there is nothing to compare against.
  *
@@ -33,6 +42,10 @@ function changePct(current, previous) {
   return Number((((current - previous) / previous) * 100).toFixed(1));
 }
 
+/** Ids of every sandbox batch; their codes are left out of live figures. */
+const testBatchIds = () => db.query('*[_type == "batch" && is_test == 1].id');
+
+/** Headline numbers for the dashboard. */
 export async function overview({ days = 30 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const today = new Date(new Date().toDateString()).toISOString();
@@ -44,86 +57,75 @@ export async function overview({ days = 30 } = {}) {
    */
   const previousSince = new Date(Date.now() - days * 2 * 86400000).toISOString();
 
-  const scans = await db.get(
-    `SELECT COUNT(*) AS total,
-            SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
-            SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged,
-            SUM(CASE WHEN result = 'invalid' THEN 1 ELSE 0 END) AS invalid
-       FROM scans WHERE ${LIVE_ONLY} AND created_at >= ?`,
-    [since]
+  // Codes are counted per status by the Lake: the registry is far too large
+  // to project, unlike the scans of one window.
+  const codeStatus = (st) =>
+    `count(*[_type == "code" && !(batch_id in $testBatches)${st ? ` && status == "${st}"` : ''}])`;
+  const r = await db.query(
+    `{
+       "s": *[${LIVE_SCANS} && created_at >= $previousSince]{created_at, result},
+       "b": *[_type == "batch" && is_test == 0].status,
+       "a": *[_type == "alert" && status in ["open", "investigating"]]{status, severity},
+       "codesTotal": ${codeStatus()},
+       "codesVerified": ${codeStatus('verified')},
+       "codesFlagged": ${codeStatus('flagged')},
+       "reportsNew": count(*[_type == "consumerReport" && status == "new"])
+     }{
+       "total": count(s[created_at >= $since]),
+       "genuine": count(s[created_at >= $since && result == "genuine"]),
+       "flagged": count(s[created_at >= $since && result == "flagged"]),
+       "invalid": count(s[created_at >= $since && result == "invalid"]),
+       "previousTotal": count(s[created_at < $since]),
+       "previousFlagged": count(s[created_at < $since && result == "flagged"]),
+       "today": count(s[created_at >= $today]),
+       codesTotal, codesVerified, codesFlagged,
+       "batchesTotal": count(b),
+       "batchesActive": count(b[@ in ["released", "distributed"]]),
+       "batchesRecalled": count(b[@ == "recalled"]),
+       "alertsOpen": count(a[status == "open"]),
+       "alertsInvestigating": count(a[status == "investigating"]),
+       "alertsUrgent": count(a[severity in ["high", "critical"]]),
+       reportsNew
+     }`,
+    { since, previousSince, today, testBatches: await testBatchIds() }
   );
 
-  const previousScans = await db.get(
-    `SELECT COUNT(*) AS total,
-            SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged
-       FROM scans
-      WHERE ${LIVE_ONLY} AND created_at >= ? AND created_at < ?`,
-    [previousSince, since]
-  );
-
-  const todayScans = await db.scalar(
-    `SELECT COUNT(*) FROM scans WHERE ${LIVE_ONLY} AND created_at >= ?`,
-    [today]
-  );
-
-  const codes = await db.get(
-    `SELECT COUNT(*) AS total,
-            SUM(CASE WHEN c.status = 'verified' THEN 1 ELSE 0 END) AS verified,
-            SUM(CASE WHEN c.status = 'flagged' THEN 1 ELSE 0 END) AS flagged
-       FROM codes c JOIN batches b ON b.id = c.batch_id
-      WHERE b.is_test = 0`
-  );
-
-  const batches = await db.get(
-    `SELECT COUNT(*) AS total,
-            SUM(CASE WHEN status IN ('released','distributed') THEN 1 ELSE 0 END) AS active,
-            SUM(CASE WHEN status = 'recalled' THEN 1 ELSE 0 END) AS recalled
-       FROM batches WHERE is_test = 0`
-  );
-
-  const alertCounts = await db.get(
-    `SELECT SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
-            SUM(CASE WHEN status = 'investigating' THEN 1 ELSE 0 END) AS investigating,
-            SUM(CASE WHEN status IN ('open','investigating') AND severity IN ('high','critical') THEN 1 ELSE 0 END) AS urgent
-       FROM alerts`
-  );
-
-  const total = scans?.total ?? 0;
-  const flagged = scans?.flagged ?? 0;
+  const total = r.total;
+  const flagged = r.flagged;
 
   return {
     windowDays: days,
     scans: {
       total,
-      genuine: scans?.genuine ?? 0,
+      genuine: r.genuine,
       flagged,
-      invalid: scans?.invalid ?? 0,
-      today: todayScans ?? 0,
-      previousTotal: previousScans?.total ?? 0,
-      previousFlagged: previousScans?.flagged ?? 0,
-      changePct: changePct(total, previousScans?.total ?? 0),
-      flaggedChangePct: changePct(flagged, previousScans?.flagged ?? 0),
+      invalid: r.invalid,
+      today: r.today,
+      previousTotal: r.previousTotal,
+      previousFlagged: r.previousFlagged,
+      changePct: changePct(total, r.previousTotal),
+      flaggedChangePct: changePct(flagged, r.previousFlagged),
       // The single number the security team watches. Expressed per-thousand
       // because a healthy rate is a fraction of a percent.
       flagRatePerThousand: total ? Number(((flagged / total) * 1000).toFixed(1)) : 0,
     },
     codes: {
-      total: codes?.total ?? 0,
-      verified: codes?.verified ?? 0,
-      flagged: codes?.flagged ?? 0,
+      total: r.codesTotal,
+      verified: r.codesVerified,
+      flagged: r.codesFlagged,
     },
     batches: {
-      total: batches?.total ?? 0,
-      active: batches?.active ?? 0,
-      recalled: batches?.recalled ?? 0,
+      total: r.batchesTotal,
+      active: r.batchesActive,
+      recalled: r.batchesRecalled,
     },
     alerts: {
-      open: alertCounts?.open ?? 0,
-      investigating: alertCounts?.investigating ?? 0,
-      urgent: alertCounts?.urgent ?? 0,
+      open: r.alertsOpen,
+      investigating: r.alertsInvestigating,
+      urgent: r.alertsUrgent,
     },
     reports: {
-      new: await db.scalar(`SELECT COUNT(*) FROM consumer_reports WHERE status = 'new'`) ?? 0,
+      new: r.reportsNew,
     },
   };
 }
@@ -137,71 +139,106 @@ export async function scanTrend({ days = 14 } = {}) {
   const since = new Date(Date.now() - (days - 1) * 86400000);
   since.setHours(0, 0, 0, 0);
 
-  const rows = await db.all(
-    `SELECT substr(created_at, 1, 10) AS day,
-            SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
-            SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged,
-            SUM(CASE WHEN result = 'invalid' THEN 1 ELSE 0 END) AS invalid
-       FROM scans
-      WHERE ${LIVE_ONLY} AND created_at >= ?
-      GROUP BY day ORDER BY day`,
-    [since.toISOString()]
+  // Days are UTC calendar days, as substr(created_at, 1, 10) grouped them.
+  const dayList = [];
+  for (let i = 0; i < days; i++) {
+    dayList.push(new Date(since.getTime() + i * 86400000).toISOString().slice(0, 10));
+  }
+
+  const params = { since: since.toISOString() };
+  const parts = dayList.map((d, i) => {
+    params[`d${i}`] = `${d}T00:00:00.000Z`;
+    params[`e${i}`] = new Date(Date.parse(`${d}T00:00:00.000Z`) + 86400000).toISOString();
+    const range = `created_at >= $d${i} && created_at < $e${i}`;
+    return `"${d}": {
+      "genuine": count(s[${range} && result == "genuine"]),
+      "flagged": count(s[${range} && result == "flagged"]),
+      "invalid": count(s[${range} && result == "invalid"])
+    }`;
+  });
+  const byDay = await db.query(
+    `{"s": *[${LIVE_SCANS} && created_at >= $since]{created_at, result}}{${parts.join(',\n')}}`,
+    params
   );
 
-  const byDay = new Map(rows.map((r) => [r.day, r]));
-  const series = [];
-  for (let i = 0; i < days; i++) {
-    const d = new Date(since.getTime() + i * 86400000).toISOString().slice(0, 10);
-    const r = byDay.get(d);
-    series.push({
-      day: d,
-      genuine: r?.genuine ?? 0,
-      flagged: r?.flagged ?? 0,
-      invalid: r?.invalid ?? 0,
-    });
-  }
-  return series;
+  return dayList.map((day) => ({
+    day,
+    genuine: byDay[day]?.genuine ?? 0,
+    flagged: byDay[day]?.flagged ?? 0,
+    invalid: byDay[day]?.invalid ?? 0,
+  }));
 }
 
 /** Where scans are coming from - drives the "flags clustering" view. */
 export async function geoBreakdown({ days = 30, limit = 12 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
-  return await db.all(
-    `SELECT COALESCE(country, 'Unknown') AS country,
-            COALESCE(region, '') AS region,
-            COUNT(*) AS total,
-            SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged
-       FROM scans
-      WHERE ${LIVE_ONLY} AND created_at >= ?
-      GROUP BY country, region
-      ORDER BY flagged DESC, total DESC
-      LIMIT ?`,
-    [since, limit]
-  );
+  const window = `${LIVE_SCANS} && created_at >= $since`;
+
+  // The window's scans, reduced to a (country, region) key and a result.
+  const rows = `*[${window}]{"k": coalesce(country, "") + "|" + coalesce(region, ""), result}`;
+
+  // Step 1: the distinct pairs.
+  const keys = await db.query(`array::unique(${rows}[].k)`, { since });
+  if (!keys.length) return [];
+
+  // Step 2: the two counts for every pair, from one pass over the window.
+  const params = { since };
+  const parts = keys.map((k, i) => {
+    params[`k${i}`] = k;
+    return `{"i": ${i}, "total": count(s[k == $k${i}]), "flagged": count(s[k == $k${i} && result == "flagged"])}`;
+  });
+  const counts = (await db.query(`{"s": ${rows}}{"rows": [${parts.join(', ')}]}`, params)).rows;
+
+  return counts
+    .map((c) => {
+      const [country, region] = keys[c.i].split('|');
+      return { country: country || 'Unknown', region, total: c.total, flagged: c.flagged };
+    })
+    .sort((a, b) => b.flagged - a.flagged || b.total - a.total)
+    .slice(0, limit);
 }
 
 /** Batches ranked by flag rate - the "which product line is being copied" view. */
 export async function topFlaggedBatches({ days = 30, limit = 8 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
-  return await db.all(
-    `SELECT b.id, b.batch_number, b.status, b.expiry_date, p.name AS product_name, p.sku,
-            COUNT(s.id) AS scans,
-            SUM(CASE WHEN s.result = 'flagged' THEN 1 ELSE 0 END) AS flagged
-       FROM scans s
-       JOIN batches b  ON b.id = s.batch_id
-       JOIN products p ON p.id = b.product_id
-      WHERE s.is_test = 0 AND s.created_at >= ?
-      -- p.name and p.sku are listed explicitly: grouping by b.id only makes
-      -- the BATCHES columns functionally dependent, not the joined product's.
-      GROUP BY b.id, b.batch_number, b.status, b.expiry_date, p.name, p.sku
-      -- The aggregate is repeated rather than naming the flagged alias:
-      -- SQLite resolves output aliases in HAVING, Postgres does not, and only
-      -- GROUP BY and ORDER BY may use them in both.
-     HAVING SUM(CASE WHEN s.result = 'flagged' THEN 1 ELSE 0 END) > 0
-      ORDER BY flagged DESC, scans DESC
-      LIMIT ?`,
-    [since, limit]
+  const window = `${LIVE_SCANS} && created_at >= $since`;
+
+  // The window's batch-linked scans once, reduced to (batch, result); each
+  // batch's two counts come from that one list. Only batches with at least
+  // one flag qualify (the old HAVING).
+  const r = await db.query(
+    `{"s": *[${window} && defined(batch_id)]{batch_id, result}}{
+       "ids": array::unique(s[result == "flagged"][].batch_id),
+       s
+     }`,
+    { since }
   );
+  if (!r.ids.length) return [];
+
+  const tally = new Map(r.ids.map((id) => [id, { scans: 0, flagged: 0 }]));
+  for (const x of r.s) {
+    const t = tally.get(x.batch_id);
+    if (!t) continue;
+    t.scans += 1;
+    if (x.result === 'flagged') t.flagged += 1;
+  }
+
+  const rows = (
+    await db.findMany('batch', { id: { in: r.ids } }, {
+      fields: ['batch_number', 'status', 'expiry_date'],
+      extra: {
+        product_name: '*[_type == "product" && id == ^.product_id][0].name',
+        sku: '*[_type == "product" && id == ^.product_id][0].sku',
+      },
+    })
+  ).map((b) => ({ ...b, ...tally.get(b.id) }));
+
+  return rows
+    .map(({ id, batch_number, status, expiry_date, product_name, sku, scans, flagged }) => ({
+      id, batch_number, status, expiry_date, product_name, sku, scans, flagged,
+    }))
+    .sort((a, b) => b.flagged - a.flagged || b.scans - a.scans)
+    .slice(0, limit);
 }
 
 /**
@@ -210,33 +247,30 @@ export async function topFlaggedBatches({ days = 30, limit = 8 } = {}) {
  */
 export async function listScans({ page, pageSize, result, reason, channel, batchId, codeId, from, to, includeTest } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
-  const where = [];
-  const params = [];
+  const where = {
+    is_test: includeTest ? undefined : 0,
+    result: result || undefined,
+    reason: reason || undefined,
+    channel: channel || undefined,
+    batch_id: batchId ? Number(batchId) : undefined,
+    code_id: codeId ? Number(codeId) : undefined,
+    created_at: from || to ? { gte: from || undefined, lte: to || undefined } : undefined,
+  };
 
-  if (!includeTest) where.push('s.is_test = 0');
-  if (result) { where.push('s.result = ?'); params.push(result); }
-  if (reason) { where.push('s.reason = ?'); params.push(reason); }
-  if (channel) { where.push('s.channel = ?'); params.push(channel); }
-  if (batchId) { where.push('s.batch_id = ?'); params.push(batchId); }
-  if (codeId) { where.push('s.code_id = ?'); params.push(codeId); }
-  if (from) { where.push('s.created_at >= ?'); params.push(from); }
-  if (to) { where.push('s.created_at <= ?'); params.push(to); }
-
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = await db.scalar(`SELECT COUNT(*) FROM scans s ${clause}`, params);
-
-  const items = await db.all(
-    `SELECT s.id, s.code_text, s.result, s.reason, s.channel, s.scan_number,
-            s.country, s.region, s.city, s.signature_state, s.is_test, s.created_at,
-            b.batch_number, p.name AS product_name, p.sku
-       FROM scans s
-       LEFT JOIN batches b  ON b.id = s.batch_id
-       LEFT JOIN products p ON p.id = s.product_id
-       ${clause}
-      ORDER BY s.created_at DESC, s.id DESC
-      LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+  const total = await db.count('scan', where);
+  const items = await db.findMany('scan', where, {
+    order: ['created_at desc', 'id desc'],
+    limit,
+    offset,
+    // Named explicitly: ip_hash, msisdn_hash and user_agent must not leave.
+    fields: ['code_text', 'result', 'reason', 'channel', 'scan_number', 'country', 'region', 'city',
+      'signature_state', 'is_test', 'created_at'],
+    extra: {
+      batch_number: '*[_type == "batch" && id == ^.batch_id][0].batch_number',
+      product_name: '*[_type == "product" && id == ^.product_id][0].name',
+      sku: '*[_type == "product" && id == ^.product_id][0].sku',
+    },
+  });
 
   return { items, total, ...meta };
 }
@@ -251,31 +285,44 @@ export async function listScans({ page, pageSize, result, reason, channel, batch
 export async function complianceReport({ from, to } = {}) {
   const start = from ?? new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const end = to ?? new Date().toISOString().slice(0, 10);
-  const params = [`${start}T00:00:00.000Z`, `${end}T23:59:59.999Z`];
+  const range = { start: `${start}T00:00:00.000Z`, end: `${end}T23:59:59.999Z` };
 
-  const batches = await db.all(
-    `SELECT b.batch_number, p.sku, p.name AS product_name, p.manufacturer,
-            b.mfg_date, b.expiry_date, b.quantity, b.status,
-            b.codes_issued_at, b.released_at, b.recalled_at, b.recall_reason,
-            (SELECT COUNT(*) FROM codes c WHERE c.batch_id = b.id) AS codes_issued
-       FROM batches b JOIN products p ON p.id = b.product_id
-      WHERE b.is_test = 0 AND b.created_at BETWEEN ? AND ?
-      ORDER BY b.created_at DESC`,
-    params
+  const batches = await db.findMany(
+    'batch',
+    { is_test: 0, created_at: { gte: range.start, lte: range.end } },
+    {
+      order: 'created_at desc',
+      fields: ['batch_number', 'mfg_date', 'expiry_date', 'quantity', 'status',
+        'codes_issued_at', 'released_at', 'recalled_at', 'recall_reason'],
+      extra: {
+        sku: '*[_type == "product" && id == ^.product_id][0].sku',
+        product_name: '*[_type == "product" && id == ^.product_id][0].name',
+        manufacturer: '*[_type == "product" && id == ^.product_id][0].manufacturer',
+        codes_issued: 'count(*[_type == "code" && batch_id == ^.id])',
+      },
+    }
   );
+  // The report lists what the batch is, not the store's internal id.
+  for (const b of batches) delete b.id;
 
-  const totals = await db.get(
-    `SELECT COUNT(*) AS scans,
-            SUM(CASE WHEN result = 'genuine' THEN 1 ELSE 0 END) AS genuine,
-            SUM(CASE WHEN result = 'flagged' THEN 1 ELSE 0 END) AS flagged
-       FROM scans WHERE ${LIVE_ONLY} AND created_at BETWEEN ? AND ?`,
-    params
-  );
+  const inRange = 'created_at >= $start && created_at <= $end';
+  const alertParts = [];
+  for (const type of TYPES.alert.fields.type.enum) {
+    for (const status of TYPES.alert.fields.status.enum) {
+      alertParts.push(
+        `{"type": "${type}", "status": "${status}", "n": count(*[_type == "alert" && type == "${type}" && status == "${status}" && ${inRange}])}`
+      );
+    }
+  }
 
-  const alertSummary = await db.all(
-    `SELECT type, status, COUNT(*) AS n FROM alerts
-      WHERE created_at BETWEEN ? AND ? GROUP BY type, status`,
-    params
+  const r = await db.query(
+    `{
+       "scans": count(*[${LIVE_SCANS} && ${inRange}]),
+       "genuine": count(*[${LIVE_SCANS} && ${inRange} && result == "genuine"]),
+       "flagged": count(*[${LIVE_SCANS} && ${inRange} && result == "flagged"]),
+       "alerts": [${alertParts.join(', ')}]
+     }`,
+    range
   );
 
   return {
@@ -288,11 +335,12 @@ export async function complianceReport({ from, to } = {}) {
       recalledBatches: batches.filter((b) => b.status === 'recalled').length,
     },
     verification: {
-      totalChecks: totals?.scans ?? 0,
-      genuine: totals?.genuine ?? 0,
-      flagged: totals?.flagged ?? 0,
+      totalChecks: r.scans,
+      genuine: r.genuine,
+      flagged: r.flagged,
     },
-    alerts: alertSummary,
+    // Only the combinations that occurred, as GROUP BY returned them.
+    alerts: r.alerts.filter((a) => a.n > 0),
     batches,
   };
 }

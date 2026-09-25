@@ -78,11 +78,10 @@ export async function raise({ type, context = {}, codeId = null, batchId = null,
 
   // Fold into an existing open alert for the same code + type, if there is one.
   const existing = codeId
-    ? await db.get(
-        `SELECT * FROM alerts
-          WHERE type = ? AND code_id = ? AND status IN ('open', 'investigating')
-          ORDER BY id DESC LIMIT 1`,
-        [type, codeId]
+    ? await db.findOne(
+        'alert',
+        { type, code_id: codeId, status: { in: ['open', 'investigating'] } },
+        { order: 'id desc' }
       )
     : null;
 
@@ -96,28 +95,33 @@ export async function raise({ type, context = {}, codeId = null, batchId = null,
       lastSeenAt: new Date().toISOString(),
     };
     const severity = escalate(existing.severity, occurrences);
+    const changes = { detail_json: JSON.stringify(merged), severity };
+    if (scanId !== null && scanId !== undefined) changes.scan_id = scanId;
 
-    await db.run(
-      `UPDATE alerts
-          SET detail_json = ?, severity = ?, scan_id = COALESCE(?, scan_id),
-              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE id = ?`,
-      [JSON.stringify(merged), severity, scanId, existing.id]
-    );
+    await db.update('alert', existing, changes);
     logger.info('alert folded', { id: existing.id, type, occurrences, severity });
-    return await db.get('SELECT * FROM alerts WHERE id = ?', [existing.id]);
+    // Built rather than re-read: inside a transaction the write is not
+    // visible yet.
+    return { ...existing, ...changes, updated_at: db.now() };
   }
 
   const detail = { ...context, occurrences: 1, firstSeenAt: new Date().toISOString() };
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO alerts (type, severity, status, title, detail_json, code_id, batch_id, scan_id)
-     VALUES (?, ?, 'open', ?, ?, ?, ?, ?)`,
-    [type, spec.severity, spec.title(context), JSON.stringify(detail), codeId, batchId, scanId]
-  );
+  const alert = await db.insert('alert', {
+    type,
+    severity: spec.severity,
+    status: 'open',
+    title: spec.title(context),
+    detail_json: JSON.stringify(detail),
+    // Kept as its own field so guessing detection can filter on it.
+    ip_hash: context.ipHash ?? null,
+    code_id: codeId,
+    batch_id: batchId,
+    scan_id: scanId,
+  });
 
-  logger.warn('alert raised', { id: lastInsertRowid, type, severity: spec.severity });
+  logger.warn('alert raised', { id: alert.id, type, severity: spec.severity });
   notify(type, spec.severity, spec.title(context));
-  return await db.get('SELECT * FROM alerts WHERE id = ?', [lastInsertRowid]);
+  return alert;
 }
 
 /**
@@ -133,51 +137,71 @@ function notify(type, severity, title) {
   }
 }
 
+/**
+ * Attach the code, batch and product fields every alert view shows.
+ *
+ * Done as one query per related type rather than per alert. The batch is the
+ * alert's own, or its code's when it carries none - COALESCE(a.batch_id,
+ * c.batch_id) in the SQL this replaced.
+ */
+async function withContext(alerts, { codeFields = [], batchFields = [], productFields = [] } = {}) {
+  const ids = (list) => [...new Set(list.filter((v) => v !== null && v !== undefined))];
+  const byId = (rows) => new Map(rows.map((r) => [r.id, r]));
+
+  const codes = byId(await db.findMany('code', { id: { in: ids(alerts.map((a) => a.code_id)) } }, {
+    fields: ['code', 'batch_id', ...codeFields],
+  }));
+  const batchOf = (a) => a.batch_id ?? codes.get(a.code_id)?.batch_id ?? null;
+  const batches = byId(await db.findMany('batch', { id: { in: ids(alerts.map(batchOf)) } }, {
+    fields: ['batch_number', 'product_id', ...batchFields],
+  }));
+  const products = byId(await db.findMany('product', {
+    id: { in: ids([...batches.values()].map((b) => b.product_id)) },
+  }, { fields: ['name', ...productFields] }));
+
+  return alerts.map((a) => {
+    const c = codes.get(a.code_id);
+    const b = batches.get(batchOf(a));
+    const p = b ? products.get(b.product_id) : undefined;
+    return { a, c, b, p };
+  });
+}
+
 /** Paged, filtered alert queue for the dashboard. */
 export async function list({ page, pageSize, status, severity, type, batchId } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
-  const where = [];
-  const params = [];
+  const where = {
+    status: status || undefined,
+    severity: severity || undefined,
+    type: type || undefined,
+    batch_id: batchId ? Number(batchId) : undefined,
+  };
 
-  if (status) {
-    where.push('a.status = ?');
-    params.push(status);
-  }
-  if (severity) {
-    where.push('a.severity = ?');
-    params.push(severity);
-  }
-  if (type) {
-    where.push('a.type = ?');
-    params.push(type);
-  }
-  if (batchId) {
-    where.push('a.batch_id = ?');
-    params.push(batchId);
-  }
+  const total = await db.count('alert', where);
+  const rows = await db.findMany('alert', where, {
+    order: [
+      'select(status == "open" => 0, status == "investigating" => 1, 2) asc',
+      'select(severity == "critical" => 0, severity == "high" => 1, severity == "medium" => 2, 3) asc',
+      'created_at desc',
+    ],
+    limit,
+    offset,
+    extra: { assignee_name: '*[_type == "user" && id == ^.assigned_to][0].full_name' },
+  });
 
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = await db.scalar(`SELECT COUNT(*) FROM alerts a ${clause}`, params);
-
-  const rows = await db.all(
-    `SELECT a.*, c.code AS code, b.batch_number, p.name AS product_name,
-            u.full_name AS assignee_name
-       FROM alerts a
-       LEFT JOIN codes c    ON c.id = a.code_id
-       LEFT JOIN batches b  ON b.id = COALESCE(a.batch_id, c.batch_id)
-       LEFT JOIN products p ON p.id = b.product_id
-       LEFT JOIN users u    ON u.id = a.assigned_to
-       ${clause}
-      ORDER BY
-        CASE a.status WHEN 'open' THEN 0 WHEN 'investigating' THEN 1 ELSE 2 END,
-        CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-        a.created_at DESC
-      LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+  const items = (await withContext(rows)).map(({ a, c, b, p }) => {
+    const { ip_hash, ...r } = a;
+    return {
+      ...r,
+      code: c?.code ?? null,
+      batch_number: b?.batch_number ?? null,
+      product_name: p?.name ?? null,
+      detail: r.detail_json ? JSON.parse(r.detail_json) : null,
+    };
+  });
 
   return {
-    items: rows.map((r) => ({ ...r, detail: r.detail_json ? JSON.parse(r.detail_json) : null })),
+    items,
     total,
     ...meta,
   };
@@ -185,28 +209,37 @@ export async function list({ page, pageSize, status, severity, type, batchId } =
 
 /** Full detail for one alert, including the scans that produced it. */
 export async function getById(id) {
-  const alert = await db.get(
-    `SELECT a.*, c.code, c.scan_count, c.status AS code_status, c.verified_count,
-            b.batch_number, b.expiry_date, b.status AS batch_status, p.name AS product_name, p.sku
-       FROM alerts a
-       LEFT JOIN codes c    ON c.id = a.code_id
-       LEFT JOIN batches b  ON b.id = COALESCE(a.batch_id, c.batch_id)
-       LEFT JOIN products p ON p.id = b.product_id
-      WHERE a.id = ?`,
-    [id]
-  );
-  if (!alert) return null;
+  const row = await db.get('alert', id);
+  if (!row) return null;
+  const [{ c, b, p }] = await withContext([row], {
+    codeFields: ['scan_count', 'status', 'verified_count'],
+    batchFields: ['expiry_date', 'status'],
+    productFields: ['sku'],
+  });
+  const alert = {
+    ...row,
+    code: c?.code ?? null,
+    scan_count: c?.scan_count ?? null,
+    code_status: c?.status ?? null,
+    verified_count: c?.verified_count ?? null,
+    batch_number: b?.batch_number ?? null,
+    expiry_date: b?.expiry_date ?? null,
+    batch_status: b?.status ?? null,
+    product_name: p?.name ?? null,
+    sku: p?.sku ?? null,
+  };
 
   const relatedScans = alert.code_id
-    ? await db.all(
-        `SELECT id, result, reason, channel, country, region, city, created_at
-           FROM scans WHERE code_id = ? ORDER BY created_at DESC LIMIT 50`,
-        [alert.code_id]
-      )
+    ? await db.findMany('scan', { code_id: alert.code_id }, {
+        order: 'created_at desc',
+        limit: 50,
+        fields: ['id', 'result', 'reason', 'channel', 'country', 'region', 'city', 'created_at'],
+      })
     : [];
 
+  const { ip_hash, ...rest } = alert;
   return {
-    ...alert,
+    ...rest,
     detail: alert.detail_json ? JSON.parse(alert.detail_json) : null,
     scans: relatedScans,
   };
@@ -214,46 +247,33 @@ export async function getById(id) {
 
 /** Move an alert through its workflow. Returns the updated row. */
 export async function updateStatus(id, { status, assignedTo, note, actor }) {
-  const alert = await db.get('SELECT * FROM alerts WHERE id = ?', [id]);
+  const alert = await db.get('alert', id);
   if (!alert) return null;
 
   const resolving = status === 'resolved' || status === 'dismissed';
-  await db.run(
-    `UPDATE alerts
-        SET status = COALESCE(?, status),
-            assigned_to = COALESCE(?, assigned_to),
-            resolution_note = COALESCE(?, resolution_note),
-            resolved_by = CASE WHEN ? THEN ? ELSE resolved_by END,
-            resolved_at = CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE resolved_at END,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [
-      status ?? null,
-      assignedTo ?? null,
-      note ?? null,
-      resolving ? 1 : 0,
-      actor?.id ?? null,
-      resolving ? 1 : 0,
-      id,
-    ]
-  );
-  return await db.get('SELECT * FROM alerts WHERE id = ?', [id]);
+  const changes = {
+    status: status ?? undefined,
+    assigned_to: assignedTo ?? undefined,
+    resolution_note: note ?? undefined,
+  };
+  if (resolving) {
+    changes.resolved_by = actor?.id ?? null;
+    changes.resolved_at = db.now();
+  }
+  await db.update('alert', alert, changes);
+  // Built rather than re-read, so this also works inside a transaction.
+  const merged = { ...alert, updated_at: db.now() };
+  for (const [k, v] of Object.entries(changes)) if (v !== undefined) merged[k] = v;
+  return merged;
 }
 
 /** Counts for the dashboard header. */
 export async function counts() {
-  const rows = await db.all(
-    `SELECT status, severity, COUNT(*) AS n FROM alerts GROUP BY status, severity`
-  );
-  const out = { open: 0, investigating: 0, resolved: 0, dismissed: 0, critical: 0, high: 0 };
-  for (const r of rows) {
-    out[r.status] = (out[r.status] ?? 0) + r.n;
-    if (r.status === 'open' || r.status === 'investigating') {
-      if (r.severity === 'critical') out.critical += r.n;
-      if (r.severity === 'high') out.high += r.n;
-    }
-  }
-  return out;
+  const STATUSES = ['open', 'investigating', 'resolved', 'dismissed'];
+  const parts = STATUSES.map((st) => `"${st}": count(*[_type == "alert" && status == "${st}"])`);
+  parts.push('"critical": count(*[_type == "alert" && status in ["open", "investigating"] && severity == "critical"])');
+  parts.push('"high": count(*[_type == "alert" && status in ["open", "investigating"] && severity == "high"])');
+  return db.query(`{${parts.join(', ')}}`);
 }
 
 export default { raise, list, getById, updateStatus, counts };

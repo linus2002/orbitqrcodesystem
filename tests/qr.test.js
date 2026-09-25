@@ -83,9 +83,7 @@ test('a scanned QR drives the full verification path to a genuine result', async
   });
 
   assert.equal(result.result, 'genuine');
-  const scanned = await (await import('../src/db/index.js')).get(
-    'SELECT signature_state FROM scans ORDER BY id DESC LIMIT 1'
-  );
+  const scanned = await (await import('../src/db/index.js')).findOne('scan', {}, { order: 'id desc' });
   assert.equal(scanned.signature_state, 'valid', 'the QR signature is recorded as verified');
 });
 

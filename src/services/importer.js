@@ -133,7 +133,7 @@ export async function importProducts(sheetRows, { actor, req, dryRun = false } =
     }
     seen.set(sku, rowNo);
 
-    const existing = await db.get('SELECT id FROM products WHERE sku = ?', [sku]);
+    const existing = await db.findOne('product', { sku }, { fields: ['id'] });
     planned.push({ row: rowNo, sku, data, action: existing ? 'update' : 'create', id: existing?.id });
   }
 
@@ -151,25 +151,21 @@ export async function importProducts(sheetRows, { actor, req, dryRun = false } =
 
   for (const p of planned) {
     const d = p.data;
+    const fields = {
+      name: d.name,
+      generic_name: d.genericName || null,
+      strength: d.strength || null,
+      dosage_form: d.dosageForm || null,
+      pack_size: d.packSize || null,
+      manufacturer: d.manufacturer,
+      category: d.category || null,
+    };
     if (p.action === 'create') {
-      const { lastInsertRowid } = await db.run(
-        `INSERT INTO products (sku, name, generic_name, strength, dosage_form, pack_size, manufacturer, category)
-         VALUES (?,?,?,?,?,?,?,?)`,
-        [p.sku, d.name, d.genericName || null, d.strength || null, d.dosageForm || null,
-         d.packSize || null, d.manufacturer, d.category || null]
-      );
+      const row = await db.insert('product', { sku: p.sku, ...fields });
       created += 1;
-      p.id = lastInsertRowid;
+      p.id = row.id;
     } else {
-      await db.run(
-        `UPDATE products
-            SET name = ?, generic_name = ?, strength = ?, dosage_form = ?,
-                pack_size = ?, manufacturer = ?, category = ?,
-                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-          WHERE id = ?`,
-        [d.name, d.genericName || null, d.strength || null, d.dosageForm || null,
-         d.packSize || null, d.manufacturer, d.category || null, p.id]
-      );
+      await db.update('product', p.id, fields);
       updated += 1;
     }
   }
@@ -248,7 +244,7 @@ export async function importBatches(sheetRows, { actor, req, dryRun = false } = 
       continue;
     }
 
-    const product = await db.get('SELECT id, sku FROM products WHERE sku = ?', [data.sku]);
+    const product = await db.findOne('product', { sku: data.sku }, { fields: ['id', 'sku'] });
     if (!product) {
       errors.push({ row: rowNo, message: `no product with SKU ${data.sku} - import the products first` });
       continue;
@@ -261,7 +257,7 @@ export async function importBatches(sheetRows, { actor, req, dryRun = false } = 
     }
     seen.set(key, rowNo);
 
-    if (await db.get('SELECT id FROM batches WHERE batch_number = ?', [data.batchNumber])) {
+    if (await db.findOne('batch', { batch_number: data.batchNumber }, { fields: ['id'] })) {
       errors.push({ row: rowNo, message: `batch ${data.batchNumber} already exists - batch numbers identify a production run and are never reused` });
       continue;
     }
@@ -294,12 +290,16 @@ export async function importBatches(sheetRows, { actor, req, dryRun = false } = 
   for (const p of planned) {
     // Recorded the same way as a batch created in the dashboard: the
     // product's current leaflet, as the one this batch shipped with.
-    await db.run(
-      `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, notes, leaflet_id)
-       VALUES (?,?,?,?,?,?,?,?)`,
-      [p.data.batchNumber, p.productId, p.data.mfgDate, p.data.expiryDate,
-       p.data.quantity, p.isTest ? 1 : 0, p.notes || null, await currentLeafletId(p.productId)]
-    );
+    await db.insert('batch', {
+      batch_number: p.data.batchNumber,
+      product_id: p.productId,
+      mfg_date: p.data.mfgDate,
+      expiry_date: p.data.expiryDate,
+      quantity: p.data.quantity,
+      is_test: p.isTest ? 1 : 0,
+      notes: p.notes || null,
+      leaflet_id: await currentLeafletId(p.productId),
+    });
     created += 1;
   }
 

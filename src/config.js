@@ -93,25 +93,37 @@ export const config = {
   publicBaseUrlIsLocal: isLocalBaseUrl(publicBaseUrl),
 
   /*
-   * One driver (libSQL) serves both shapes: a local file in development, a
-   * hosted Turso database in production. Serverless hosting has no persistent
-   * filesystem, so TURSO_DATABASE_URL is what makes a deploy durable - without
-   * it the app silently falls back to a file that the platform will discard.
+   * The database is a Sanity dataset. All three values are server-side
+   * secrets in practice: they are read here, in the Node process, and never
+   * sent to the browser - nothing in this object is exposed by any endpoint,
+   * and Vite only bundles variables prefixed VITE_. Keep them in .env locally
+   * and in the host's environment settings in production; never commit them.
+   *
+   * The token needs write access (an Editor or Developer token from
+   * sanity.io/manage -> API -> Tokens). The dataset should be PRIVATE, so the
+   * project id alone reads nothing.
+   *
+   * With any of the three missing, the app runs on a local file instead
+   * (db.file) - fine for development, never for a serverless deploy, which has
+   * no persistent disk.
    */
+  sanity: {
+    projectId: str('SANITY_PROJECT_ID', ''),
+    dataset: str('SANITY_DATASET', ''),
+    token: str('SANITY_API_TOKEN', ''),
+    apiVersion: str('SANITY_API_VERSION', '2025-02-19'),
+    get enabled() {
+      return Boolean(this.projectId && this.dataset && this.token);
+    },
+  },
+
   db: {
-    file: path.resolve(ROOT, str('DB_FILE', './data/qrshield.db')),
-    url: str('TURSO_DATABASE_URL', ''),
-    authToken: str('TURSO_AUTH_TOKEN', ''),
-    /*
-     * A Postgres connection string (Supabase). When set it wins over the two
-     * above: it is the only one of the three that both persists on a
-     * serverless platform and is shared by every instance.
-     *
-     * Supabase gives two - use the CONNECTION POOLER one (port 6543) for
-     * serverless. The direct connection (5432) allows far fewer clients, and
-     * a function that scales out will exhaust them.
-     */
-    postgresUrl: str('DATABASE_URL', str('POSTGRES_URL', '')),
+    // The local fallback store: a JSON file of documents.
+    // ':memory:' keeps nothing on disk (the tests).
+    file:
+      str('DB_FILE', '') === ':memory:'
+        ? ':memory:'
+        : path.resolve(ROOT, str('DB_FILE', './data/qrshield.json')),
   },
 
   secrets: {
@@ -139,14 +151,14 @@ export const config = {
     loginPer15Min: int('RL_LOGIN_PER_15MIN', 5),
     reportPerHour: int('RL_REPORT_PER_HOUR', 5),
     /*
-     * 'memory' for a single long-running process, 'sql' when more than one
+     * 'memory' for a single long-running process, 'db' when more than one
      * instance serves traffic - on serverless the counters must be shared or
      * an attacker just spreads attempts across instances.
      */
     store: str(
       'RATELIMIT_STORE',
-      str('TURSO_DATABASE_URL', '') || str('DATABASE_URL', '') || str('POSTGRES_URL', '')
-        ? 'sql'
+      str('SANITY_PROJECT_ID', '') && str('SANITY_DATASET', '') && str('SANITY_API_TOKEN', '')
+        ? 'db'
         : 'memory'
     ),
     guessAlertThreshold: int('GUESS_ALERT_THRESHOLD', 8),

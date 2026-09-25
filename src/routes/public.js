@@ -54,7 +54,7 @@ const onVerifyLimit = (req) => {
 router.get('/health', async (req, res) => {
   let dbOk = true;
   try {
-    await db.scalar('SELECT 1');
+    await db.migrate({ silent: true });
   } catch {
     dbOk = false;
   }
@@ -149,23 +149,19 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
   });
 
   const normalized = data.code ? normalizeCode(data.code) : null;
-  const codeRow = normalized ? await db.get('SELECT id, batch_id FROM codes WHERE code = ?', [normalized]) : null;
+  const codeRow = normalized ? await db.getCode(normalized) : null;
 
+  // The report, its alert and the link between them land together or not at all.
   const report = await db.tx(async () => {
-    const { lastInsertRowid } = await db.run(
-      `INSERT INTO consumer_reports
-         (code_text, code_id, scan_id, reporter_name, reporter_contact, purchase_location, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        normalized,
-        codeRow?.id ?? null,
-        data.scanId ?? null,
-        data.reporterName ?? null,
-        data.reporterContact ?? null,
-        data.purchaseLocation ?? null,
-        data.description,
-      ]
-    );
+    const row = await db.insert('consumerReport', {
+      code_text: normalized,
+      code_id: codeRow?.id ?? null,
+      scan_id: data.scanId ?? null,
+      reporter_name: data.reporterName ?? null,
+      reporter_contact: data.reporterContact ?? null,
+      purchase_location: data.purchaseLocation ?? null,
+      description: data.description,
+    });
 
     const alert = await alerts.raise({
       type: 'consumer_report',
@@ -180,10 +176,8 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
       },
     });
 
-    if (alert) {
-      await db.run('UPDATE consumer_reports SET alert_id = ? WHERE id = ?', [alert.id, lastInsertRowid]);
-    }
-    return lastInsertRowid;
+    if (alert) await db.update('consumerReport', row, { alert_id: alert.id });
+    return row.id;
   });
 
   logger.info('consumer report filed', { reportId: report, code: normalized });
@@ -210,9 +204,7 @@ router.get('/portal', async (req, res) => {
 // GET /api/product/:sku/leaflet - the public leaflet
 // ---------------------------------------------------------------------------
 router.get('/product/:sku/leaflet', async (req, res) => {
-  const product = await db.get('SELECT * FROM products WHERE sku = ?', [
-    String(req.params.sku).toUpperCase(),
-  ]);
+  const product = await db.findOne('product', { sku: String(req.params.sku).toUpperCase() });
   if (!product) throw notFound('Product not found');
 
   const lang = String(req.query.lang ?? 'en');
@@ -233,12 +225,10 @@ router.get('/product/:sku/leaflet', async (req, res) => {
    * A patient may be on a slow connection, and every past version is weight
    * they did not ask for.
    */
-  const versions = await db.all(
-    `SELECT id, version, effective_from FROM leaflets
-      WHERE product_id = ? AND language = ?
-      ORDER BY effective_from DESC, id DESC`,
-    [product.id, lang]
-  );
+  const versions = await db.findMany('leaflet', { product_id: product.id, language: lang }, {
+    order: ['effective_from desc', 'id desc'],
+    fields: ['id', 'version', 'effective_from'],
+  });
   if (!versions.length) throw notFound('No leaflet is published for this product');
 
   const wanted =
@@ -247,7 +237,7 @@ router.get('/product/:sku/leaflet', async (req, res) => {
       : versions.find((v) => v.version === String(req.query.version));
   if (!wanted) throw notFound('That version of the leaflet does not exist');
 
-  const leaflet = await db.get('SELECT * FROM leaflets WHERE id = ?', [wanted.id]);
+  const leaflet = await db.get('leaflet', wanted.id);
 
   res.json({
     product: {
@@ -261,7 +251,7 @@ router.get('/product/:sku/leaflet', async (req, res) => {
       version: leaflet.version,
       language: leaflet.language,
       effectiveFrom: leaflet.effective_from,
-      sections: JSON.parse(leaflet.sections_json),
+      sections: leaflet.sections,
       // Said explicitly rather than left for the page to work out from the
       // history: it drives a warning the reader must see before the content.
       superseded: wanted.id !== versions[0].id,

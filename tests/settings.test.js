@@ -37,12 +37,13 @@ beforeEach(async () => {
   await resetRateLimits();
 });
 
-const setThreshold = (n) =>
-  db.run(
-    `INSERT INTO settings (key, value) VALUES ('alerts.duplicate_threshold', ?)
-     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-    [String(n)]
-  );
+/** Store a raw value, bypassing validation - as a hand edit would. */
+async function storeRaw(key, value) {
+  if (await db.get('setting', key)) await db.update('setting', key, { value });
+  else await db.insert('setting', { key, value });
+}
+
+const setThreshold = (n) => storeRaw('alerts.duplicate_threshold', String(n));
 
 /** Verify one code from several distinct devices; return each result. */
 async function fromDevices(code, n) {
@@ -81,12 +82,12 @@ test('the same device re-checking inside the grace window stays genuine at any t
 });
 
 test('a corrupted stored threshold falls back to 1, never to "no limit"', async () => {
-  await db.run(`INSERT INTO settings (key, value) VALUES ('alerts.duplicate_threshold', 'lots')`);
+  await storeRaw('alerts.duplicate_threshold', 'lots');
   assert.deepEqual(await fromDevices(codes[4], 2), ['genuine', 'flagged']);
 });
 
 test('a stored threshold above the range is not trusted either', async () => {
-  await db.run(`INSERT INTO settings (key, value) VALUES ('alerts.duplicate_threshold', '50')`);
+  await storeRaw('alerts.duplicate_threshold', '50');
   assert.deepEqual(await fromDevices(codes[5], 2), ['genuine', 'flagged']);
 });
 
@@ -101,7 +102,7 @@ test('the threshold can be changed within 1-3, and the change is audited from an
 
   assert.equal(res.status, 200);
   assert.equal(res.body.value, '2');
-  const entry = await db.get(`SELECT * FROM audit_log WHERE action = 'settings.update' ORDER BY id DESC LIMIT 1`);
+  const entry = await db.findOne('auditLog', { action: 'settings.update' }, { order: 'id desc' });
   assert.equal(entry.actor_email, ADMIN.email);
   assert.equal(entry.entity_id, 'alerts.duplicate_threshold');
   assert.deepEqual(JSON.parse(entry.detail_json), { from: 1, to: 2 });
@@ -114,7 +115,7 @@ test('the threshold cannot be set outside 1-3 or to a non-number', async () => {
     const res = await client.patch('/api/admin/settings/alerts.duplicate_threshold', { value });
     assert.equal(res.status, 400, `"${value}" must be refused`);
   }
-  assert.equal(await db.scalar(`SELECT COUNT(*) FROM settings WHERE key = 'alerts.duplicate_threshold'`), 0);
+  assert.equal(await db.count('setting', { key: 'alerts.duplicate_threshold' }), 0);
 });
 
 test('an unknown key cannot be written', async () => {
@@ -123,7 +124,7 @@ test('an unknown key cannot be written', async () => {
   const res = await client.patch('/api/admin/settings/anything.at_all', { value: 'x' });
 
   assert.equal(res.status, 400);
-  assert.equal(await db.scalar(`SELECT COUNT(*) FROM settings WHERE key = 'anything.at_all'`), 0);
+  assert.equal(await db.count('setting', { key: 'anything.at_all' }), 0);
 });
 
 test('a missing value is refused, but an empty notice is allowed - it hides the notice', async () => {
@@ -163,7 +164,7 @@ test('only an admin can change settings', async () => {
 });
 
 test('the Settings screen lists every defined setting and nothing else', async () => {
-  await db.run(`INSERT INTO settings (key, value) VALUES ('stray.key', 'x')`);
+  await storeRaw('stray.key', 'x');
   await client.login(ADMIN.email, ADMIN.password);
 
   const res = await client.get('/api/admin/settings');

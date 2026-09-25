@@ -48,18 +48,16 @@ beforeEach(async () => {
 
 /** Another product, deliberately without a leaflet. */
 async function product(sku, name = 'Testamol', strength = '500 mg') {
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO products (sku, name, strength, dosage_form, manufacturer)
-     VALUES (?, ?, ?, 'Tablet', 'Northbridge')`,
-    [sku, name, strength]
-  );
-  return lastInsertRowid;
+  const row = await db.insert('product', {
+    sku, name, strength, dosage_form: 'Tablet', manufacturer: 'Northbridge',
+  });
+  return row.id;
 }
 
 const publish = (id, body) =>
   client.post(`/api/admin/products/${id}/leaflets`, { version: '1.0', sections: SECTIONS, reason: REASON, ...body });
 
-const countFor = (id) => db.scalar('SELECT COUNT(*) FROM leaflets WHERE product_id = ?', [id]);
+const countFor = (id) => db.count('leaflet', { product_id: id });
 
 // ---------------------------------------------------------------------------
 // One product
@@ -102,7 +100,7 @@ test('a newer version becomes what the QR opens, and the old one is kept', async
   const page = await client.get('/api/product/AMX25/leaflet');
   assert.equal(page.body.leaflet.version, '2.0', 'the newest is served');
 
-  const kept = await db.all('SELECT version FROM leaflets WHERE product_id = 1 ORDER BY id');
+  const kept = await db.findMany('leaflet', { product_id: 1 }, { order: 'id asc' });
   assert.deepEqual(kept.map((l) => l.version), ['1.0', '2.0'], 'the earlier version survives');
 });
 
@@ -162,9 +160,7 @@ test('publishing is recorded in the audit log with who and why', async () => {
 
   await publish(id);
 
-  const entry = await db.get(
-    `SELECT * FROM audit_log WHERE action = 'leaflet.publish' ORDER BY id DESC LIMIT 1`
-  );
+  const entry = await db.findOne('auditLog', { action: 'leaflet.publish' }, { order: 'id desc' });
   assert.ok(entry, 'an audit entry exists');
   assert.equal(entry.actor_email, ADMIN.email, 'who');
   const detail = JSON.parse(entry.detail_json);
@@ -193,12 +189,13 @@ test('one publish covers several strengths with identical content', async () => 
   );
   assert.equal(res.body.product_id, b25, 'the body is still the named product\'s row');
 
-  const rows = await db.all(
-    `SELECT p.sku, l.version, l.language, l.sections_json FROM leaflets l
-       JOIN products p ON p.id = l.product_id WHERE p.sku IN ('BEL25','BEL50') ORDER BY p.sku`
-  );
+  const bel = await db.findMany('product', { sku: { in: ['BEL25', 'BEL50'] } }, { order: 'sku asc' });
+  const rows = [];
+  for (const p of bel) {
+    for (const l of await db.findMany('leaflet', { product_id: p.id })) rows.push({ sku: p.sku, ...l });
+  }
   assert.equal(rows.length, 2, 'one row per product');
-  assert.equal(rows[0].sections_json, rows[1].sections_json, 'identical content');
+  assert.deepEqual(rows[0].sections, rows[1].sections, 'identical content');
   assert.deepEqual(rows.map((r) => r.version), ['1.0', '1.0'], 'identical version - that IS the grouping');
 
   for (const sku of ['BEL25', 'BEL50']) {
@@ -253,9 +250,7 @@ test('every covered product gets its own audit entry naming the whole set', asyn
 
   await publish(b25, { alsoApplyTo: [b50] });
 
-  const entries = await db.all(
-    `SELECT detail_json FROM audit_log WHERE action = 'leaflet.publish' ORDER BY id`
-  );
+  const entries = await db.findMany('auditLog', { action: 'leaflet.publish' }, { order: 'id asc' });
   assert.equal(entries.length, 2, 'one per product, so each SKU\'s own trail is complete');
   const details = entries.map((e) => JSON.parse(e.detail_json));
   assert.deepEqual(details.map((d) => d.sku), ['BEL25', 'BEL50']);

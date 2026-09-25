@@ -38,11 +38,11 @@ test('a person can change their own display name', async () => {
   const res = await client.patch('/api/auth/profile', { fullName: 'Renamed Person' });
   assert.equal(res.status, 200);
   assert.equal(res.body.user.fullName, 'Renamed Person');
-  assert.equal(await db.scalar('SELECT full_name FROM users'), 'Renamed Person');
+  assert.equal((await db.findOne('user')).full_name, 'Renamed Person');
 });
 
 test('a display name cannot be blanked through the API', async () => {
-  const before = await db.scalar('SELECT full_name FROM users');
+  const before = (await db.findOne('user')).full_name;
 
   // Only spaces: trimmed to nothing, which used to be stored.
   const spaces = await client.patch('/api/auth/profile', { fullName: '    ' });
@@ -51,16 +51,16 @@ test('a display name cannot be blanked through the API', async () => {
 
   assert.equal(spaces.status, 422);
   assert.equal(empty.status, 422, 'refused, not reported as a success');
-  assert.equal(await db.scalar('SELECT full_name FROM users'), before, 'the name is unchanged');
+  assert.equal((await db.findOne('user')).full_name, before, 'the name is unchanged');
 });
 
 test('leaving the name out still lets the picture be changed on its own', async () => {
-  const before = await db.scalar('SELECT full_name FROM users');
+  const before = (await db.findOne('user')).full_name;
 
   const res = await client.patch('/api/auth/profile', { avatar: null });
 
   assert.equal(res.status, 200);
-  assert.equal(await db.scalar('SELECT full_name FROM users'), before);
+  assert.equal((await db.findOne('user')).full_name, before);
 });
 
 test('an avatar is stored and can be cleared again', async () => {
@@ -70,7 +70,7 @@ test('an avatar is stored and can be cleared again', async () => {
 
   const cleared = await client.patch('/api/auth/profile', { avatar: null });
   assert.equal(cleared.body.user.avatar, null);
-  assert.equal(await db.scalar('SELECT avatar FROM users'), null);
+  assert.equal((await db.findOne('user')).avatar, null);
 });
 
 test('an SVG avatar is refused', async () => {
@@ -84,7 +84,7 @@ test('an SVG avatar is refused', async () => {
   });
   assert.equal(res.status, 400);
   assert.match(res.body.error.message, /JPEG, PNG or WebP/);
-  assert.equal(await db.scalar('SELECT avatar FROM users'), null);
+  assert.equal((await db.findOne('user')).avatar, null);
 });
 
 test('an avatar over the size cap is refused', async () => {
@@ -105,7 +105,7 @@ test('a remote URL is not accepted as an avatar', async () => {
 });
 
 test('role, status and email cannot be changed through the profile', async () => {
-  const before = await db.get('SELECT email, role, status FROM users');
+  const before = await db.findOne('user', {}, { fields: ['email', 'role', 'status'] });
 
   const res = await client.patch('/api/auth/profile', {
     fullName: 'Still Me',
@@ -116,7 +116,7 @@ test('role, status and email cannot be changed through the profile', async () =>
   });
   assert.equal(res.status, 200, 'the recognised field is still applied');
 
-  const after = await db.get('SELECT email, role, status FROM users');
+  const after = await db.findOne('user', {}, { fields: ['email', 'role', 'status'] });
   assert.deepEqual(after, before, 'nothing else moved');
   assert.equal(res.body.user.fullName, 'Still Me');
 });

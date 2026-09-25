@@ -16,3 +16,13 @@ dist/
 
 # The .env template lives in scripts/setup.js, which generates real secrets.
 .env.example
+
+# The local fallback store (the Sanity dataset holds the real data).
+data/*.json
+data/*.json.tmp
+
+# Sanity Studio: its .env holds the project id; build output is regenerated.
+studio/.env
+studio/.env.*
+studio/dist/
+studio/.sanity/

@@ -14,7 +14,10 @@
  *     cluster on the antimalarial line (the highest-risk real-world category)
  *   - the alerts, consumer reports and shipments that history implies
  *
- * Re-running is safe: the script clears the demo tables first.
+ * Re-running is safe: the script clears the store first. Against the Sanity
+ * dataset that means DELETING EVERYTHING in it, so it refuses unless
+ * ALLOW_DESTRUCTIVE_RESET=1 is set - seed a throwaway dataset, never the live
+ * one.
  */
 import * as db from '../src/db/index.js';
 import { config } from '../src/config.js';
@@ -43,15 +46,17 @@ const ymd = (d) => d.toISOString().slice(0, 10);
 db.open();
 await db.migrate({ silent: true });
 
-console.log('Seeding QR Shield demonstration data...\n');
+console.log(`Seeding QR Shield demonstration data into ${db.describe()}...\n`);
 
 // ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
-await db.resetTables([
-  'sms_log', 'audit_log', 'consumer_reports', 'alerts', 'scans',
-  'shipments', 'codes', 'batches', 'leaflets', 'products', 'sessions', 'users', 'settings',
-]);
+try {
+  await db.resetAll();
+} catch (err) {
+  console.error(`\n${err.message}\n`);
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // Users
@@ -64,11 +69,14 @@ const users = [
 
 const userIds = {};
 for (const u of users) {
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO users (email, full_name, password_hash, role, must_change_pw) VALUES (?,?,?,?,0)`,
-    [u.email.toLowerCase(), u.fullName, hashPassword(u.password), u.role]
-  );
-  userIds[u.role] = lastInsertRowid;
+  const row = await db.insert('user', {
+    email: u.email.toLowerCase(),
+    full_name: u.fullName,
+    password_hash: hashPassword(u.password),
+    role: u.role,
+    must_change_pw: 0,
+  });
+  userIds[u.role] = row.id;
 }
 console.log(`  users      : ${users.length}`);
 
@@ -128,18 +136,22 @@ const PRODUCTS = [
 const productIds = {};
 const leafletIds = {};
 for (const p of PRODUCTS) {
-  const { lastInsertRowid: pid } = await db.run(
-    `INSERT INTO products (sku, name, generic_name, strength, dosage_form, pack_size, manufacturer, category)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [p.sku, p.name, p.genericName, p.strength, p.dosageForm, p.packSize, p.manufacturer, p.category]
-  );
-  productIds[p.sku] = pid;
+  const product = await db.insert('product', {
+    sku: p.sku,
+    name: p.name,
+    generic_name: p.genericName,
+    strength: p.strength,
+    dosage_form: p.dosageForm,
+    pack_size: p.packSize,
+    manufacturer: p.manufacturer,
+    category: p.category,
+  });
+  productIds[p.sku] = product.id;
 
-  const { lastInsertRowid: lid } = await db.run(
-    `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?,?,?,?)`,
-    [pid, '1.0', 'en', JSON.stringify(p.leaflet)]
-  );
-  leafletIds[p.sku] = lid;
+  const leaflet = await db.insert('leaflet', {
+    product_id: product.id, version: '1.0', language: 'en', sections: p.leaflet,
+  });
+  leafletIds[p.sku] = leaflet.id;
 }
 console.log(`  products   : ${PRODUCTS.length} (each with a leaflet)`);
 
@@ -157,12 +169,18 @@ const BATCHES = [
 
 const batchIds = {};
 for (const b of BATCHES) {
-  const { lastInsertRowid: bid } = await db.run(
-    `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, leaflet_id, notes, created_by, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    [b.number, productIds[b.sku], ymd(b.mfg), ymd(b.expiry), b.qty, b.isTest ? 1 : 0,
-     leafletIds[b.sku], b.note ?? null, userIds.admin, iso(b.mfg)]
-  );
+  const { id: bid } = await db.insert('batch', {
+    batch_number: b.number,
+    product_id: productIds[b.sku],
+    mfg_date: ymd(b.mfg),
+    expiry_date: ymd(b.expiry),
+    quantity: b.qty,
+    is_test: b.isTest ? 1 : 0,
+    leaflet_id: leafletIds[b.sku],
+    notes: b.note ?? null,
+    created_by: userIds.admin,
+    created_at: iso(b.mfg),
+  });
   batchIds[b.number] = bid;
 
   // Run the real serialization engine, then walk the real lifecycle.
@@ -170,7 +188,7 @@ for (const b of BATCHES) {
 
   const path = ['printed', 'released', 'distributed', 'recalled'];
   for (const step of path) {
-    const current = (await db.get('SELECT status FROM batches WHERE id = ?', [bid])).status;
+    const current = (await db.get('batch', bid)).status;
     if (current === b.target) break;
     if (step === 'recalled' && b.target !== 'recalled') break;
     await serialization.transition(bid, step, {
@@ -179,7 +197,7 @@ for (const b of BATCHES) {
     });
   }
 }
-const totalCodes = await db.scalar('SELECT COUNT(*) FROM codes');
+const totalCodes = await db.count('code');
 console.log(`  batches    : ${BATCHES.length}`);
 console.log(`  codes      : ${totalCodes.toLocaleString()} serialized`);
 
@@ -199,19 +217,21 @@ for (const b of BATCHES.filter((x) => ['distributed', 'recalled'].includes(x.tar
   for (let i = 0; i < 3; i++) {
     const dest = PHARMACIES[(shipmentNo + i) % PHARMACIES.length];
     const shippedAt = daysAgo(between(5, 30));
-    await db.run(
-      `INSERT INTO shipments (reference, batch_id, quantity, from_site, to_name, to_type, to_region, status, shipped_at, received_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [
-        `SHP-${shipmentNo++}`, batchIds[b.number], Math.floor(b.qty / 4),
-        'Northbridge Plant 2, Ogun', dest.name, dest.type, dest.region,
-        i === 2 ? 'in_transit' : 'received', iso(shippedAt),
-        i === 2 ? null : iso(new Date(shippedAt.getTime() + 2 * 86400000)),
-      ]
-    );
+    await db.insert('shipment', {
+      reference: `SHP-${shipmentNo++}`,
+      batch_id: batchIds[b.number],
+      quantity: Math.floor(b.qty / 4),
+      from_site: 'Northbridge Plant 2, Ogun',
+      to_name: dest.name,
+      to_type: dest.type,
+      to_region: dest.region,
+      status: i === 2 ? 'in_transit' : 'received',
+      shipped_at: iso(shippedAt),
+      received_at: i === 2 ? null : iso(new Date(shippedAt.getTime() + 2 * 86400000)),
+    });
   }
 }
-console.log(`  shipments  : ${await db.scalar('SELECT COUNT(*) FROM shipments')}`);
+console.log(`  shipments  : ${await db.count('shipment')}`);
 
 // ---------------------------------------------------------------------------
 // Scan history
@@ -229,41 +249,46 @@ const LOCATIONS = [
   { country: 'GH', region: 'Greater Accra', city: 'Accra' },
 ];
 
-const INSERT_SCAN = `INSERT INTO scans (code_text, code_id, batch_id, product_id, result, reason, channel,
-                      signature_state, scan_number, ip_hash, user_agent, country, region, city, is_test, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
-
 /** Record a backdated scan and keep the code's counters in step. */
 async function historicScan({ code, result, reason, daysBack, channel = 'web', location, ipSeed, scanNumber = 1 }) {
   const when = new Date(daysAgo(daysBack).getTime() + between(0, 86399) * 1000);
   const loc = location ?? pick(LOCATIONS);
-  await db.run(INSERT_SCAN, [
-    code.code, code.id, code.batch_id, code.product_id, result, reason, channel,
-    channel === 'sms' ? null : 'valid', scanNumber,
-    pseudonymize(`seed-${ipSeed ?? between(1, 5000)}`, config.secrets.session),
-    channel === 'sms' ? null : 'Mozilla/5.0 (Linux; Android 13) Mobile Safari/537.36',
-    loc.country, loc.region, loc.city, code.is_test ?? 0, iso(when),
-  ]);
-  await db.run(
-    `UPDATE codes SET scan_count = scan_count + 1,
-            verified_count = verified_count + ?,
-            first_scan_at = COALESCE(first_scan_at, ?),
-            last_scan_at = ?,
-            status = CASE WHEN ? = 'flagged' THEN 'flagged'
-                          WHEN status IN ('issued','printed','released') THEN 'verified' ELSE status END,
-            flagged_at = CASE WHEN ? = 'flagged' THEN COALESCE(flagged_at, ?) ELSE flagged_at END
-      WHERE id = ?`,
-    [result === 'genuine' ? 1 : 0, iso(when), iso(when), result, result, iso(when), code.id]
-  );
+  await db.insert('scan', {
+    code_text: code.code,
+    code_id: code.id,
+    batch_id: code.batch_id,
+    product_id: code.product_id,
+    result,
+    reason,
+    channel,
+    signature_state: channel === 'sms' ? null : 'valid',
+    scan_number: scanNumber,
+    ip_hash: pseudonymize(`seed-${ipSeed ?? between(1, 5000)}`, config.secrets.session),
+    user_agent: channel === 'sms' ? null : 'Mozilla/5.0 (Linux; Android 13) Mobile Safari/537.36',
+    country: loc.country,
+    region: loc.region,
+    city: loc.city,
+    is_test: code.is_test ?? 0,
+    created_at: iso(when),
+  });
+
+  // Read fresh: the same code is scanned several times in a row below.
+  const current = await db.getCode(code.code);
+  let status = current.status;
+  if (result === 'flagged') status = 'flagged';
+  else if (['issued', 'printed', 'released'].includes(status)) status = 'verified';
+  await db.update('code', current, { status, last_scan_at: iso(when) }, {
+    inc: { scan_count: 1, verified_count: result === 'genuine' ? 1 : 0 },
+    setIfMissing: result === 'flagged' ? { first_scan_at: iso(when), flagged_at: iso(when) } : { first_scan_at: iso(when) },
+  });
   return { when, loc };
 }
 
-const codesOf = async (batchNumber, limit, offset = 0) =>
-  await db.all(
-    `SELECT c.*, b.is_test FROM codes c JOIN batches b ON b.id = c.batch_id
-      WHERE c.batch_id = ? ORDER BY c.unit_index LIMIT ? OFFSET ?`,
-    [batchIds[batchNumber], limit, offset]
-  );
+const codesOf = async (batchNumber, limit, offset = 0) => {
+  const batch = await db.get('batch', batchIds[batchNumber]);
+  const rows = await db.findMany('code', { batch_id: batch.id }, { order: 'unit_index asc', limit, offset });
+  return rows.map((c) => ({ ...c, is_test: batch.is_test }));
+};
 
 // --- Normal, healthy traffic ------------------------------------------------
 let genuineCount = 0;
@@ -307,52 +332,69 @@ for (const code of clonedCodes) {
 let unknownCount = 0;
 for (let i = 0; i < 24; i++) {
   const when = daysAgo(between(0, 25));
-  await db.run(INSERT_SCAN, [
-    `ART20-${String(between(240101, 260931))}-${String(between(10000, 99999))}-${pick(['K7', 'M2', 'Q9', 'B4'])}`,
-    null, null, null, 'flagged', 'unknown_code', 'web', 'absent', null,
-    pseudonymize(`seed-unknown-${between(1, 40)}`, config.secrets.session),
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Mobile/15E148',
-    ...Object.values(pick(LOCATIONS)), 0, iso(when)
-  
-  ]);
+  const loc = pick(LOCATIONS);
+  await db.insert('scan', {
+    code_text: `ART20-${String(between(240101, 260931))}-${String(between(10000, 99999))}-${pick(['K7', 'M2', 'Q9', 'B4'])}`,
+    result: 'flagged',
+    reason: 'unknown_code',
+    channel: 'web',
+    signature_state: 'absent',
+    ip_hash: pseudonymize(`seed-unknown-${between(1, 40)}`, config.secrets.session),
+    user_agent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Mobile/15E148',
+    country: loc.country,
+    region: loc.region,
+    city: loc.city,
+    is_test: 0,
+    created_at: iso(when),
+  });
   unknownCount++;
 }
 
 // --- A code-guessing burst from one source ----------------------------------
 const attackerIp = pseudonymize('seed-attacker-1', config.secrets.session);
 for (let i = 0; i < 26; i++) {
-  await db.run(INSERT_SCAN, [
-    `ART20-260712-${String(between(10000, 99999))}-${pick(['A1', 'ZZ', '7K'])}`,
-    null, null, null, 'invalid', 'checksum_failed', 'api', 'absent', null,
-    attackerIp, 'python-requests/2.31.0', 'RU', null, null, 0,
-    iso(new Date(daysAgo(3).getTime() + i * 45000))
-  
-  ]);
+  await db.insert('scan', {
+    code_text: `ART20-260712-${String(between(10000, 99999))}-${pick(['A1', 'ZZ', '7K'])}`,
+    result: 'invalid',
+    reason: 'checksum_failed',
+    channel: 'api',
+    signature_state: 'absent',
+    ip_hash: attackerIp,
+    user_agent: 'python-requests/2.31.0',
+    country: 'RU',
+    is_test: 0,
+    created_at: iso(new Date(daysAgo(3).getTime() + i * 45000)),
+  });
 }
 
-console.log(`  scans      : ${await db.scalar('SELECT COUNT(*) FROM scans')} (${genuineCount} genuine, ${duplicateCount} duplicates, ${unknownCount} unknown)`);
+console.log(`  scans      : ${await db.count('scan')} (${genuineCount} genuine, ${duplicateCount} duplicates, ${unknownCount} unknown)`);
 
 // ---------------------------------------------------------------------------
 // Alerts derived from that history
 // ---------------------------------------------------------------------------
 async function alertFor(codeRow, type, severity, title, detail, status, daysBack) {
   const when = iso(daysAgo(daysBack));
-  await db.run(
-    `INSERT INTO alerts (type, severity, status, title, detail_json, code_id, batch_id, resolution_note, resolved_by, resolved_at, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [
-      type, severity, status, title, JSON.stringify(detail),
-      codeRow?.id ?? null, codeRow?.batch_id ?? null,
-      status === 'resolved' ? 'Confirmed as a cloned pack. Distributor notified and the affected route is under review.' : null,
-      status === 'resolved' ? userIds.security : null,
-      status === 'resolved' ? when : null,
-      when, when,
-    ]
-  );
+  await db.insert('alert', {
+    type,
+    severity,
+    status,
+    title,
+    detail_json: JSON.stringify(detail),
+    ip_hash: detail.ipHash ?? null,
+    code_id: codeRow?.id ?? null,
+    batch_id: codeRow?.batch_id ?? null,
+    resolution_note: status === 'resolved'
+      ? 'Confirmed as a cloned pack. Distributor notified and the affected route is under review.'
+      : null,
+    resolved_by: status === 'resolved' ? userIds.security : null,
+    resolved_at: status === 'resolved' ? when : null,
+    created_at: when,
+    updated_at: when,
+  });
 }
 
 for (const [i, code] of clonedCodes.entries()) {
-  const occurrences = await db.scalar(`SELECT COUNT(*) FROM scans WHERE code_id = ? AND result = 'flagged'`, [code.id]);
+  const occurrences = await db.count('scan', { code_id: code.id, result: 'flagged' });
   await alertFor(
     code, 'duplicate_scan',
     occurrences >= 6 ? 'critical' : 'high',
@@ -380,7 +422,7 @@ await alertFor(expiredCode, 'expired_scan', 'low',
   { batchNumber: 'ART20-2412B', expiryDate: ymd(daysAgo(25)) },
   'open', 1);
 
-console.log(`  alerts     : ${await db.scalar('SELECT COUNT(*) FROM alerts')}`);
+console.log(`  alerts     : ${await db.count('alert')}`);
 
 // ---------------------------------------------------------------------------
 // Consumer reports
@@ -413,12 +455,17 @@ const REPORTS = [
 ];
 
 for (const r of REPORTS) {
-  const codeRow = r.code ? await db.get('SELECT id FROM codes WHERE code = ?', [r.code]) : null;
-  await db.run(
-    `INSERT INTO consumer_reports (code_text, code_id, reporter_name, reporter_contact, purchase_location, description, status, created_at)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [r.code, codeRow?.id ?? null, r.name, r.contact, r.location, r.description, r.status, iso(daysAgo(between(1, 10)))]
-  );
+  const codeRow = r.code ? await db.getCode(r.code) : null;
+  await db.insert('consumerReport', {
+    code_text: r.code,
+    code_id: codeRow?.id ?? null,
+    reporter_name: r.name,
+    reporter_contact: r.contact,
+    purchase_location: r.location,
+    description: r.description,
+    status: r.status,
+    created_at: iso(daysAgo(between(1, 10))),
+  });
 }
 console.log(`  reports    : ${REPORTS.length}`);
 
@@ -431,7 +478,7 @@ for (const s of [
   ['support.phone', '+234 800 QRSHIELD', 'Contact number shown to patients on a flagged result.'],
   ['support.sms_shortcode', '32123', 'Shortcode patients text a code to when offline.'],
 ]) {
-  await db.run('INSERT INTO settings (key, value, description) VALUES (?,?,?)', s);
+  await db.insert('setting', { key: s[0], value: s[1], description: s[2] });
 }
 
 // ---------------------------------------------------------------------------

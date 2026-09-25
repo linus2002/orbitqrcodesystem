@@ -146,6 +146,8 @@ export async function start({ port = config.port } = {}) {
     logger.info(`QR Shield listening on http://localhost:${port}`, {
       env: config.env,
       publicBaseUrl: config.publicBaseUrl,
+      // The backend's name only - never the project id or token.
+      store: db.describe(),
     });
     // Said once at boot as well as at each export, so it is visible to whoever
     // started the server and not only to whoever clicks a download.

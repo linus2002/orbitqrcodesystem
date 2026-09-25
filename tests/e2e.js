@@ -21,8 +21,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
+// fileURLToPath, not URL.pathname: the pathname keeps spaces as %20, so a
+// checkout under a folder with a space in its name was never found.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------------------------------------------------------------------------
 // Locating Chrome
@@ -167,10 +170,15 @@ if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) {
 }
 
 // --- Start an isolated API server -----------------------------------------
-const dbFile = path.join(os.tmpdir(), `qrshield-e2e-${Date.now()}.db`);
+const dbFile = path.join(os.tmpdir(), `qrshield-e2e-${Date.now()}.json`);
 process.env.NODE_ENV = 'development';
 process.env.QRSHIELD_SKIP_DOTENV = '1';
 process.env.DB_FILE = dbFile;
+// A local file, never the Sanity dataset - the seed wipes what it points at.
+process.env.SANITY_PROJECT_ID = '';
+process.env.SANITY_DATASET = '';
+process.env.SANITY_API_TOKEN = '';
+process.env.RATELIMIT_STORE = 'memory';
 process.env.SESSION_SECRET = 'e2e-session-secret-not-used-anywhere-real';
 process.env.CODE_SECRET = 'e2e-code-secret-not-used-anywhere-real';
 process.env.SEED_ADMIN_EMAIL = 'admin@e2e.local';
@@ -585,14 +593,10 @@ await cleanup(failed === 0 ? 0 : 1);
 async function pickCode(base) {
   const db = await import('../src/db/index.js');
   db.open();
-  const genuine = (await db.get(
-    `SELECT c.code FROM codes c JOIN batches b ON b.id = c.batch_id
-      WHERE c.scan_count = 0 AND b.status = 'distributed' AND b.is_test = 0
-        AND b.expiry_date > date('now') LIMIT 1`
-  )).code;
-  const recalled = (await db.get(
-    `SELECT c.code FROM codes c JOIN batches b ON b.id = c.batch_id
-      WHERE b.status = 'recalled' LIMIT 1`
-  )).code;
+  const today = new Date().toISOString().slice(0, 10);
+  const live = await db.findMany('batch', { status: 'distributed', is_test: 0, expiry_date: { gt: today } }, { fields: ['id'] });
+  const genuine = (await db.findOne('code', { scan_count: 0, batch_id: { in: live.map((b) => b.id) } })).code;
+  const recalledBatch = await db.findOne('batch', { status: 'recalled' });
+  const recalled = (await db.findOne('code', { batch_id: recalledBatch.id })).code;
   return { genuine, recalled, base };
 }

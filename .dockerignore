@@ -19,3 +19,6 @@ DEPLOY.md
 *.log
 Dockerfile
 .dockerignore
+
+# The Studio is a separate app; it is not part of the server image.
+studio/

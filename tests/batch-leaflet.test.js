@@ -42,8 +42,8 @@ const newBatch = (batchNumber, extra = {}) =>
     ...extra,
   });
 
-const leafletOf = (batchNumber) =>
-  db.scalar('SELECT leaflet_id FROM batches WHERE batch_number = ?', [batchNumber]);
+const leafletOf = async (batchNumber) =>
+  (await db.findOne('batch', { batch_number: batchNumber })).leaflet_id;
 
 test('a batch created in the dashboard records the current leaflet, not null', async () => {
   const res = await newBatch('AMX25-D1');
@@ -53,11 +53,10 @@ test('a batch created in the dashboard records the current leaflet, not null', a
 });
 
 test('after a newer leaflet is published, new batches record the newer one', async () => {
-  await db.run(
-    `INSERT INTO leaflets (product_id, version, language, sections_json, effective_from)
-     VALUES (1, '2.0', 'en', '[{"heading":"H","body":"B"}]', '2026-10-01T00:00:00.000Z')`
-  );
-  const v2 = await db.scalar(`SELECT id FROM leaflets WHERE version = '2.0'`);
+  const { id: v2 } = await db.insert('leaflet', {
+    product_id: 1, version: '2.0', language: 'en',
+    sections: [{ heading: 'H', body: 'B' }], effective_from: '2026-10-01T00:00:00.000Z',
+  });
 
   await newBatch('AMX25-D2');
 
@@ -72,11 +71,9 @@ test('an explicit leafletId is still honoured', async () => {
 });
 
 test('a product with no leaflet gives a batch with none, not an error', async () => {
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO products (sku, name, manufacturer) VALUES ('NOLF1', 'No Leaflet', 'Northbridge')`
-  );
+  const product = await db.insert('product', { sku: 'NOLF1', name: 'No Leaflet', manufacturer: 'Northbridge' });
 
-  const res = await newBatch('NOLF1-D1', { productId: lastInsertRowid });
+  const res = await newBatch('NOLF1-D1', { productId: product.id });
 
   assert.equal(res.status, 201);
   assert.equal(await leafletOf('NOLF1-D1'), null);

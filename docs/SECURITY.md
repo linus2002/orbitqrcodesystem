@@ -19,7 +19,8 @@ does not defend against.
 | 8 | Cross-site request forgery | `SameSite=Strict` plus double-submit CSRF token | - |
 | 9 | Regulator or auditor over-reaches into patient data | Role matrix enforced server-side; the compliance report is built from aggregates only | - |
 | 10 | Patient data leaks from the scan log | IPs and phone numbers stored only as keyed digests; location kept to city granularity | - |
-| 11 | Insider tampers with records | Append-only `scans`, `audit_log`, `sms_log`; every admin action audited | An operator with database access can still edit the file |
+| 11 | Insider tampers with records | Append-only scans, audit log and SMS log; every admin action audited; the Studio is read-only | A member of the Sanity project, or anyone holding the API token, can still edit documents through the Sanity API |
+| 12 | The database is read directly, bypassing the app | Sanity credentials are server-side only and never sent to the browser; the dataset is private; no CORS origin for the web app; the build fails on a public dataset | The token grants full read/write - store it as a secret, give it to nothing else |
 
 ---
 
@@ -183,14 +184,21 @@ data nor signal cannot check at the counter.
 design: an automatic recall triggered by an unverified flag would be far more
 dangerous than a slow one.
 
-**Rate limiting is per process.** Correct for a single instance and for the
-pilot. Behind a load balancer, each instance enforces its own budget - swap
-`MemoryStore` in `src/lib/ratelimit.js` for a Redis-backed implementation of
-the same three methods.
+**Rate limiting is shared only when Sanity is configured.** With Sanity, the
+counters live in the dataset and every instance sees them. On the local-file
+fallback they are per process - correct for a single instance only.
 
-**The database file is the system of record.** Anyone with filesystem access
-can read or edit it. Encrypt at rest, restrict access, and back it up: losing
+**The Sanity dataset is the system of record.** Anyone with the API token, or
+membership of the Sanity project, can read and edit it. Keep the dataset
+private, keep the token out of every file that is committed or shipped to a
+browser, limit project membership, and export backups on a schedule: losing
 the code registry orphans every pack in circulation.
+
+**The project id is not a secret, and is not treated as one.** It is kept out
+of the web app anyway - only the server knows it - but the protection is the
+private dataset and the token, not the id. A deployed Studio (`sanity deploy`)
+carries the id in its bundle; it still requires a project login to see
+anything. Running the Studio locally avoids publishing it at all.
 
 ---
 
@@ -200,6 +208,9 @@ the code registry orphans every pack in circulation.
       app refuses to start in production with the development fallbacks.
 - [ ] Back up `CODE_SECRET` somewhere durable. It cannot be regenerated once
       codes are printed.
+- [ ] Sanity dataset set to **private**, the app's domain **not** listed under
+      the project's CORS origins, and `SANITY_API_TOKEN` held only in the
+      host's environment settings.
 - [ ] `COOKIE_SECURE=true`, TLS terminated in front of the app.
 - [ ] `PUBLIC_BASE_URL` set to the real HTTPS origin **before any print run**.
 - [ ] `trust proxy` matches the real proxy hop count.

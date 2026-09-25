@@ -34,10 +34,10 @@ import logger from '../lib/logger.js';
  * same thing everywhere.
  */
 export async function currentLeafletId(productId, { lang = 'en' } = {}) {
-  const row = await db.get(
-    `SELECT id FROM leaflets WHERE product_id = ? AND language = ?
-      ORDER BY effective_from DESC, id DESC LIMIT 1`,
-    [productId, lang]
+  const row = await db.findOne(
+    'leaflet',
+    { product_id: Number(productId), language: lang },
+    { order: ['effective_from desc', 'id desc'], fields: ['id'] }
   );
   return row?.id ?? null;
 }
@@ -56,24 +56,21 @@ export function leafletUrl(sku, { lang } = {}) {
  * patient to a dead end, so the gap has to be visible on this screen.
  */
 export async function listLeafletCodes({ lang = 'en' } = {}) {
-  const rows = await db.all(
-    `SELECT p.id, p.sku, p.name, p.strength, p.dosage_form, p.manufacturer, p.status,
-            l.id            AS leaflet_id,
-            l.version       AS leaflet_version,
-            l.language      AS leaflet_language,
-            l.effective_from,
-            (SELECT COUNT(*) FROM leaflets x WHERE x.product_id = p.id) AS leaflet_versions
-       FROM products p
-       LEFT JOIN leaflets l
-              ON l.id = (
-                 SELECT id FROM leaflets
-                  WHERE product_id = p.id AND language = ?
-                  ORDER BY effective_from DESC
-                  LIMIT 1
-               )
-      ORDER BY p.name`,
-    [lang]
-  );
+  // The current leaflet per product: newest effective_from, then newest id -
+  // the same ordering currentLeafletId and the public page use.
+  const current = '*[_type == "leaflet" && product_id == ^.id && language == $lang] | order(effective_from desc, id desc)[0]';
+  const rows = await db.findMany('product', {}, {
+    order: 'name asc',
+    fields: ['sku', 'name', 'strength', 'dosage_form', 'manufacturer', 'status'],
+    extra: {
+      leaflet_id: `${current}.id`,
+      leaflet_version: `${current}.version`,
+      leaflet_language: `${current}.language`,
+      effective_from: `${current}.effective_from`,
+      leaflet_versions: 'count(*[_type == "leaflet" && product_id == ^.id])',
+    },
+    params: { lang },
+  });
 
   return rows.map((r) => ({
     ...r,
@@ -84,9 +81,7 @@ export async function listLeafletCodes({ lang = 'en' } = {}) {
 
 /** One product's leaflet QR, as an SVG string. */
 export async function leafletQrSvg(sku, { lang = 'en', width = 240 } = {}) {
-  const product = await db.get('SELECT sku FROM products WHERE sku = ?', [
-    String(sku).toUpperCase(),
-  ]);
+  const product = await db.findOne('product', { sku: String(sku).toUpperCase() }, { fields: ['sku'] });
   if (!product) throw notFound('Product not found');
 
   /*

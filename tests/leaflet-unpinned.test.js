@@ -38,16 +38,18 @@ beforeEach(async () => {
 
 /** Publish a later version directly, dated so it is unambiguously the newest. */
 const publishV2 = () =>
-  db.run(
-    `INSERT INTO leaflets (product_id, version, language, sections_json, effective_from)
-     VALUES (1, '2.0', 'en', ?, '2026-10-01T00:00:00.000Z')`,
-    [JSON.stringify([{ heading: 'New warning', body: 'Added after the batch was packed.' }])]
-  );
+  db.insert('leaflet', {
+    product_id: 1,
+    version: '2.0',
+    language: 'en',
+    sections: [{ heading: 'New warning', body: 'Added after the batch was packed.' }],
+    effective_from: '2026-10-01T00:00:00.000Z',
+  });
 
 test('a scan of a batch pinned to v1.0 shows v2.0 once v2.0 is published', async () => {
   await publishV2();
   assert.equal(
-    await db.scalar('SELECT leaflet_id FROM batches WHERE id = 1'),
+    (await db.get('batch', 1)).leaflet_id,
     1,
     'the batch is genuinely pinned to the older version'
   );
@@ -74,12 +76,12 @@ test('the pinned column is left alone - it is a record, not a display setting', 
 
   await client.post('/api/verify', { code: codes[2] }, { fromIp: '198.51.100.9' });
 
-  assert.equal(await db.scalar('SELECT leaflet_id FROM batches WHERE id = 1'), 1, 'still 1');
+  assert.equal((await db.get('batch', 1)).leaflet_id, 1, 'still 1');
 });
 
 test('a batch with no pinned leaflet behaves identically', async () => {
   await publishV2();
-  await db.run('UPDATE batches SET leaflet_id = NULL WHERE id = 1');
+  await db.update('batch', 1, { leaflet_id: null });
 
   const res = await client.post('/api/verify', { code: codes[3] }, { fromIp: '198.51.100.10' });
 
@@ -88,7 +90,7 @@ test('a batch with no pinned leaflet behaves identically', async () => {
 });
 
 test('a medicine with no leaflet at all still verifies, with no leaflet', async () => {
-  await db.run('DELETE FROM leaflets WHERE product_id = 1');
+  await db.removeWhere('leaflet', { product_id: 1 });
 
   const res = await client.post('/api/verify', { code: codes[4] }, { fromIp: '198.51.100.11' });
 
