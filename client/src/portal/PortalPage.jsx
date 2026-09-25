@@ -250,6 +250,7 @@ export default function PortalPage() {
               {needDetails && (
                 <DetailsForm
                   pendingCode={pending?.code}
+                  supportPhone={portal.supportPhone}
                   onDone={(c) => setPortal((p) => ({ ...p, checker: c }))}
                 />
               )}

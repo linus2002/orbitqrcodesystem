@@ -68,13 +68,18 @@ router.get('/trend', requirePermission('dashboard:view'), async (req, res) => {
 // Products
 // ===========================================================================
 
+/** Every product with its batch and code counts - the list and its export. */
+const productsWithCounts = () =>
+  db.findMany('product', {}, {
+    order: 'name asc',
+    extra: {
+      batch_count: 'count(*[_type == "batch" && product_id == ^.id])',
+      code_count: 'count(*[_type == "code" && product_id == ^.id])',
+    },
+  });
+
 router.get('/products', requirePermission('products:read'), async (req, res) => {
-  const items = await db.all(
-    `SELECT p.*,
-            (SELECT COUNT(*) FROM batches b WHERE b.product_id = p.id) AS batch_count,
-            (SELECT COUNT(*) FROM codes c WHERE c.product_id = p.id)   AS code_count
-       FROM products p ORDER BY p.name`
-  );
+  const items = await productsWithCounts();
   res.json({ items, total: items.length });
 });
 
@@ -98,39 +103,43 @@ router.post('/products', requirePermission('products:write'), async (req, res) =
   });
 
   const sku = data.sku.toUpperCase();
-  if (await db.get('SELECT id FROM products WHERE sku = ?', [sku])) {
+  if (await db.findOne('product', { sku }, { fields: ['id'] })) {
     throw conflict(`A product with SKU ${sku} already exists.`);
   }
 
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO products (sku, name, generic_name, strength, dosage_form, pack_size, manufacturer, category)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [sku, data.name, data.genericName ?? null, data.strength ?? null, data.dosageForm ?? null,
-     data.packSize ?? null, data.manufacturer, data.category ?? null]
-  );
+  const product = await db.insert('product', {
+    sku,
+    name: data.name,
+    generic_name: data.genericName ?? null,
+    strength: data.strength ?? null,
+    dosage_form: data.dosageForm ?? null,
+    pack_size: data.packSize ?? null,
+    manufacturer: data.manufacturer,
+    category: data.category ?? null,
+  });
 
-  await audit.record({ actor: req.user, req, action: 'product.create', entityType: 'product', entityId: lastInsertRowid, detail: { sku } });
-  res.status(201).json(await db.get('SELECT * FROM products WHERE id = ?', [lastInsertRowid]));
+  await audit.record({ actor: req.user, req, action: 'product.create', entityType: 'product', entityId: product.id, detail: { sku } });
+  res.status(201).json(product);
 });
 
 router.get('/products/:id', requirePermission('products:read'), async (req, res) => {
-  const product = await db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
+  const product = await db.get('product', req.params.id);
   if (!product) throw notFound('Product not found');
   res.json({
     ...product,
-    leaflets: await db.all(
-      'SELECT id, version, language, effective_from FROM leaflets WHERE product_id = ? ORDER BY effective_from DESC',
-      [product.id]
-    ),
-    batches: await db.all(
-      'SELECT id, batch_number, status, mfg_date, expiry_date, quantity, is_test FROM batches WHERE product_id = ? ORDER BY created_at DESC',
-      [product.id]
-    ),
+    leaflets: await db.findMany('leaflet', { product_id: product.id }, {
+      order: 'effective_from desc',
+      fields: ['id', 'version', 'language', 'effective_from'],
+    }),
+    batches: await db.findMany('batch', { product_id: product.id }, {
+      order: 'created_at desc',
+      fields: ['id', 'batch_number', 'status', 'mfg_date', 'expiry_date', 'quantity', 'is_test'],
+    }),
   });
 });
 
 router.patch('/products/:id', requirePermission('products:write'), async (req, res) => {
-  const product = await db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
+  const product = await db.get('product', req.params.id);
   if (!product) throw notFound('Product not found');
 
   const data = validate(req.body, {
@@ -146,20 +155,20 @@ router.patch('/products/:id', requirePermission('products:write'), async (req, r
 
   // The SKU is intentionally immutable: it is embedded in every code already
   // printed on packs, so changing it would orphan them.
-  await db.run(
-    `UPDATE products SET name = COALESCE(?, name), generic_name = COALESCE(?, generic_name),
-            strength = COALESCE(?, strength), dosage_form = COALESCE(?, dosage_form),
-            pack_size = COALESCE(?, pack_size), manufacturer = COALESCE(?, manufacturer),
-            category = COALESCE(?, category), status = COALESCE(?, status),
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = ?`,
-    [data.name ?? null, data.genericName ?? null, data.strength ?? null, data.dosageForm ?? null,
-     data.packSize ?? null, data.manufacturer ?? null, data.category ?? null, data.status ?? null,
-     product.id]
-  );
+  // Only the fields supplied change (the COALESCE of the SQL this replaced).
+  await db.update('product', product, {
+    name: data.name,
+    generic_name: data.genericName,
+    strength: data.strength,
+    dosage_form: data.dosageForm,
+    pack_size: data.packSize,
+    manufacturer: data.manufacturer,
+    category: data.category,
+    status: data.status,
+  });
 
   await audit.record({ actor: req.user, req, action: 'product.update', entityType: 'product', entityId: product.id, detail: data });
-  res.json(await db.get('SELECT * FROM products WHERE id = ?', [product.id]));
+  res.json(await db.get('product', product.id));
 });
 
 /**
@@ -183,7 +192,7 @@ router.patch('/products/:id', requirePermission('products:write'), async (req, r
  * and the answer has to already be in the log.
  */
 router.post('/products/:id/leaflets', requirePermission('products:write'), async (req, res) => {
-  const product = await db.get('SELECT * FROM products WHERE id = ?', [req.params.id]);
+  const product = await db.get('product', req.params.id);
   if (!product) throw notFound('Product not found');
 
   const data = validate(req.body, {
@@ -216,24 +225,23 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
     throw badRequest('alsoApplyTo must be a list of product ids.');
   }
   const ids = [...new Set([product.id, ...extraIds])];
-  const marks = ids.map(() => '?').join(',');
 
-  const products = await db.all(`SELECT id, sku FROM products WHERE id IN (${marks})`, ids);
+  const products = await db.findMany('product', { id: { in: ids } }, { fields: ['id', 'sku'] });
   if (products.length !== ids.length) {
     throw badRequest('One of the products to publish to does not exist.');
   }
   products.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
 
   /*
-   * Checked up front and named, rather than left to the UNIQUE constraint:
-   * a constraint failure would be a 500 that says nothing about which
-   * strength already had the version, and with several products in one
-   * publish that is the first thing the person needs to know.
+   * Checked up front and named, rather than left to the unique key: a key
+   * clash would be a bare 409 that says nothing about which strength already
+   * had the version, and with several products in one publish that is the
+   * first thing the person needs to know.
    */
-  const taken = await db.all(
-    `SELECT p.sku FROM leaflets l JOIN products p ON p.id = l.product_id
-      WHERE l.product_id IN (${marks}) AND l.version = ? AND l.language = ?`,
-    [...ids, data.version, data.language]
+  const taken = await db.findMany(
+    'leaflet',
+    { product_id: { in: ids }, version: data.version, language: data.language },
+    { fields: ['product_id'], extra: { sku: '*[_type == "product" && id == ^.product_id][0].sku' } }
   );
   if (taken.length) {
     throw conflict(
@@ -242,23 +250,27 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
     );
   }
 
-  const sectionsJson = JSON.stringify(sections);
+  // Only the two fields a section has: the body is stored as it is sent.
+  const cleaned = sections.map((s) => ({ heading: String(s.heading), body: String(s.body) }));
   let pdf = null;
-  const coverage = await db.tx(async () => {
+  const written = await db.tx(async () => {
     // One file, however many strengths the publish covers: they are the same
     // document, and the sharing is what keeps them saying the same thing.
     if (pdfFileId) pdf = await leaflets.finishPdf(pdfFileId);
     const rows = [];
     for (const p of products) {
-      const { lastInsertRowid } = await db.run(
-        `INSERT INTO leaflets (product_id, version, language, sections_json, file_id)
-         VALUES (?,?,?,?,?)`,
-        [p.id, data.version, data.language, sectionsJson, pdf?.id ?? null]
-      );
-      rows.push({ leafletId: lastInsertRowid, productId: p.id, sku: p.sku });
+      const leaflet = await db.insert('leaflet', {
+        product_id: p.id,
+        version: data.version,
+        language: data.language,
+        sections: cleaned,
+        file_id: pdf?.id ?? null,
+      });
+      rows.push({ leaflet, coverage: { leafletId: leaflet.id, productId: p.id, sku: p.sku } });
     }
     return rows;
   });
+  const coverage = written.map((w) => w.coverage);
 
   // One entry per product, so the trail for any single SKU is complete on its
   // own - and each names the whole set, so the grouping is on record even
@@ -279,9 +291,8 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
   }
 
   // The named product's row, as before, plus what else was written.
-  const primary = await db.get('SELECT * FROM leaflets WHERE id = ?', [coverage[0].leafletId]);
   res.status(201).json({
-    ...primary,
+    ...written[0].leaflet,
     coverage,
     pdf: pdf ? { filename: pdf.filename, size: pdf.size } : null,
   });
@@ -317,30 +328,40 @@ router.put('/leaflet-files/:id/chunks/:seq', requirePermission('products:write')
 // Batches
 // ===========================================================================
 
+/** The product fields and counts shown beside every batch in a list. */
+const BATCH_EXTRA = {
+  product_name: '*[_type == "product" && id == ^.product_id][0].name',
+  sku: '*[_type == "product" && id == ^.product_id][0].sku',
+  codes_issued: 'count(*[_type == "code" && batch_id == ^.id])',
+};
+
 router.get('/batches', requirePermission('batches:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
-  const where = [];
-  const params = [];
-
-  if (req.query.status) { where.push('b.status = ?'); params.push(req.query.status); }
-  if (req.query.productId) { where.push('b.product_id = ?'); params.push(req.query.productId); }
-  if (req.query.includeTest !== 'true') where.push('b.is_test = 0');
+  const params = {};
+  const where = {
+    status: req.query.status || undefined,
+    product_id: req.query.productId ? Number(req.query.productId) : undefined,
+    is_test: req.query.includeTest !== 'true' ? 0 : undefined,
+  };
   if (req.query.search) {
-    where.push('(b.batch_number LIKE ? OR p.name LIKE ? OR p.sku LIKE ?)');
-    const q = `%${req.query.search}%`;
-    params.push(q, q, q);
+    // The batch number, or its product's name or SKU (a LIKE on the join).
+    // Word-prefix matching: GROQ's match works on words, not substrings.
+    params.search = `${String(req.query.search).replace(/[*"\\]/g, '')}*`;
+    where.$raw =
+      'batch_number match $search || product_id in *[_type == "product" && (name match $search || sku match $search)].id';
   }
 
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = await db.scalar(`SELECT COUNT(*) FROM batches b JOIN products p ON p.id = b.product_id ${clause}`, params);
-  const items = await db.all(
-    `SELECT b.*, p.name AS product_name, p.sku,
-            (SELECT COUNT(*) FROM codes c WHERE c.batch_id = b.id) AS codes_issued,
-            (SELECT COUNT(*) FROM scans s WHERE s.batch_id = b.id AND s.result = 'flagged') AS flagged_scans
-       FROM batches b JOIN products p ON p.id = b.product_id
-       ${clause} ORDER BY b.created_at DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+  const total = await db.count('batch', where, { params });
+  const items = await db.findMany('batch', where, {
+    order: 'created_at desc',
+    limit,
+    offset,
+    params,
+    extra: {
+      ...BATCH_EXTRA,
+      flagged_scans: 'count(*[_type == "scan" && batch_id == ^.id && result == "flagged"])',
+    },
+  });
   res.json({ items, total, ...meta });
 });
 
@@ -356,12 +377,12 @@ router.post('/batches', requirePermission('batches:write'), async (req, res) => 
     notes: { type: 'string', max: 500 },
   });
 
-  const product = await db.get('SELECT * FROM products WHERE id = ?', [data.productId]);
+  const product = await db.get('product', data.productId);
   if (!product) throw badRequest('That product does not exist.');
   if (new Date(data.expiryDate) <= new Date(data.mfgDate)) {
     throw badRequest('The expiry date must be after the manufacturing date.');
   }
-  if (await db.get('SELECT id FROM batches WHERE batch_number = ?', [data.batchNumber])) {
+  if (await db.findOne('batch', { batch_number: data.batchNumber }, { fields: ['id'] })) {
     throw conflict(`Batch ${data.batchNumber} already exists.`);
   }
 
@@ -371,33 +392,39 @@ router.post('/batches', requirePermission('batches:write'), async (req, res) => 
   // does not use this - a scan shows the current leaflet - it is the record.
   const leafletId = data.leafletId ?? (await leaflets.currentLeafletId(product.id));
 
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, is_test, leaflet_id, notes, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
-    [data.batchNumber, product.id, data.mfgDate, data.expiryDate, data.quantity,
-     data.isTest ? 1 : 0, leafletId, data.notes ?? null, req.user.id]
-  );
+  const batch = await db.insert('batch', {
+    batch_number: data.batchNumber,
+    product_id: product.id,
+    mfg_date: data.mfgDate,
+    expiry_date: data.expiryDate,
+    quantity: data.quantity,
+    is_test: data.isTest ? 1 : 0,
+    leaflet_id: leafletId,
+    notes: data.notes ?? null,
+    created_by: req.user.id,
+  });
 
-  await audit.record({ actor: req.user, req, action: 'batch.create', entityType: 'batch', entityId: lastInsertRowid, detail: { batchNumber: data.batchNumber, quantity: data.quantity, isTest: data.isTest } });
-  res.status(201).json(await db.get('SELECT * FROM batches WHERE id = ?', [lastInsertRowid]));
+  await audit.record({ actor: req.user, req, action: 'batch.create', entityType: 'batch', entityId: batch.id, detail: { batchNumber: data.batchNumber, quantity: data.quantity, isTest: data.isTest } });
+  res.status(201).json(batch);
 });
 
+/** A batch with the product fields its detail and label views show. */
+async function batchWithProduct(id) {
+  const batch = await db.get('batch', id);
+  if (!batch) return undefined;
+  const p = await db.get('product', batch.product_id);
+  return { ...batch, product_name: p?.name ?? null, sku: p?.sku ?? null, strength: p?.strength ?? null, manufacturer: p?.manufacturer ?? null };
+}
+
 router.get('/batches/:id', requirePermission('batches:read'), async (req, res) => {
-  const batch = await db.get(
-    `SELECT b.*, p.name AS product_name, p.sku, p.strength, p.manufacturer
-       FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
-    [req.params.id]
-  );
+  const batch = await batchWithProduct(req.params.id);
   if (!batch) throw notFound('Batch not found');
 
   res.json({
     ...batch,
     stats: await serialization.batchStats(batch.id),
-    shipments: await db.all('SELECT * FROM shipments WHERE batch_id = ? ORDER BY shipped_at DESC', [batch.id]),
-    openAlerts: await db.scalar(
-      `SELECT COUNT(*) FROM alerts WHERE batch_id = ? AND status IN ('open','investigating')`,
-      [batch.id]
-    ),
+    shipments: await db.findMany('shipment', { batch_id: batch.id }, { order: 'shipped_at desc' }),
+    openAlerts: await db.count('alert', { batch_id: batch.id, status: { in: ['open', 'investigating'] } }),
   });
 });
 
@@ -440,19 +467,17 @@ router.get('/batches/:id/codes.csv', requirePermission('codes:export'), async (r
  * browser. Capped at 60 labels per request to keep the response small.
  */
 router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, res) => {
-  const batch = await db.get(
-    `SELECT b.*, p.name AS product_name, p.sku, p.strength
-       FROM batches b JOIN products p ON p.id = b.product_id WHERE b.id = ?`,
-    [req.params.id]
-  );
+  const batch = await batchWithProduct(req.params.id);
   if (!batch) throw notFound('Batch not found');
 
   const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 60);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
-  const codes = await db.all(
-    'SELECT id, code, serial, unit_index FROM codes WHERE batch_id = ? ORDER BY unit_index LIMIT ? OFFSET ?',
-    [batch.id, limit, offset]
-  );
+  const codes = await db.findMany('code', { batch_id: batch.id }, {
+    order: 'unit_index asc',
+    limit,
+    offset,
+    fields: ['id', 'code', 'serial', 'unit_index'],
+  });
 
   const items = await Promise.all(
     codes.map(async (c) => ({ ...c, svg: await serialization.qrSvg(c.code) }))
@@ -468,7 +493,7 @@ router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, r
       expiryDate: batch.expiry_date,
     },
     items,
-    total: await db.scalar('SELECT COUNT(*) FROM codes WHERE batch_id = ?', [batch.id]),
+    total: await db.count('code', { batch_id: batch.id }),
     // Undefined when the base URL is a real one, so a correctly configured
     // deployment returns exactly the response it returned before.
     warning: config.publicBaseUrlIsLocal ? LOCAL_BASE_URL_WARNING : undefined,
@@ -484,41 +509,50 @@ router.get('/codes/lookup', requirePermission('codes:read'), async (req, res) =>
   const code = normalizeCode(String(req.query.code ?? ''));
   if (!code) throw badRequest('Provide a code to look up.');
 
-  const row = await db.get(
-    `SELECT c.*, b.batch_number, b.status AS batch_status, b.expiry_date, b.mfg_date, b.is_test,
-            p.name AS product_name, p.sku, p.strength
-       FROM codes c JOIN batches b ON b.id = c.batch_id JOIN products p ON p.id = c.product_id
-      WHERE c.code = ?`,
-    [code]
-  );
-  if (!row) throw notFound('That code is not in the registry.');
+  const found = await db.getCode(code);
+  if (!found) throw notFound('That code is not in the registry.');
+  const b = await db.get('batch', found.batch_id);
+  const p = await db.get('product', found.product_id);
+  const row = {
+    ...found,
+    batch_number: b?.batch_number ?? null,
+    batch_status: b?.status ?? null,
+    expiry_date: b?.expiry_date ?? null,
+    mfg_date: b?.mfg_date ?? null,
+    is_test: b?.is_test ?? 0,
+    product_name: p?.name ?? null,
+    sku: p?.sku ?? null,
+    strength: p?.strength ?? null,
+  };
 
   res.json({
     ...row,
     qrPayload: qrPayload(row.code, config.secrets.code, config.publicBaseUrl),
-    scans: await db.all(
-      `SELECT id, result, reason, channel, scan_number, country, region, city, signature_state, created_at
-         FROM scans WHERE code_id = ? ORDER BY created_at DESC LIMIT 100`,
-      [row.id]
-    ),
-    alerts: await db.all('SELECT id, type, severity, status, title, created_at FROM alerts WHERE code_id = ?', [row.id]),
+    scans: await db.findMany('scan', { code_id: row.id }, {
+      order: 'created_at desc',
+      limit: 100,
+      fields: ['id', 'result', 'reason', 'channel', 'scan_number', 'country', 'region', 'city', 'signature_state', 'created_at'],
+    }),
+    alerts: await db.findMany('alert', { code_id: row.id }, {
+      fields: ['id', 'type', 'severity', 'status', 'title', 'created_at'],
+    }),
   });
 });
 
 /** Withdraw a single code (e.g. a unit destroyed or known stolen). */
 router.post('/codes/:id/void', requirePermission('batches:write'), async (req, res) => {
   const { reason } = validate(req.body, { reason: { type: 'string', required: true, min: 5, max: 300 } });
-  const code = await db.get('SELECT * FROM codes WHERE id = ?', [req.params.id]);
+  const code = await db.get('code', req.params.id);
   if (!code) throw notFound('Code not found');
 
-  await db.run(`UPDATE codes SET status = 'void' WHERE id = ?`, [code.id]);
+  await db.update('code', code, { status: 'void' });
   await audit.record({ actor: req.user, req, action: 'code.void', entityType: 'code', entityId: code.id, detail: { code: code.code, reason } });
-  res.json({ ok: true, code: await db.get('SELECT * FROM codes WHERE id = ?', [code.id]) });
+  res.json({ ok: true, code: await db.getCode(code.code) });
 });
 
 /** QR image for a single code, as SVG. */
 router.get('/codes/:id/qr.svg', requirePermission('codes:read'), async (req, res) => {
-  const code = await db.get('SELECT code FROM codes WHERE id = ?', [req.params.id]);
+  const code = await db.get('code', req.params.id);
   if (!code) throw notFound('Code not found');
   res.type('image/svg+xml').send(await serialization.qrSvg(code.code));
 });
@@ -656,16 +690,19 @@ router.patch('/alerts/:id', requirePermission('alerts:write'), async (req, res) 
 
 /** Load an alert that is still open and has a code attached. */
 async function openAlertWithCode(id) {
-  const alert = await db.get(
-    `SELECT a.id, a.status, a.code_id, c.status AS code_status, c.verified_count,
-            b.status AS batch_status
-       FROM alerts a
-       LEFT JOIN codes c   ON c.id = a.code_id
-       LEFT JOIN batches b ON b.id = c.batch_id
-      WHERE a.id = ?`,
-    [id]
-  );
-  if (!alert) throw notFound('Alert not found');
+  const row = await db.get('alert', id);
+  if (!row) throw notFound('Alert not found');
+  const code = row.code_id ? await db.get('code', row.code_id) : undefined;
+  const batch = code ? await db.get('batch', code.batch_id) : undefined;
+  const alert = {
+    id: row.id,
+    status: row.status,
+    code_id: row.code_id,
+    code: code?.code ?? null,
+    code_status: code?.status ?? null,
+    verified_count: code?.verified_count ?? null,
+    batch_status: batch?.status ?? null,
+  };
   if (alert.status === 'resolved' || alert.status === 'dismissed') {
     throw conflict('This alert is already closed.');
   }
@@ -712,7 +749,7 @@ router.post('/alerts/:id/false-positive', requirePermission('alerts:write'), asy
 
   await db.tx(async () => {
     if (to !== from) {
-      await db.run(`UPDATE codes SET status = ? WHERE id = ?`, [to, alert.code_id]);
+      await db.update('code', alert, { status: to });
     }
     await alertService.updateStatus(alert.id, { status: 'resolved', note, actor: req.user });
   });
@@ -742,7 +779,7 @@ router.post(
     const from = alert.code_status;
 
     await db.tx(async () => {
-      await db.run(`UPDATE codes SET status = 'void' WHERE id = ?`, [alert.code_id]);
+      await db.update('code', alert, { status: 'void' });
       await alertService.updateStatus(alert.id, { status: 'resolved', note: `Code voided: ${reason}`, actor: req.user });
     });
 
@@ -759,21 +796,30 @@ router.post(
 
 router.get('/reports', requirePermission('reports:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
-  const where = [];
-  const params = [];
-  if (req.query.status) { where.push('r.status = ?'); params.push(req.query.status); }
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const where = { status: req.query.status || undefined };
 
-  const total = await db.scalar(`SELECT COUNT(*) FROM consumer_reports r ${clause}`, params);
-  const items = await db.all(
-    `SELECT r.*, c.code AS registry_code, b.batch_number, p.name AS product_name
-       FROM consumer_reports r
-       LEFT JOIN codes c ON c.id = r.code_id
-       LEFT JOIN batches b ON b.id = c.batch_id
-       LEFT JOIN products p ON p.id = b.product_id
-       ${clause} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+  const total = await db.count('consumerReport', where);
+  const rows = await db.findMany('consumerReport', where, { order: 'created_at desc', limit, offset });
+
+  // The registry code, its batch and product, for the reports that name one.
+  const codes = new Map(
+    (await db.findMany('code', { id: { in: rows.map((r) => r.code_id).filter(Boolean) } }, {
+      fields: ['code', 'batch_id'],
+      extra: {
+        batch_number: '*[_type == "batch" && id == ^.batch_id][0].batch_number',
+        product_name: '*[_type == "batch" && id == ^.batch_id][0]{"n": *[_type == "product" && id == ^.product_id][0].name}.n',
+      },
+    })).map((c) => [c.id, c])
   );
+  const items = rows.map((r) => {
+    const c = codes.get(r.code_id);
+    return {
+      ...r,
+      registry_code: c?.code ?? null,
+      batch_number: c?.batch_number ?? null,
+      product_name: c?.product_name ?? null,
+    };
+  });
   res.json({ items, total, ...meta });
 });
 
@@ -781,12 +827,12 @@ router.patch('/reports/:id', requirePermission('reports:write'), async (req, res
   const { status } = validate(req.body, {
     status: { type: 'enum', required: true, values: ['new', 'reviewing', 'closed'] },
   });
-  const report = await db.get('SELECT * FROM consumer_reports WHERE id = ?', [req.params.id]);
+  const report = await db.get('consumerReport', req.params.id);
   if (!report) throw notFound('Report not found');
 
-  await db.run('UPDATE consumer_reports SET status = ? WHERE id = ?', [status, report.id]);
+  await db.update('consumerReport', report, { status });
   await audit.record({ actor: req.user, req, action: 'report.update', entityType: 'report', entityId: report.id, detail: { status } });
-  res.json(await db.get('SELECT * FROM consumer_reports WHERE id = ?', [report.id]));
+  res.json(await db.get('consumerReport', report.id));
 });
 
 // ===========================================================================
@@ -795,13 +841,16 @@ router.patch('/reports/:id', requirePermission('reports:write'), async (req, res
 
 router.get('/shipments', requirePermission('batches:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
-  const total = await db.scalar('SELECT COUNT(*) FROM shipments');
-  const items = await db.all(
-    `SELECT s.*, b.batch_number, p.name AS product_name
-       FROM shipments s JOIN batches b ON b.id = s.batch_id JOIN products p ON p.id = b.product_id
-      ORDER BY s.shipped_at DESC LIMIT ? OFFSET ?`,
-    [limit, offset]
-  );
+  const total = await db.count('shipment');
+  const items = await db.findMany('shipment', {}, {
+    order: 'shipped_at desc',
+    limit,
+    offset,
+    extra: {
+      batch_number: '*[_type == "batch" && id == ^.batch_id][0].batch_number',
+      product_name: '*[_type == "batch" && id == ^.batch_id][0]{"n": *[_type == "product" && id == ^.product_id][0].name}.n',
+    },
+  });
   res.json({ items, total, ...meta });
 });
 
@@ -816,32 +865,37 @@ router.post('/shipments', requirePermission('batches:write'), async (req, res) =
     toRegion: { type: 'string', max: 120 },
   });
 
-  const batch = await db.get('SELECT * FROM batches WHERE id = ?', [data.batchId]);
+  const batch = await db.get('batch', data.batchId);
   if (!batch) throw badRequest('That batch does not exist.');
   if (!['released', 'distributed'].includes(batch.status)) {
     throw conflict(`Batch ${batch.batch_number} is "${batch.status}" and cannot be shipped until it is released.`);
   }
 
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO shipments (reference, batch_id, quantity, from_site, to_name, to_type, to_region)
-     VALUES (?,?,?,?,?,?,?)`,
-    [data.reference, data.batchId, data.quantity, data.fromSite, data.toName, data.toType, data.toRegion ?? null]
-  );
+  if (await db.findOne('shipment', { reference: data.reference }, { fields: ['id'] })) {
+    throw conflict(`Shipment ${data.reference} already exists.`);
+  }
 
-  await audit.record({ actor: req.user, req, action: 'shipment.create', entityType: 'shipment', entityId: lastInsertRowid, detail: data });
-  res.status(201).json(await db.get('SELECT * FROM shipments WHERE id = ?', [lastInsertRowid]));
+  const shipment = await db.insert('shipment', {
+    reference: data.reference,
+    batch_id: data.batchId,
+    quantity: data.quantity,
+    from_site: data.fromSite,
+    to_name: data.toName,
+    to_type: data.toType,
+    to_region: data.toRegion ?? null,
+  });
+
+  await audit.record({ actor: req.user, req, action: 'shipment.create', entityType: 'shipment', entityId: shipment.id, detail: data });
+  res.status(201).json(shipment);
 });
 
 router.patch('/shipments/:id/receive', requirePermission('batches:write'), async (req, res) => {
-  const shipment = await db.get('SELECT * FROM shipments WHERE id = ?', [req.params.id]);
+  const shipment = await db.get('shipment', req.params.id);
   if (!shipment) throw notFound('Shipment not found');
 
-  await db.run(
-    `UPDATE shipments SET status = 'received', received_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-    [shipment.id]
-  );
+  await db.update('shipment', shipment, { status: 'received', received_at: db.now() });
   await audit.record({ actor: req.user, req, action: 'shipment.receive', entityType: 'shipment', entityId: shipment.id });
-  res.json(await db.get('SELECT * FROM shipments WHERE id = ?', [shipment.id]));
+  res.json(await db.get('shipment', shipment.id));
 });
 
 // ===========================================================================
@@ -1019,13 +1073,7 @@ const EXPORTS = {
     ],
     // The same shape the /products list returns, so an export and the screen
     // it came from can never disagree.
-    load: () =>
-      db.all(
-        `SELECT p.*,
-                (SELECT COUNT(*) FROM batches b WHERE b.product_id = p.id) AS batch_count,
-                (SELECT COUNT(*) FROM codes c WHERE c.product_id = p.id)   AS code_count
-           FROM products p ORDER BY p.name`
-      ),
+    load: () => productsWithCounts(),
   },
   batches: {
     permission: 'batches:read',
@@ -1041,13 +1089,7 @@ const EXPORTS = {
       { header: 'Codes issued', key: 'codes_issued' },
       { header: 'Notes', key: 'notes', width: 40 },
     ],
-    load: () =>
-      db.all(
-        `SELECT b.*, p.name AS product_name, p.sku,
-                (SELECT COUNT(*) FROM codes c WHERE c.batch_id = b.id) AS codes_issued
-           FROM batches b JOIN products p ON p.id = b.product_id
-          ORDER BY b.created_at DESC`
-      ),
+    load: () => db.findMany('batch', {}, { order: 'created_at desc', extra: BATCH_EXTRA }),
   },
 };
 

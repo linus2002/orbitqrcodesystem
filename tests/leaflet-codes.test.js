@@ -81,9 +81,7 @@ test('a non-English leaflet carries its language, English does not', async () =>
 });
 
 test('the list includes products with no leaflet, flagged as such', async () => {
-  await db.run(
-    `INSERT INTO products (sku, name, manufacturer) VALUES ('NOLEAF', 'No leaflet yet', 'North')`
-  );
+  await db.insert('product', { sku: 'NOLEAF', name: 'No leaflet yet', manufacturer: 'North' });
 
   const items = await leaflets.listLeafletCodes();
   const gap = items.find((i) => i.sku === 'NOLEAF');
@@ -96,9 +94,7 @@ test('the list includes products with no leaflet, flagged as such', async () => 
 });
 
 test('the print sheet leaves out medicines with no leaflet', async () => {
-  await db.run(
-    `INSERT INTO products (sku, name, manufacturer) VALUES ('NOLEAF', 'No leaflet yet', 'North')`
-  );
+  await db.insert('product', { sku: 'NOLEAF', name: 'No leaflet yet', manufacturer: 'North' });
 
   const sheet = await leaflets.leafletSheet();
   assert.equal(

@@ -6,10 +6,10 @@
  * a setting is defined, validated and read, and nothing outside this list can
  * be written.
  *
- * Read fresh from the database every time, never cached. On a serverless
+ * Read fresh from the store every time, never cached. On a serverless
  * deployment several instances serve traffic at once, and a cached value
  * would let two of them disagree about whether the same scan is a duplicate.
- * These are single-row primary-key reads, and the duplicate threshold is only
+ * These are single-document reads by id, and the duplicate threshold is only
  * read for codes that have already been verified once.
  *
  * A stored value that fails validation - hand-edited, or left from an older
@@ -109,7 +109,7 @@ const known = (key) => Object.prototype.hasOwnProperty.call(SETTINGS, key);
 export async function get(key) {
   if (!known(key)) throw new Error(`settings.get: unknown key "${key}"`);
   const spec = SETTINGS[key];
-  const row = await db.get('SELECT value FROM settings WHERE key = ?', [key]);
+  const row = await db.get('setting', key);
   if (!row) return spec.default;
   try {
     return spec.check(row.value);
@@ -121,7 +121,7 @@ export async function get(key) {
 
 /** Every setting, for the Settings screen: definition plus effective value. */
 export async function list() {
-  const rows = await db.all('SELECT key, value, updated_at FROM settings');
+  const rows = await db.findMany('setting', {}, { fields: ['key', 'value', 'updated_at'] });
   const stored = Object.fromEntries(rows.map((r) => [r.key, r]));
   const out = [];
   for (const [key, spec] of Object.entries(SETTINGS)) {
@@ -151,13 +151,13 @@ export async function update(key, value, { actor } = {}) {
   const next = spec.check(value);
   const previous = await get(key);
 
-  await db.run(
-    `INSERT INTO settings (key, value, description, updated_by, updated_at)
-     VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by,
-                                     updated_at = excluded.updated_at`,
-    [key, String(next), spec.description, actor?.id ?? null]
-  );
+  // Upsert: the row exists once a value has ever been saved.
+  const change = { value: String(next), updated_by: actor?.id ?? null };
+  if (await db.get('setting', key)) {
+    await db.update('setting', key, change);
+  } else {
+    await db.insert('setting', { key, description: spec.description, ...change });
+  }
   return { key, from: previous, to: next };
 }
 

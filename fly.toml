@@ -10,14 +10,17 @@ primary_region = "jnb"
 [env]
   NODE_ENV = "production"
   PORT = "3000"
-  DB_FILE = "/data/qrshield.db"
+  # Fallback store only. The data lives in Sanity: set the three values with
+  #   fly secrets set SANITY_PROJECT_ID=... SANITY_DATASET=... SANITY_API_TOKEN=...
+  # (secrets, never here).
+  DB_FILE = "/data/qrshield.json"
   COOKIE_SECURE = "true"
 
 [http_service]
   internal_port = 3000
   force_https = true
-  # No scale-to-zero and no second machine: the SQLite file on the volume
-  # below has exactly one owner. `suspend` would be fine for the process, but
+  # No scale-to-zero: without Sanity configured, the fallback file on the
+  # volume below has exactly one owner. `suspend` would be fine for the process, but
   # a cold start delays a patient's scan, so one machine stays up.
   auto_stop_machines = false
   auto_start_machines = true
@@ -30,8 +33,9 @@ primary_region = "jnb"
     method = "GET"
     path = "/api/health"
 
-# A Fly volume is attached to a single machine. Never `fly scale count 2` with
-# this layout - the second machine gets a separate, diverging database.
+# A Fly volume is attached to a single machine. Only scale past one machine
+# once Sanity is configured - on the fallback file, a second machine would get
+# a separate, diverging store.
 [[mounts]]
   source = "orbit_data"
   destination = "/data"

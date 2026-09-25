@@ -38,6 +38,8 @@ beforeEach(async () => {
   await resetRateLimits();
 });
 
+const lastScan = () => db.findOne('scan', {}, { order: 'id desc' });
+
 // ---------------------------------------------------------------------------
 // The gate
 // ---------------------------------------------------------------------------
@@ -53,7 +55,7 @@ test('a check is refused until the person says who they are', async () => {
   const bulk = await client.post('/api/verify/bulk', { codes: [codes[0], codes[1]] });
   assert.equal(bulk.status, 403);
 
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM scans'), 0, 'nothing was checked or logged');
+  assert.equal(await db.count('scan'), 0, 'nothing was checked or logged');
 });
 
 test('giving details unlocks checking, and every check is recorded against the person', async () => {
@@ -73,13 +75,13 @@ test('giving details unlocks checking, and every check is recorded against the p
   assert.equal(res.status, 200);
   assert.equal(res.body.result, 'genuine');
 
-  const scan = await db.get('SELECT verifier_id FROM scans ORDER BY id DESC LIMIT 1');
-  assert.equal(scan.verifier_id, 1);
+  assert.equal((await lastScan()).verifier_id, 1);
 
-  const person = await db.get('SELECT * FROM verifiers WHERE id = 1');
+  const person = await db.get('verifier', 1);
   assert.equal(person.check_count, 1);
   assert.ok(person.last_check_at, 'the last check is timestamped');
   assert.ok(person.consent_at, 'consent is recorded, not assumed');
+  assert.equal(person.policy_version, '2026-09-25', 'and which notice was agreed to');
 
   const portal = await client.get('/api/portal');
   assert.equal(portal.body.checker.name, 'Maria Santos', 'the portal knows who this browser is');
@@ -98,7 +100,7 @@ test('the form is validated as a whole, naming every bad field at once', async (
 
   const fields = res.body.error.details.map((d) => d.field).sort();
   assert.deepEqual(fields, ['consent', 'email', 'fullName', 'phone', 'role']);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM verifiers'), 0);
+  assert.equal(await db.count('verifier'), 0);
 });
 
 test('a missing consent box is refused, not defaulted', async () => {
@@ -127,8 +129,8 @@ test('the cookie is httpOnly and only a digest of the token is stored', async ()
   assert.match(setCookie, /SameSite=Lax/i);
 
   const token = setCookie.split(';')[0].split('=')[1];
-  const stored = await db.get('SELECT token_hash FROM verifiers WHERE id = 1');
-  assert.notEqual(stored.token_hash, token, 'the raw token is never written to the database');
+  const stored = await db.get('verifier', 1);
+  assert.notEqual(stored.token_hash, token, 'the raw token is never written to the store');
   assert.notEqual(stored.token_hash, decodeURIComponent(token));
 });
 
@@ -144,7 +146,7 @@ test('"not you?" forgets this browser, and the question is asked again', async (
   assert.equal(again.body.error.code, 'details_required');
 });
 
-test('giving details is rate limited, so the table cannot be filled with junk', async () => {
+test('giving details is rate limited, so the store cannot be filled with junk', async () => {
   let limited = false;
   for (let i = 0; i < 12; i++) {
     const res = await giveDetails(client);
@@ -171,8 +173,7 @@ test('staff can switch the question off, and checking becomes anonymous again', 
 
   const res = await client.post('/api/verify', { code: codes[0] });
   assert.equal(res.status, 200, 'no details, no gate');
-  const scan = await db.get('SELECT verifier_id FROM scans ORDER BY id DESC LIMIT 1');
-  assert.equal(scan.verifier_id, null);
+  assert.equal((await lastScan()).verifier_id, null);
 });
 
 test('with the question off, a browser that did give details is still recorded', async () => {
@@ -182,8 +183,7 @@ test('with the question off, a browser that did give details is still recorded',
 
   await giveDetails(client);
   await client.post('/api/verify', { code: codes[0] });
-  const scan = await db.get('SELECT verifier_id FROM scans ORDER BY id DESC LIMIT 1');
-  assert.equal(scan.verifier_id, 1);
+  assert.equal((await lastScan()).verifier_id, 1);
 });
 
 test('the setting takes only on or off', async () => {
@@ -214,11 +214,17 @@ test('the security team sees the people and their checks; a regulator does not',
   assert.equal(person.check_count, 2);
   assert.equal(person.flagged_count, 1);
   assert.equal(person.token_hash, undefined, 'the credential is never listed');
+  assert.equal(person.ip_hash, undefined);
 
-  const byPhone = await client.get('/api/admin/customers?search=9171234567');
-  assert.equal(byPhone.body.total, 1);
+  // A number as people type it, a start of the name, part of an email.
+  const byPhone = await client.get('/api/admin/customers?search=0917%20123%204567');
+  assert.equal(byPhone.body.total, 1, 'by the typed mobile number');
+  const byPrefix = await client.get('/api/admin/customers?search=0917');
+  assert.equal(byPrefix.body.total, 1, 'by the start of the number');
+  const byName = await client.get('/api/admin/customers?search=mar');
+  assert.equal(byName.body.total, 1, 'by the start of the name');
   const byEmail = await client.get('/api/admin/customers?search=MARIA@gmail');
-  assert.equal(byEmail.body.total, 1);
+  assert.equal(byEmail.body.total, 1, 'by the email, whatever the case');
   const nobody = await client.get('/api/admin/customers?search=juan');
   assert.equal(nobody.body.total, 0);
 
@@ -229,6 +235,7 @@ test('the security team sees the people and their checks; a regulator does not',
     detail.body.scans.map((s) => s.result).sort(),
     ['flagged', 'genuine']
   );
+  assert.equal(detail.body.token_hash, undefined);
 
   const scans = await client.get('/api/admin/scans');
   assert.equal(scans.body.items[0].checker_name, 'Maria Santos', 'the scan log names the checker');
@@ -236,7 +243,7 @@ test('the security team sees the people and their checks; a regulator does not',
   const csv = await client.get('/api/admin/customers.csv');
   assert.equal(csv.status, 200);
   assert.match(csv.body, /maria@gmail\.com/);
-  assert.equal(await db.scalar(`SELECT COUNT(*) FROM audit_log WHERE action = 'customers.export'`), 1);
+  assert.equal(await db.count('auditLog', { action: 'customers.export' }), 1);
 
   client.clearCookies();
   await client.login(REGULATOR.email, REGULATOR.password);

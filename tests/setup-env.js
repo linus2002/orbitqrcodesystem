@@ -15,6 +15,14 @@ process.env.SESSION_SECRET = 'test-session-secret-not-used-anywhere-real';
 process.env.CODE_SECRET = 'test-code-secret-not-used-anywhere-real';
 process.env.SMS_WEBHOOK_SECRET = 'test-webhook-secret';
 process.env.DB_FILE = ':memory:';
+
+// Never the hosted dataset. The suite writes and wipes freely, so it runs on
+// the in-memory store whatever the shell or a .env says - blanking these
+// makes that unconditional rather than a matter of which file got loaded.
+process.env.SANITY_PROJECT_ID = '';
+process.env.SANITY_DATASET = '';
+process.env.SANITY_API_TOKEN = '';
+process.env.RATELIMIT_STORE = 'memory';
 process.env.PUBLIC_BASE_URL = 'http://test.local';
 process.env.SMS_PROVIDER = 'console';
 

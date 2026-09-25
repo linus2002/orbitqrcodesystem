@@ -1,11 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# Runs on any host that gives the container a persistent volume - Railway,
-# Render, Fly.io, or a plain VPS.
+# Runs on any container host - Railway, Render, Fly.io, or a plain VPS. The
+# data lives in Sanity (set the SANITY_* variables); the /data volume is only
+# for the local-file fallback.
 #
-# Node 24 rather than the 22 in package.json engines: `node:sqlite` is only
-# importable without --experimental-sqlite from Node 22.13 onward, and 24 is
-# what this project is developed against.
+# Node 24 is what this project is developed against.
 
 # --- build -----------------------------------------------------------------
 FROM node:24-alpine AS build
@@ -32,7 +31,7 @@ COPY scripts ./scripts
 
 # The volume mounts at /data. Keeping the database off the image means a
 # redeploy replaces the code and leaves the codes, scans and alerts alone.
-ENV DB_FILE=/data/qrshield.db
+ENV DB_FILE=/data/qrshield.json
 RUN mkdir -p /data && chown -R node:node /data /app
 USER node
 

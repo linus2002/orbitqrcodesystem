@@ -76,19 +76,23 @@ export async function handleInbound(from, body, req = null) {
     .replace(/^\s*(check|verify|qr|shield)\s+/i, '')
     .trim();
 
-  await db.run(`INSERT INTO sms_log (direction, msisdn_hash, body, provider) VALUES ('inbound', ?, ?, ?)`, [
-    msisdnHash,
-    cleaned.slice(0, 200),
-    config.sms.provider,
-  ]);
+  await db.insert('smsLog', {
+    direction: 'inbound',
+    msisdn_hash: msisdnHash,
+    body: cleaned.slice(0, 200),
+    provider: config.sms.provider,
+  });
 
   const result = await verification.verify(cleaned, { channel: 'sms', msisdn: from, req });
   const reply = composeReply(result);
 
-  await db.run(
-    `INSERT INTO sms_log (direction, msisdn_hash, body, scan_id, provider) VALUES ('outbound', ?, ?, ?, ?)`,
-    [msisdnHash, reply, result.scanId ?? null, config.sms.provider]
-  );
+  await db.insert('smsLog', {
+    direction: 'outbound',
+    msisdn_hash: msisdnHash,
+    body: reply,
+    scan_id: result.scanId ?? null,
+    provider: config.sms.provider,
+  });
 
   // Fire and forget: the gateway's HTTP response must not wait on delivery.
   // Deliberately not awaited, so `.catch` is what keeps a failed send from

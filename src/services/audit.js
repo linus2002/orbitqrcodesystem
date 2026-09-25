@@ -25,20 +25,16 @@ import logger from '../lib/logger.js';
  */
 export async function record({ actor, action, entityType = null, entityId = null, detail = null, req = null }) {
   try {
-    await db.run(
-      `INSERT INTO audit_log (actor_id, actor_email, action, entity_type, entity_id, detail_json, ip, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        actor?.id ?? null,
-        actor?.email ?? null,
-        action,
-        entityType,
-        entityId === null ? null : String(entityId),
-        detail ? JSON.stringify(detail) : null,
-        req?.clientIp ?? null,
-        req?.get?.('user-agent')?.slice(0, 300) ?? null,
-      ]
-    );
+    await db.insert('auditLog', {
+      actor_id: actor?.id ?? null,
+      actor_email: actor?.email ?? null,
+      action,
+      entity_type: entityType,
+      entity_id: entityId === null ? null : String(entityId),
+      detail_json: detail ? JSON.stringify(detail) : null,
+      ip: req?.clientIp ?? null,
+      user_agent: req?.get?.('user-agent')?.slice(0, 300) ?? null,
+    });
   } catch (err) {
     // An audit write must never take down the operation it is describing,
     // but a failure here is serious and has to be loud in the logs.
@@ -49,39 +45,23 @@ export async function record({ actor, action, entityType = null, entityId = null
 /** Paged audit trail for the admin dashboard. */
 export async function list({ page, pageSize, action, actorId, entityType, from, to } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
-  const where = [];
-  const params = [];
+  const where = {
+    // LIKE 'prefix%' - a dotted action family such as 'batch.'
+    $raw: action ? 'string::startsWith(action, $actionPrefix)' : undefined,
+    actor_id: actorId ? Number(actorId) : undefined,
+    entity_type: entityType || undefined,
+    created_at: from || to ? { gte: from || undefined, lte: to || undefined } : undefined,
+  };
+  const params = action ? { actionPrefix: String(action) } : {};
 
-  if (action) {
-    where.push('action LIKE ?');
-    params.push(`${action}%`);
-  }
-  if (actorId) {
-    where.push('actor_id = ?');
-    params.push(actorId);
-  }
-  if (entityType) {
-    where.push('entity_type = ?');
-    params.push(entityType);
-  }
-  if (from) {
-    where.push('created_at >= ?');
-    params.push(from);
-  }
-  if (to) {
-    where.push('created_at <= ?');
-    params.push(to);
-  }
-
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = await db.scalar(`SELECT COUNT(*) FROM audit_log ${clause}`, params);
-  const rows = await db.all(
-    `SELECT id, actor_id, actor_email, action, entity_type, entity_id, detail_json, ip, created_at
-       FROM audit_log ${clause}
-      ORDER BY created_at DESC, id DESC
-      LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+  const total = await db.count('auditLog', where, { params });
+  const rows = await db.findMany('auditLog', where, {
+    order: ['created_at desc', 'id desc'],
+    limit,
+    offset,
+    fields: ['id', 'actor_id', 'actor_email', 'action', 'entity_type', 'entity_id', 'detail_json', 'ip', 'created_at'],
+    params,
+  });
 
   return {
     items: rows.map((r) => ({ ...r, detail: r.detail_json ? JSON.parse(r.detail_json) : null })),

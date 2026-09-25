@@ -36,16 +36,13 @@ beforeEach(async () => {
 
 /** Publish another version directly, with an explicit date so ordering is not left to the clock. */
 async function publish(version, { lang = 'en', effectiveFrom, heading = 'Revised' } = {}) {
-  await db.run(
-    `INSERT INTO leaflets (product_id, version, language, sections_json, effective_from)
-     VALUES (1, ?, ?, ?, ?)`,
-    [
-      version,
-      lang,
-      JSON.stringify([{ heading, body: `Body of ${version}.` }]),
-      effectiveFrom ?? new Date().toISOString(),
-    ]
-  );
+  await db.insert('leaflet', {
+    product_id: 1,
+    version,
+    language: lang,
+    sections: [{ heading, body: `Body of ${version}.` }],
+    effective_from: effectiveFrom ?? new Date().toISOString(),
+  });
 }
 
 const leaflet = (query = {}) => {

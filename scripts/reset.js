@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * Delete the database file and rebuild it from scratch, then reseed.
+ * Delete the local store file and rebuild it from scratch, then reseed.
  *
  *   npm run db:reset
  *
  * Refuses to run when NODE_ENV=production - this destroys the code registry,
  * which in a live system is unrecoverable and would orphan every printed pack.
+ * Against the Sanity dataset the seed itself refuses too, unless
+ * ALLOW_DESTRUCTIVE_RESET=1 is set.
  */
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -16,7 +18,8 @@ if (config.isProd) {
   process.exit(1);
 }
 
-for (const suffix of ['', '-wal', '-shm', '-journal']) {
+for (const suffix of ['', '.tmp']) {
+  if (config.db.file === ':memory:') break;
   const file = `${config.db.file}${suffix}`;
   if (!fs.existsSync(file)) continue;
 

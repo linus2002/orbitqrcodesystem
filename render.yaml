@@ -1,9 +1,12 @@
 # Render blueprint. Create the service with New > Blueprint and point it at
 # this repository; Render reads this file and provisions everything below.
 #
-# IMPORTANT: numInstances stays at 1. The database is a SQLite file on the
-# attached disk, which one instance owns. A second instance would get its own
-# disk and its own divergent copy of the codes and scan log.
+# DATA: set SANITY_PROJECT_ID, SANITY_DATASET and SANITY_API_TOKEN in the
+# Render dashboard (they are `sync: false` below, so they never live in this
+# file). With them set, all data is in Sanity and the disk is unused.
+#
+# Without them the app falls back to a local file on the attached disk, which
+# one instance owns - so numInstances stays at 1 unless Sanity is configured.
 services:
   - type: web
     name: orbit-qr
@@ -23,7 +26,14 @@ services:
       - key: NODE_ENV
         value: production
       - key: DB_FILE
-        value: /data/qrshield.db
+        value: /data/qrshield.json
+      # The database. Secrets: entered in the dashboard, never committed.
+      - key: SANITY_PROJECT_ID
+        sync: false
+      - key: SANITY_DATASET
+        sync: false
+      - key: SANITY_API_TOKEN
+        sync: false
       # Session cookies over HTTPS only. Render terminates TLS for us.
       - key: COOKIE_SECURE
         value: "true"

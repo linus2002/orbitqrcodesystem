@@ -119,25 +119,26 @@ function daysUntil(isoDate) {
  * leaflet page is where a reader chooses one.
  */
 async function loadLeaflet(batch) {
-  const leaflet = await db.get(
-    `SELECT l.*, f.filename AS pdf_filename, f.size AS pdf_size
-       FROM leaflets l
-       LEFT JOIN leaflet_files f ON f.id = l.file_id
-      WHERE l.product_id = ? AND l.language = 'en'
-      ORDER BY l.effective_from DESC, l.id DESC LIMIT 1`,
-    [batch.product_id]
+  const leaflet = await db.findOne(
+    'leaflet',
+    { product_id: batch.product_id, language: 'en' },
+    {
+      order: ['effective_from desc', 'id desc'],
+      // The PDF this version was published as, if any - name and size only.
+      extra: {
+        pdf_filename: '*[_type == "leafletFile" && id == ^.file_id][0].filename',
+        pdf_size: '*[_type == "leafletFile" && id == ^.file_id][0].size',
+      },
+    }
   );
   if (!leaflet) return null;
-  let sections = [];
-  try {
-    sections = JSON.parse(leaflet.sections_json);
-  } catch {
-    logger.error('leaflet sections_json is not valid JSON', { leafletId: leaflet.id });
+  if (!Array.isArray(leaflet.sections)) {
+    logger.error('leaflet sections are not a list', { leafletId: leaflet.id });
   }
   return {
     version: leaflet.version,
     language: leaflet.language,
-    sections,
+    sections: Array.isArray(leaflet.sections) ? leaflet.sections : [],
     // The PDF, when this version has one: the result card offers it, and the
     // sections stay for a screen reader.
     pdf: leaflets.pdfInfo(batch.sku, leaflet),
@@ -152,23 +153,20 @@ async function loadLeaflet(batch) {
 async function detectGuessing(ipHash, scanId) {
   if (!ipHash) return;
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const attempts = await db.scalar(
-    `SELECT COUNT(*) FROM scans
-      WHERE ip_hash = ? AND created_at >= ?
-        AND reason IN ('unknown_code', 'checksum_failed', 'malformed')`,
-    [ipHash, since]
-  );
+  const attempts = await db.count('scan', {
+    ip_hash: ipHash,
+    created_at: { gte: since },
+    reason: { in: ['unknown_code', 'checksum_failed', 'malformed'] },
+  });
 
   if (attempts >= config.rateLimit.guessAlertThreshold) {
     // Fire once per hour per source rather than on every subsequent attempt.
-    const recent = await db.get(
-      `SELECT id FROM alerts
-        WHERE type = 'guess_attack' AND status IN ('open','investigating')
-          AND json_extract(detail_json, '$.ipHash') = ?
-          AND created_at >= ?
-        LIMIT 1`,
-      [ipHash, since]
-    );
+    const recent = await db.findOne('alert', {
+      type: 'guess_attack',
+      status: { in: ['open', 'investigating'] },
+      ip_hash: ipHash,
+      created_at: { gte: since },
+    }, { fields: ['id'] });
     if (!recent) {
       await alerts.raise({
         type: 'guess_attack',
@@ -241,18 +239,7 @@ export async function verify(rawCode, ctx = {}) {
   const signatureState = checkSignature(code, signature, config.secrets.code);
 
   // --- 2. Registry lookup --------------------------------------------------
-  const row = await db.get(
-    `SELECT c.*,
-            b.batch_number, b.mfg_date, b.expiry_date, b.status AS batch_status,
-            b.is_test, b.leaflet_id, b.product_id AS batch_product_id, b.recall_reason,
-            p.sku, p.name AS product_name, p.generic_name, p.strength,
-            p.dosage_form, p.pack_size, p.manufacturer
-       FROM codes c
-       JOIN batches b  ON b.id = c.batch_id
-       JOIN products p ON p.id = c.product_id
-      WHERE c.code = ?`,
-    [code]
-  );
+  const row = await lookup(code);
 
   if (!row) {
     const scanId = await logScan({
@@ -315,13 +302,13 @@ export async function verify(rawCode, ctx = {}) {
     row.verified_count >= (await settings.get('alerts.duplicate_threshold'))
   ) {
     // Grace window: the same source re-checking the same pack is one event.
-    const lastSameSource = await db.get(
-      `SELECT created_at FROM scans
-        WHERE code_id = ? AND result = 'genuine'
-          AND ip_hash IS NOT NULL AND ip_hash = ?
-        ORDER BY created_at DESC LIMIT 1`,
-      [row.id, ipHash]
-    );
+    const lastSameSource = ipHash
+      ? await db.findOne(
+          'scan',
+          { code_id: row.id, result: 'genuine', ip_hash: ipHash },
+          { order: 'created_at desc', fields: ['created_at'] }
+        )
+      : null;
     const withinGrace =
       lastSameSource &&
       Date.now() - new Date(lastSameSource.created_at).getTime() < SAME_SOURCE_GRACE_MS;
@@ -355,28 +342,21 @@ export async function verify(rawCode, ctx = {}) {
       isTest,
     });
 
+    const at = db.now();
     // A grace re-scan must not inflate the counter that defines "duplicate".
     if (reason !== REASONS.OK_REPEAT_SAME_SOURCE) {
-      await db.run(
-        `UPDATE codes
-            SET scan_count = scan_count + 1,
-                verified_count = verified_count + CASE WHEN ? = 'genuine' THEN 1 ELSE 0 END,
-                first_scan_at = COALESCE(first_scan_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-                last_scan_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-                status = CASE
-                  WHEN ? = 'genuine' AND status IN ('issued','printed','released') THEN 'verified'
-                  WHEN ? = 'flagged' AND status <> 'recalled' THEN 'flagged'
-                  ELSE status END,
-                flagged_at = CASE WHEN ? = 'flagged' THEN
-                  COALESCE(flagged_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')) ELSE flagged_at END
-          WHERE id = ?`,
-        [result, result, result, result, row.id]
-      );
+      let status = row.status;
+      if (result === 'genuine' && ['issued', 'printed', 'released'].includes(status)) status = 'verified';
+      else if (result === 'flagged' && status !== 'recalled') status = 'flagged';
+
+      // The counters are incremented on the server, so two scans landing at
+      // the same moment can never lose one.
+      await db.update('code', row, { status, last_scan_at: at }, {
+        inc: { scan_count: 1, verified_count: result === 'genuine' ? 1 : 0 },
+        setIfMissing: result === 'flagged' ? { first_scan_at: at, flagged_at: at } : { first_scan_at: at },
+      });
     } else {
-      await db.run(
-        `UPDATE codes SET last_scan_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-        [row.id]
-      );
+      await db.update('code', row, { last_scan_at: at });
     }
     return id;
   });
@@ -449,6 +429,48 @@ export async function verify(rawCode, ctx = {}) {
   });
 }
 
+/**
+ * The registry lookup: a code with its batch and product, in one request.
+ *
+ * Fetched by document id - a code's id IS the code - so this costs the same
+ * however large the registry grows. Returns the row shape the old three-way
+ * join produced, or undefined for a code that does not exist.
+ */
+async function lookup(code) {
+  const doc = await db.query(
+    `*[_id == $id && _type == "code"][0]{
+       ...,
+       "b": *[_type == "batch" && id == ^.batch_id][0]{
+         batch_number, mfg_date, expiry_date, status, is_test, leaflet_id, product_id, recall_reason
+       },
+       "p": *[_type == "product" && id == ^.product_id][0]{
+         sku, name, generic_name, strength, dosage_form, pack_size, manufacturer
+       }
+     }`,
+    { id: db.docIdOf('code', { code }) }
+  );
+  if (!doc || !doc.b || !doc.p) return undefined;
+  const { b, p, ...codeDoc } = doc;
+  return {
+    ...db.toRow('code', codeDoc),
+    batch_number: b.batch_number,
+    mfg_date: b.mfg_date,
+    expiry_date: b.expiry_date,
+    batch_status: b.status,
+    is_test: b.is_test ?? 0,
+    leaflet_id: b.leaflet_id ?? null,
+    batch_product_id: b.product_id,
+    recall_reason: b.recall_reason ?? null,
+    sku: p.sku,
+    product_name: p.name,
+    generic_name: p.generic_name ?? null,
+    strength: p.strength ?? null,
+    dosage_form: p.dosage_form ?? null,
+    pack_size: p.pack_size ?? null,
+    manufacturer: p.manufacturer,
+  };
+}
+
 /** Insert one scan row. Returns its id. */
 async function logScan({
   codeText,
@@ -467,33 +489,26 @@ async function logScan({
   signatureState = null,
   isTest = false,
 }) {
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO scans
-       (code_text, code_id, batch_id, product_id, result, reason, channel,
-        signature_state, scan_number, ip_hash, verifier_id, msisdn_hash, user_agent,
-        country, region, city, is_test)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [
-      String(codeText).slice(0, 64),
-      codeId,
-      batchId,
-      productId,
-      result,
-      reason,
-      channel,
-      signatureState,
-      scanNumber,
-      ipHash,
-      verifierId,
-      msisdnHash,
-      userAgent,
-      geo.country ?? null,
-      geo.region ?? null,
-      geo.city ?? null,
-      isTest ? 1 : 0,
-    ]
-  );
-  return Number(lastInsertRowid);
+  const scan = await db.insert('scan', {
+    code_text: String(codeText).slice(0, 64),
+    code_id: codeId,
+    batch_id: batchId,
+    product_id: productId,
+    verifier_id: verifierId,
+    result,
+    reason,
+    channel,
+    signature_state: signatureState,
+    scan_number: scanNumber,
+    ip_hash: ipHash,
+    msisdn_hash: msisdnHash,
+    user_agent: userAgent,
+    country: geo.country ?? null,
+    region: geo.region ?? null,
+    city: geo.city ?? null,
+    is_test: isTest ? 1 : 0,
+  });
+  return scan.id;
 }
 
 /** Assemble the response body, attaching the patient-facing message. */
@@ -517,10 +532,10 @@ export async function verifyBulk(codes, ctx = {}) {
   const unique = [...new Set(codes.map((c) => String(c).trim()).filter(Boolean))];
 
   /*
-   * Checked one at a time rather than with Promise.all: each verification
-   * writes a scan row inside a transaction, and the connection serves a single
-   * transaction at a time. Running them concurrently would have them fighting
-   * over it, and a shipment check is not latency-critical.
+   * Checked one at a time rather than with Promise.all: a shipment often
+   * lists the same code twice by mistake, and checking both at once would let
+   * each read the counters before the other wrote them. A shipment check is
+   * not latency-critical.
    */
   const results = [];
   for (const raw of unique) {

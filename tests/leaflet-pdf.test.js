@@ -4,11 +4,11 @@
  * The artwork department has the leaflet as a PDF, and the carton's leaflet
  * QR should open it. A file may be 25 MB while a request may not (a Vercel
  * function takes 4.5 MB), so the browser announces the file, sends it in
- * pieces, and the publish points at the finished upload. These cover that
- * upload contract, the public address that serves the file back, that the
- * address tracks the current version while older ones stay reachable, that
- * a genuine pack scan offers it, and what is refused - before anything is
- * written.
+ * pieces - each stored as a file asset - and the publish points at the
+ * finished upload. These cover that upload contract, the public address that
+ * streams the file back, that the address tracks the current version while
+ * older ones stay reachable, that a genuine pack scan offers it, and what is
+ * refused - before anything is written.
  */
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,12 +44,8 @@ beforeEach(async () => {
 
 /** Another product, without a leaflet. */
 async function product(sku, name = 'Testamol', strength = '500 mg') {
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO products (sku, name, strength, dosage_form, manufacturer)
-     VALUES (?, ?, ?, 'Tablet', 'Northbridge')`,
-    [sku, name, strength]
-  );
-  return lastInsertRowid;
+  const row = await db.insert('product', { sku, name, strength, dosage_form: 'Tablet', manufacturer: 'Northbridge' });
+  return row.id;
 }
 
 /** Announce a file and send it in pieces, as the Products screen does. Returns the file id. */
@@ -83,8 +79,9 @@ async function fetchPdf(path) {
   };
 }
 
-const fileCount = () => db.scalar('SELECT COUNT(*) FROM leaflet_files');
-const chunkCount = () => db.scalar('SELECT COUNT(*) FROM leaflet_file_chunks');
+const fileCount = () => db.count('leafletFile');
+const leafletsFor = (id) => db.count('leaflet', { product_id: id });
+const pieceCount = async () => (await db.findMany('leafletFile')).reduce((n, f) => n + (f.chunks ?? 0), 0);
 
 // ---------------------------------------------------------------------------
 // Publishing and serving
@@ -99,9 +96,11 @@ test('a leaflet can be published as a PDF alone, and the public page then points
   assert.equal(res.status, 201, JSON.stringify(res.body));
   assert.deepEqual(res.body.pdf, { filename: 'Testamol-leaflet.pdf', size: pdfBytes().length });
 
-  const file = await db.get('SELECT * FROM leaflet_files WHERE id = ?', [fileId]);
+  const file = await db.get('leafletFile', fileId);
   assert.equal(file.status, 'ready', 'the upload is sealed by the publish');
   assert.match(file.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(file.pieces.length, 1);
+  assert.ok(file.pieces[0].asset_id, 'each piece is an asset');
 
   client.clearCookies();
   const page = await client.get('/api/product/TES12/leaflet');
@@ -128,7 +127,7 @@ test('a file sent in many pieces is reassembled exactly, in order', async () => 
   for (let i = 0; i < body.length; i++) body[i] = (i * 7 + (i >> 8)) & 0xff;
   const bytes = Buffer.concat([Buffer.from('%PDF-1.4\n'), body]);
   const fileId = await uploadPdf(bytes, { chunk: 7 * 1024 });
-  assert.equal(await chunkCount(), 15);
+  assert.equal((await db.get('leafletFile', fileId)).chunks, 15);
 
   assert.equal((await publish(id, { pdf: { fileId } })).status, 201);
   client.clearCookies();
@@ -205,7 +204,8 @@ test('one publish across strengths stores the file once and serves it for each',
   const res = await publish(a, { pdf: { fileId }, alsoApplyTo: [b] });
   assert.equal(res.status, 201);
   assert.equal(await fileCount(), 1, 'one document, one file');
-  assert.equal(await db.scalar('SELECT COUNT(DISTINCT file_id) FROM leaflets WHERE file_id IS NOT NULL'), 1);
+  const shared = new Set((await db.findMany('leaflet', { file_id: { ne: null } })).map((l) => l.file_id));
+  assert.equal(shared.size, 1);
 
   client.clearCookies();
   for (const sku of ['TES12', 'TES25']) {
@@ -220,7 +220,7 @@ test('the audit entry names the file', async () => {
   await client.login(ADMIN.email, ADMIN.password);
   await publish(id, { pdf: { fileId: await uploadPdf(pdfBytes()) } });
 
-  const entry = await db.get(`SELECT detail_json FROM audit_log WHERE action = 'leaflet.publish' ORDER BY id DESC LIMIT 1`);
+  const entry = await db.findOne('auditLog', { action: 'leaflet.publish' }, { order: 'id desc' });
   const detail = JSON.parse(entry.detail_json);
   assert.equal(detail.pdf.filename, 'Testamol-leaflet.pdf');
   assert.match(detail.pdf.sha256, /^[0-9a-f]{64}$/);
@@ -236,7 +236,7 @@ test('neither sections nor a PDF is refused, and nothing is written', async () =
 
   const res = await publish(id, {});
   assert.equal(res.status, 400);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM leaflets WHERE product_id = ?', [id]), 0);
+  assert.equal(await leafletsFor(id), 0);
 });
 
 test('a file over 25 MB is refused before a single byte is sent', async () => {
@@ -253,7 +253,7 @@ test('a piece larger than a request may carry is refused', async () => {
   const tooBig = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(PDF_CHUNK_BYTES)]);
   const res = await client.raw(`/api/admin/leaflet-files/${begin.body.fileId}/chunks/0`, { body: tooBig, contentType: 'application/pdf' });
   assert.equal(res.status, 413);
-  assert.equal(await chunkCount(), 0);
+  assert.equal(await pieceCount(), 0);
 });
 
 test('a file that is not a PDF is refused at its first piece', async () => {
@@ -263,7 +263,7 @@ test('a file that is not a PDF is refused at its first piece', async () => {
   const res = await client.raw(`/api/admin/leaflet-files/${begin.body.fileId}/chunks/0`, { body: bytes, contentType: 'application/pdf' });
   assert.equal(res.status, 400);
   assert.match(res.body.error.message, /not a PDF/);
-  assert.equal(await chunkCount(), 0);
+  assert.equal(await pieceCount(), 0);
 });
 
 test('pieces must arrive in order and add up to the announced size', async () => {
@@ -299,8 +299,8 @@ test('publishing with an incomplete upload is refused, and the upload stays reus
   const res = await publish(id, { pdf: { fileId: begin.body.fileId } });
   assert.equal(res.status, 400);
   assert.match(res.body.error.message, /incomplete/);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM leaflets WHERE product_id = ?', [id]), 0, 'nothing published');
-  assert.equal((await db.get('SELECT status FROM leaflet_files WHERE id = ?', [begin.body.fileId])).status, 'pending');
+  assert.equal(await leafletsFor(id), 0, 'nothing published');
+  assert.equal((await db.get('leafletFile', begin.body.fileId)).status, 'pending');
 
   // Finish it, and the same upload publishes.
   await client.raw(`/api/admin/leaflet-files/${begin.body.fileId}/chunks/1`, { body: bytes.subarray(10), contentType: 'application/pdf' });
@@ -328,19 +328,41 @@ test('an unknown upload id is refused', async () => {
   assert.equal((await client.raw('/api/admin/leaflet-files/999/chunks/0', { body: pdfBytes(), contentType: 'application/pdf' })).status, 404);
 });
 
-test('uploads announced but never published are dropped after a day', async () => {
+test('uploads announced but never published are dropped after a day, assets included', async () => {
   await client.login(ADMIN.email, ADMIN.password);
-  const bytes = pdfBytes();
+  const bytes = pdfBytes('FORGOTTEN');
   const begin = await client.post('/api/admin/leaflet-files', { name: 'forgotten.pdf', size: bytes.length });
   await client.raw(`/api/admin/leaflet-files/${begin.body.fileId}/chunks/0`, { body: bytes, contentType: 'application/pdf' });
+  const [piece] = (await db.get('leafletFile', begin.body.fileId)).pieces;
+  assert.ok(await db.readFile(piece.asset_id), 'the piece is stored');
+
   const twoDaysAgo = new Date(Date.now() - 48 * 3_600_000).toISOString();
-  await db.run('UPDATE leaflet_files SET created_at = ? WHERE id = ?', [twoDaysAgo, begin.body.fileId]);
+  await db.update('leafletFile', begin.body.fileId, { created_at: twoDaysAgo });
 
   // A new upload beginning is when the sweep runs.
   await client.post('/api/admin/leaflet-files', { name: 'new.pdf', size: bytes.length });
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM leaflet_files WHERE id = ?', [begin.body.fileId]), 0);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM leaflet_file_chunks WHERE file_id = ?', [begin.body.fileId]), 0);
+  assert.equal(await db.get('leafletFile', begin.body.fileId), undefined);
+  assert.equal(await db.readFile(piece.asset_id), undefined, 'and its asset is gone');
   assert.equal(await fileCount(), 1, 'the fresh upload is untouched');
+});
+
+test('a piece shared with another file survives the sweep', async () => {
+  const id = await product('TES12');
+  await client.login(ADMIN.email, ADMIN.password);
+  // The same bytes twice: content-addressed assets mean one asset, two files.
+  const kept = await uploadPdf(pdfBytes('SAME'));
+  await publish(id, { pdf: { fileId: kept } });
+  const bytes = pdfBytes('SAME');
+  const stale = await client.post('/api/admin/leaflet-files', { name: 'dup.pdf', size: bytes.length });
+  await client.raw(`/api/admin/leaflet-files/${stale.body.fileId}/chunks/0`, { body: bytes, contentType: 'application/pdf' });
+  await db.update('leafletFile', stale.body.fileId, { created_at: new Date(Date.now() - 48 * 3_600_000).toISOString() });
+
+  await client.post('/api/admin/leaflet-files', { name: 'new.pdf', size: 10 });
+  assert.equal(await db.get('leafletFile', stale.body.fileId), undefined, 'the stale index is gone');
+  client.clearCookies();
+  const served = await fetchPdf('/api/product/TES12/leaflet.pdf');
+  assert.equal(served.status, 200, 'the published file still serves');
+  assert.ok(served.bytes.equals(pdfBytes('SAME')));
 });
 
 test('a regulator cannot upload', async () => {
@@ -363,5 +385,5 @@ test('the file name is reduced to something safe to send back', async () => {
 
   const untitled = await client.post('/api/admin/leaflet-files', { size: 10 });
   assert.equal(untitled.status, 201);
-  assert.equal((await db.get('SELECT filename FROM leaflet_files WHERE id = ?', [untitled.body.fileId])).filename, 'leaflet.pdf');
+  assert.equal((await db.get('leafletFile', untitled.body.fileId)).filename, 'leaflet.pdf');
 });

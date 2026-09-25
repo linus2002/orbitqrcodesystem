@@ -12,65 +12,45 @@ import './setup-env.js';
 import { after } from 'node:test';
 
 import * as db from '../src/db/index.js';
-import { config } from '../src/config.js';
 import { hashPassword } from '../src/lib/crypto.js';
 import * as serialization from '../src/services/serialization.js';
 
 /*
- * Close the database when a test file finishes.
- *
- * freshDb() closes the previous connection before opening the next, but
- * nothing closed the last one, so every test process exited holding a live
- * native libSQL connection - and occasionally segfaulted tearing it down
- * (exit 139 after every test had passed, reported only as 'test failed').
- * Seen in about 1 full-suite run in 5, and only under load: 3 crashes in 96
- * parallel runs of verification.test.js as it was, 0 in 96 with this.
- *
- * Registered here, at the top level of the shared helper, so it applies once
- * to every file that imports it - which is every file that opens a database.
- * Closing is idempotent, so files that close things themselves are unaffected.
+ * Close the store when a test file finishes. Registered here, at the top
+ * level of the shared helper, so it applies once to every file that imports
+ * it. Closing is idempotent.
  */
 after(async () => {
   await db.close();
 });
 
 /**
- * A clean database for one test.
+ * A clean store for one test: a brand new in-memory one.
  *
- * On SQLite that means a brand new in-memory one. On Postgres the server is
- * shared, so the schema is applied once and every table emptied instead.
+ * Always in memory - db.open(':memory:') selects the memory backend whatever
+ * the environment says, so no test can ever write to the Sanity dataset.
  */
 export async function freshDb() {
-  if (config.db.postgresUrl) {
-    db.open();
-    await db.migrate({ silent: true });
-    await db.resetForTests();
-    return db;
-  }
   await db.close();
   db.open(':memory:');
   await db.migrate({ silent: true });
   return db;
 }
 
+/** One leaflet section list, in the shape the store keeps. */
+export const SECTIONS = [{ heading: 'Dosage', body: 'One capsule three times a day.' }];
+
 /** Minimal but realistic fixture: one product, one released batch with codes. */
 export async function seedBasics({ quantity = 40, expiryDays = 700 } = {}) {
   const expiry = new Date(Date.now() + expiryDays * 86400000).toISOString().slice(0, 10);
 
-  await db.run(
-    `INSERT INTO products (sku, name, strength, dosage_form, manufacturer)
-     VALUES ('AMX25', 'Amoxicillin', '250 mg', 'Capsule', 'Northbridge')`
-  );
-  await db.run(
-    `INSERT INTO leaflets (product_id, version, sections_json)
-     VALUES (1, '1.0', ?)`,
-    [JSON.stringify([{ heading: 'Dosage', body: 'One capsule three times a day.' }])]
-  );
-  await db.run(
-    `INSERT INTO batches (batch_number, product_id, mfg_date, expiry_date, quantity, leaflet_id)
-     VALUES ('AMX25-T1', 1, '2026-09-01', ?, ?, 1)`,
-    [expiry, quantity]
-  );
+  await db.insert('product', {
+    sku: 'AMX25', name: 'Amoxicillin', strength: '250 mg', dosage_form: 'Capsule', manufacturer: 'Northbridge',
+  });
+  await db.insert('leaflet', { product_id: 1, version: '1.0', sections: SECTIONS });
+  await db.insert('batch', {
+    batch_number: 'AMX25-T1', product_id: 1, mfg_date: '2026-09-01', expiry_date: expiry, quantity, leaflet_id: 1,
+  });
 
   await serialization.issueCodes(1, {});
   await serialization.transition(1, 'printed', {});
@@ -79,17 +59,16 @@ export async function seedBasics({ quantity = 40, expiryDays = 700 } = {}) {
   return {
     batchId: 1,
     productId: 1,
-    codes: (await db.all('SELECT * FROM codes WHERE batch_id = 1 ORDER BY unit_index')).map((c) => c.code),
+    codes: (await db.findMany('code', { batch_id: 1 }, { order: 'unit_index asc' })).map((c) => c.code),
   };
 }
 
 /** Create a staff account. */
 export async function seedUser({ email, password, role = 'admin', name = 'Test User' }) {
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO users (email, full_name, password_hash, role) VALUES (?,?,?,?)`,
-    [email.toLowerCase(), name, hashPassword(password), role]
-  );
-  return lastInsertRowid;
+  const user = await db.insert('user', {
+    email: email.toLowerCase(), full_name: name, password_hash: hashPassword(password), role,
+  });
+  return user.id;
 }
 
 /**
@@ -216,6 +195,7 @@ export const DETAILS = {
   role: 'patient',
   city: 'Quezon City',
   consent: true,
+  policyVersion: '2026-09-25',
 };
 
 /** Give the portal details for this client, so verification is allowed. */
@@ -226,9 +206,5 @@ export async function giveDetails(client, overrides = {}) {
 /** Clear rate-limit state between tests, whichever store is in use. */
 export async function resetRateLimits() {
   const { store } = await import('../src/lib/ratelimit.js');
-  if (store.hits) {
-    store.hits.clear();          // MemoryStore
-  } else {
-    await db.run('DELETE FROM rate_hits');  // SqlStore
-  }
+  store.hits.clear(); // the suite always runs on the MemoryStore
 }

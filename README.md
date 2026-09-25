@@ -9,9 +9,9 @@ engine, a scan log, an alert queue, and an audit trail.
 Built as a working prototype from the *QR Shield Field Guide*, which remains
 the specification of record for the workflow and terminology used here.
 
-**Stack:** React 19 + Vite on the front, Express 5 + Node's built-in
-`node:sqlite` on the back. No database server to install and no native
-compilation step.
+**Stack:** React 19 + Vite on the front, Express 5 on the back, and a
+**Sanity** dataset as the database. Without Sanity credentials it runs on a
+local file, so development and the tests need no account, network or server.
 
 ---
 
@@ -67,13 +67,14 @@ compilation step.
 
 ## Quick start
 
-Requires **Node.js 22.5 or newer** (24 recommended). There is no database
-server to install and no native compilation step: the project uses Node's
-built-in `node:sqlite`.
+Requires **Node.js 22.5 or newer** (24 recommended). Nothing else is needed to
+start: with no Sanity credentials the app keeps its data in a local file
+(`data/qrshield.json`). See [Data: Sanity](#data-sanity) to use the real
+dataset.
 
 ```bash
 npm install
-npm run setup     # generates .env with real secrets, creates the DB, loads demo data
+npm run setup     # generates .env with real secrets, loads demo data locally
 npm run build     # builds the React frontend into dist/
 npm start
 ```
@@ -90,6 +91,46 @@ Then open the app on the port in your `.env` (`PORT`, default 3000).
 > in use on the machine it was built on. If you change `PORT`, change
 > `PUBLIC_BASE_URL` to match - that URL is what gets encoded into QR codes, so
 > a mismatch produces QR codes that point at the wrong host.
+
+### Data: Sanity
+
+All data - products, leaflets, batches, the code registry, scans, alerts,
+users, sessions, the audit log - lives in a Sanity dataset. The server talks
+to it with a token; **the browser never does**, and nothing identifying the
+project ever reaches it:
+
+- `SANITY_PROJECT_ID`, `SANITY_DATASET` and `SANITY_API_TOKEN` are read by the
+  Node server only (`src/config.js`). No endpoint returns them, and Vite only
+  bundles variables prefixed `VITE_`, so they cannot leak into the client.
+- They live in `.env` locally and in the host's environment settings in
+  production. `.env` is git-ignored; never commit them.
+- The dataset must be **private**, and the project should list **no CORS
+  origin** for the web app, so the project id on its own reads nothing.
+
+To connect:
+
+1. At [sanity.io/manage](https://www.sanity.io/manage), open the project, then
+   **API -> Tokens -> Add API token** with **Editor** permissions.
+2. Put it in `.env` as `SANITY_API_TOKEN` (the project id and dataset are
+   already there). Treat it like a password.
+3. Make the dataset private: `cd studio && npx sanity login && npx sanity
+   dataset visibility set production private`.
+4. `npm run db:migrate` checks the connection and refuses a public dataset.
+5. Create the first administrator: `npm run user:create -- --email ... --name
+   "..." --password "..."`. (`npm run db:seed` loads demo data but WIPES the
+   dataset first, so it refuses against Sanity unless
+   `ALLOW_DESTRUCTIVE_RESET=1` is set - use it on a throwaway dataset only.)
+
+Moving from an existing SQL database (Supabase, Turso or a SQLite file)?
+`npm run db:import-sql -- --from postgres|turso|<file>` copies every row
+across with its id intact; add `--to-file data/rehearsal.json` to try it
+locally first. It is safe to re-run.
+
+**The Studio** (`studio/`) is a read-only view of the dataset for staff who
+are members of the Sanity project: `cd studio && npm install && npm run dev`.
+Its project id comes from `studio/.env` (git-ignored). Nothing can be edited
+there - every write goes through the app, which keeps the audit trail. Its
+schema is generated from `src/db/schema.js` by `npm run studio:schema`.
 
 ### Working on it
 
@@ -233,8 +274,10 @@ src/
   server.js              Express app: middleware order, routes, static, shutdown
   config.js              Every tunable, read from the environment in one place
   db/
-    schema.sql           Full DDL with CHECK constraints and indexes
-    index.js             Connection, pragmas, query helpers, transactions
+    schema.js            Every document type: fields, enums, defaults, unique keys
+    index.js             The store: validated writes, queries, transactions
+    sanity.js            Sanity backend (production)
+    memory.js            In-memory / local-file backend (tests, development)
   lib/
     codes.js             Code format: generation, permutation, checksum, parsing
     crypto.js            scrypt passwords, HMAC tokens, timing-safe comparison
@@ -282,7 +325,9 @@ client/                  React frontend (Vite). Built into dist/.
       views/             One component per dashboard section
     styles/              Design tokens plus per-surface stylesheets
 
-scripts/                 setup, migrate, seed, reset, dev
+scripts/                 setup, migrate (connection check), seed, reset, dev,
+                         import-sql (SQL -> Sanity), gen-studio-schema
+studio/                  Read-only Sanity Studio
 tests/                   62 unit/integration tests + 24 browser tests
 docs/                    API reference, data model, security notes
 ```
@@ -368,8 +413,9 @@ npm run test:all  # everything
   patient's browser uses, and runs the decoded payload through verification.
   Includes a damaged-label test, because pharmaceutical labels get scuffed.
 
-Tests run against an in-memory database and set their own environment, so they
-never touch your `.env` or the development database.
+Tests run against an in-memory store and set their own environment, so they
+never touch your `.env`, the development data or the Sanity dataset - the
+Sanity variables are blanked before anything loads.
 
 They run one file at a time (`--test-concurrency=1`). Node's default is to run
 test files in parallel, which starts several HTTP servers at once and produces
@@ -377,7 +423,7 @@ intermittent `fetch failed` errors on a machine that is already short of
 memory. Serialising costs a few seconds and makes the suite deterministic.
 
 **`npm run test:e2e`** - 24 tests driving the real React app in headless
-Chrome over the DevTools Protocol, against its own temporary database. They
+Chrome over the DevTools Protocol, against its own temporary store. They
 cover every dashboard section, the three result states on the portal, drawer
 and filter interaction, the printable label sheet, role-based navigation, and
 mobile layout. **Any console error or failed request fails the test**, which is
@@ -443,12 +489,11 @@ Nothing here assumes a particular host. A minimal production checklist:
 5. Behind a load balancer, check `trust proxy` in `src/server.js` matches your
    real proxy hop count. Getting this wrong lets a client spoof
    `X-Forwarded-For` and bypass rate limiting entirely.
-6. Back up `data/qrshield.db` (or migrate to PostgreSQL - see
-   `docs/DATA-MODEL.md`). The code registry is the system of record; losing it
-   orphans every pack in circulation.
-7. Replace the in-memory rate limiter with a shared store if you run more than
-   one instance. `src/lib/ratelimit.js` is written against a three-method store
-   interface so a Redis implementation drops straight in.
+6. Configure Sanity (see [Data: Sanity](#data-sanity)) and back the dataset up
+   (`npx sanity dataset export`). The code registry is the system of record;
+   losing it orphans every pack in circulation.
+7. With Sanity configured, rate limits are shared across instances
+   automatically (`RATELIMIT_STORE=db`); without it they are per process.
 8. `GET /api/health` is the liveness probe.
 
 ---
@@ -458,7 +503,7 @@ Nothing here assumes a particular host. A minimal production checklist:
 | Document | Contents |
 |---|---|
 | [`docs/API.md`](docs/API.md) | Every endpoint, with request and response examples |
-| [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) | Tables, relationships, and the PostgreSQL migration path |
+| [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) | Document types, relationships, and how Sanity stores them |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model, controls, and honest limitations |
 
 ---

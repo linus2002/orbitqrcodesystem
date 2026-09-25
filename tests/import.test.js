@@ -41,7 +41,7 @@ test('products import, and a lower-case SKU is stored upper-case', async () => {
   assert.equal(result.created, 1);
   assert.equal(result.errors.length, 0);
 
-  const product = await db.get('SELECT sku FROM products');
+  const product = await db.findOne('product');
   // The SKU becomes the first segment of every code, so its case is not
   // cosmetic - two cases would be two different code prefixes.
   assert.equal(product.sku, 'AMX25');
@@ -56,8 +56,8 @@ test('a second import of the same SKU updates rather than duplicating', async ()
 
   assert.equal(result.created, 0);
   assert.equal(result.updated, 1);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM products'), 1);
-  assert.equal(await db.scalar('SELECT name FROM products'), 'Corrected');
+  assert.equal(await db.count('product'), 1);
+  assert.equal((await db.findOne('product')).name, 'Corrected');
 });
 
 test('a bad row is reported against its spreadsheet row and the good ones still import', async () => {
@@ -91,7 +91,7 @@ test('the same SKU twice in one file is refused rather than silently overwritten
   assert.equal(result.created, 1);
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0].message, /appears twice/);
-  assert.equal(await db.scalar('SELECT name FROM products'), 'First entry');
+  assert.equal((await db.findOne('product')).name, 'First entry');
 });
 
 test('a dry run reports what would happen and writes nothing', async () => {
@@ -99,7 +99,7 @@ test('a dry run reports what would happen and writes nothing', async () => {
 
   const result = await importProducts(rows, { dryRun: true });
   assert.equal(result.created, 1);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM products'), 0, 'nothing was written');
+  assert.equal(await db.count('product'), 0, 'nothing was written');
 });
 
 test('blank rows left behind by Excel are ignored, not reported as errors', async () => {
@@ -126,10 +126,10 @@ test('batches resolve their product by SKU and accept a comma in the quantity', 
 
   const result = await importBatches(rows, {});
   assert.equal(result.created, 1, result.errors.map((e) => e.message).join('; '));
-  assert.equal(await db.scalar('SELECT quantity FROM batches'), 1200);
+  assert.equal((await db.findOne('batch')).quantity, 1200);
   // Importing a batch must not mint codes: that stays a deliberate step.
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM codes'), 0);
-  assert.equal(await db.scalar('SELECT status FROM batches'), 'planned');
+  assert.equal(await db.count('code'), 0);
+  assert.equal((await db.findOne('batch')).status, 'planned');
 });
 
 test('an imported batch records the product\'s current leaflet, as a dashboard batch does', async () => {
@@ -137,12 +137,10 @@ test('an imported batch records the product\'s current leaflet, as a dashboard b
     await sheetFrom(['SKU', 'Name', 'Manufacturer'], [['AMX25', 'Amoxicillin', 'North'], ['NOLF1', 'No Leaflet', 'North']]),
     {}
   );
-  const amx = await db.scalar(`SELECT id FROM products WHERE sku = 'AMX25'`);
-  await db.run(
-    `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?, '1.0', 'en', '[{"heading":"H","body":"B"}]')`,
-    [amx]
-  );
-  const leaflet = await db.scalar('SELECT id FROM leaflets');
+  const amx = (await db.findOne('product', { sku: 'AMX25' })).id;
+  const { id: leaflet } = await db.insert('leaflet', {
+    product_id: amx, version: '1.0', language: 'en', sections: [{ heading: 'H', body: 'B' }],
+  });
 
   const rows = await sheetFrom(
     ['Product SKU', 'Batch number', 'Manufacturing date', 'Expiry date', 'Quantity'],
@@ -154,9 +152,9 @@ test('an imported batch records the product\'s current leaflet, as a dashboard b
   const result = await importBatches(rows, {});
 
   assert.equal(result.created, 2, result.errors.map((e) => e.message).join('; '));
-  assert.equal(await db.scalar(`SELECT leaflet_id FROM batches WHERE batch_number = 'AMX25-2609A'`), leaflet);
+  assert.equal((await db.findOne('batch', { batch_number: 'AMX25-2609A' })).leaflet_id, leaflet);
   assert.equal(
-    await db.scalar(`SELECT leaflet_id FROM batches WHERE batch_number = 'NOLF1-2609A'`),
+    (await db.findOne('batch', { batch_number: 'NOLF1-2609A' })).leaflet_id,
     null,
     'a product with no leaflet still imports, with none'
   );
@@ -219,5 +217,5 @@ test('a batch number is never reused', async () => {
 
   assert.equal(result.created, 0);
   assert.match(result.errors[0].message, /already exists/);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM batches'), 1);
+  assert.equal(await db.count('batch'), 1);
 });

@@ -261,23 +261,32 @@ export default function DetailsForm({ pendingCode, onDone, supportPhone }) {
               checked={fields.consent}
               onChange={set('consent')}
               aria-invalid={invalid('consent')}
-              aria-describedby={errors.consent ? 'dConsentErr' : 'dConsentHint'}
+              aria-describedby={errors.consent ? 'dConsentErr dConsentHint' : 'dConsentHint'}
             />
             <span>
-              I agree that Orbit may keep these details and contact me by SMS or email about the
-              medicines I check.
+              I have read the privacy notice and agree that Orbit may keep these details and
+              contact me by SMS or email about the medicines I check. <Required />
             </span>
           </label>
-          {errors.consent ? (
+          {/* Outside the label: a button inside it would also toggle the box. */}
+          <p className="hint" id="dConsentHint">
+            <button className="link-btn" type="button" onClick={() => setPolicyOpen(true)}>
+              Read the privacy notice
+            </button>
+            {' - '}what is kept, why, who sees it, and how to have it removed.
+          </p>
+          {errors.consent && (
             <p className="field-error" id="dConsentErr" role="alert">
               {errors.consent}
             </p>
-          ) : (
-            <p className="hint" id="dConsentHint">
-              Used by the brand security team for safety follow-up only.
-            </p>
           )}
         </div>
+
+        <PrivacyPolicy
+          open={policyOpen}
+          onClose={() => setPolicyOpen(false)}
+          supportPhone={supportPhone}
+        />
 
         {error && (
           <div className="alert alert-error" role="alert">

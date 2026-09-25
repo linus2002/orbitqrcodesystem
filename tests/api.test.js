@@ -96,8 +96,11 @@ test('a patient report is accepted and returns a reference', async () => {
 
   assert.equal(res.status, 201);
   assert.match(res.body.reference, /^RPT-\d{6}$/);
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM consumer_reports'), 1);
-  assert.equal(await db.scalar(`SELECT COUNT(*) FROM alerts WHERE type = 'consumer_report'`), 1);
+  assert.equal(await db.count('consumerReport'), 1);
+  assert.equal(await db.count('alert', { type: 'consumer_report' }), 1);
+  // The report and its alert are linked, in the one transaction that wrote both.
+  const report = await db.findOne('consumerReport', {});
+  assert.equal(report.alert_id, (await db.findOne('alert', { type: 'consumer_report' })).id);
 });
 
 test('a report needs a real description', async () => {
@@ -320,7 +323,7 @@ test('the SMS webhook verifies a code and replies in plain words', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.result, 'genuine');
   assert.match(res.body.reply, /GENUINE/);
-  assert.equal(await db.scalar(`SELECT COUNT(*) FROM scans WHERE channel = 'sms'`), 1);
+  assert.equal(await db.count('scan', { channel: 'sms' }), 1);
 });
 
 test('the SMS webhook rejects a wrong shared secret', async () => {
@@ -345,7 +348,7 @@ test('phone numbers are never stored in the clear', async () => {
     body: codes[10],
   });
 
-  const rows = await db.all('SELECT msisdn_hash FROM sms_log');
+  const rows = await db.findMany('smsLog', {}, { fields: ['msisdn_hash'] });
   assert.ok(rows.length > 0);
   for (const r of rows) {
     assert.ok(!String(r.msisdn_hash).includes('2348099999999'), 'the raw number must not be stored');

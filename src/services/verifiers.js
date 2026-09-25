@@ -8,7 +8,7 @@
  * possible. Every check they make afterwards is recorded against them.
  *
  * The browser gets a random token in a cookie. Only a keyed digest of it is
- * stored, so the database cannot be used to pose as a person, and the cookie
+ * stored, so the dataset cannot be used to pose as a person, and the cookie
  * grants nothing beyond "the portal will check packs for you" - it opens no
  * account and reveals nothing.
  *
@@ -84,7 +84,8 @@ export function publicView(row) {
  *
  * Every field is validated in one pass so the form can highlight all of them
  * at once. Consent is a real field, not an assumption: the row records when
- * it was given, and the request is refused without it.
+ * it was given and which notice was shown, and the request is refused
+ * without it.
  */
 export async function register(body, { req } = {}) {
   const raw = body && typeof body === 'object' ? body : {};
@@ -122,27 +123,19 @@ export async function register(body, { req } = {}) {
   if (errors.length) throw validationFailed(errors);
 
   const token = randomToken(32);
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO verifiers
-       (token_hash, full_name, phone, email, role, city, purchase_location,
-        consent_at, policy_version, ip_hash, user_agent)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    [
-      tokenHash(token),
-      data.fullName,
-      phone,
-      data.email,
-      data.role,
-      data.city || null,
-      data.purchaseLocation || null,
-      new Date().toISOString(),
-      data.policyVersion || null,
-      pseudonymize(req?.clientIp, config.secrets.session),
-      req?.get?.('user-agent')?.slice(0, 300) ?? null,
-    ]
-  );
-
-  const row = await db.get('SELECT * FROM verifiers WHERE id = ?', [lastInsertRowid]);
+  const row = await db.insert('verifier', {
+    token_hash: tokenHash(token),
+    full_name: data.fullName,
+    phone,
+    email: data.email,
+    role: data.role,
+    city: data.city || null,
+    purchase_location: data.purchaseLocation || null,
+    consent_at: db.now(),
+    policy_version: data.policyVersion || null,
+    ip_hash: pseudonymize(req?.clientIp, config.secrets.session),
+    user_agent: req?.get?.('user-agent')?.slice(0, 300) ?? null,
+  });
   return { verifier: row, token };
 }
 
@@ -150,7 +143,7 @@ export async function register(body, { req } = {}) {
 export async function fromRequest(req) {
   const token = req.cookies?.[COOKIE];
   if (typeof token !== 'string' || !token || token.length > 128) return null;
-  return db.get('SELECT * FROM verifiers WHERE token_hash = ?', [tokenHash(token)]);
+  return (await db.findOne('verifier', { token_hash: tokenHash(token) })) ?? null;
 }
 
 /**
@@ -177,64 +170,82 @@ export async function requireDetails(req, res, next) {
   }
 }
 
-/** One more check by this person. */
+/** One more check by this person. The count is incremented on the server, never read-then-written. */
 export async function touch(id) {
-  await db.run(
-    'UPDATE verifiers SET check_count = check_count + 1, last_check_at = ? WHERE id = ?',
-    [new Date().toISOString(), id]
-  );
+  await db.update('verifier', id, { last_check_at: db.now() }, { inc: { check_count: 1 } });
 }
 
 // token_hash is never selected for staff: it is a credential, not a detail.
-const STAFF_COLUMNS = `v.id, v.full_name, v.phone, v.email, v.role, v.city, v.purchase_location,
-                       v.consent_at, v.policy_version, v.check_count, v.last_check_at, v.created_at`;
+// ip_hash and user_agent likewise stay behind.
+const STAFF_FIELDS = [
+  'full_name', 'phone', 'email', 'role', 'city', 'purchase_location',
+  'consent_at', 'policy_version', 'check_count', 'last_check_at', 'created_at',
+];
 
-/** The people list for staff, newest first, searchable by name, number or email. */
+/**
+ * The people list for staff, newest first.
+ *
+ * Search matches the start of any word of the name or email, and a mobile
+ * number typed the way people type them (0917 123 4567, +63 917...), which
+ * is normalised before it is compared - the stored form is always +63...
+ */
 export async function list({ page, pageSize, search, role, from, to } = {}) {
   const { limit, offset, ...meta } = db.paginate({ page, pageSize });
-  const where = [];
-  const params = [];
+  const where = {
+    role: role || undefined,
+    created_at: from || to ? { gte: from || undefined, lte: to || undefined } : undefined,
+  };
+  const params = {};
 
-  if (role) { where.push('v.role = ?'); params.push(role); }
-  if (search?.trim()) {
-    const like = `%${search.trim().toLowerCase()}%`;
-    where.push('(LOWER(v.full_name) LIKE ? OR v.phone LIKE ? OR v.email LIKE ?)');
-    params.push(like, like, like);
+  const term = String(search ?? '').trim().toLowerCase();
+  if (term) {
+    const alts = ['lower(full_name) match $term', 'lower(email) match $term'];
+    params.term = `${term}*`;
+    const phone = normalizePhone(term);
+    if (phone) {
+      alts.push('phone == $phone');
+      params.phone = phone;
+    } else if (/^\+?\d[\d ]*$/.test(term)) {
+      // A partial number: try it as typed, and as the +63 form of a 09... start.
+      const digits = term.replace(/\s/g, '');
+      const prefixes = [digits];
+      if (digits.startsWith('0')) prefixes.push(`+63${digits.slice(1)}`);
+      else if (digits.startsWith('63')) prefixes.push(`+${digits}`);
+      else if (!digits.startsWith('+')) prefixes.push(`+${digits}`);
+      params.prefixes = prefixes;
+      alts.push('count($prefixes[string::startsWith(^.phone, @)]) > 0');
+    }
+    where.$raw = `(${alts.join(' || ')})`;
   }
-  if (from) { where.push('v.created_at >= ?'); params.push(from); }
-  if (to) { where.push('v.created_at <= ?'); params.push(to); }
 
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = await db.scalar(`SELECT COUNT(*) FROM verifiers v ${clause}`, params);
-  const items = await db.all(
-    `SELECT ${STAFF_COLUMNS},
-            (SELECT COUNT(*) FROM scans s WHERE s.verifier_id = v.id AND s.result = 'flagged')
-              AS flagged_count
-       FROM verifiers v
-       ${clause}
-      ORDER BY v.created_at DESC, v.id DESC
-      LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+  const total = await db.count('verifier', where, { params });
+  const items = await db.findMany('verifier', where, {
+    order: ['created_at desc', 'id desc'],
+    limit,
+    offset,
+    params,
+    fields: STAFF_FIELDS,
+    extra: {
+      flagged_count: 'count(*[_type == "scan" && verifier_id == ^.id && result == "flagged"])',
+    },
+  });
   return { items, total, ...meta };
 }
 
 /** One person and their recent checks. */
 export async function detail(id) {
-  const person = await db.get(`SELECT ${STAFF_COLUMNS} FROM verifiers v WHERE v.id = ?`, [id]);
+  const person = await db.findOne('verifier', { id: Number(id) }, { fields: STAFF_FIELDS });
   if (!person) throw notFound('No such person');
 
-  const scans = await db.all(
-    `SELECT s.id, s.code_text, s.result, s.reason, s.channel, s.city, s.region, s.country,
-            s.created_at, b.batch_number, p.name AS product_name
-       FROM scans s
-       LEFT JOIN batches b  ON b.id = s.batch_id
-       LEFT JOIN products p ON p.id = s.product_id
-      WHERE s.verifier_id = ?
-      ORDER BY s.created_at DESC, s.id DESC
-      LIMIT 25`,
-    [id]
-  );
+  const scans = await db.findMany('scan', { verifier_id: person.id }, {
+    order: ['created_at desc', 'id desc'],
+    limit: 25,
+    fields: ['code_text', 'result', 'reason', 'channel', 'city', 'region', 'country', 'created_at'],
+    extra: {
+      batch_number: '*[_type == "batch" && id == ^.batch_id][0].batch_number',
+      product_name: '*[_type == "product" && id == ^.product_id][0].name',
+    },
+  });
   return { ...person, scans };
 }
 

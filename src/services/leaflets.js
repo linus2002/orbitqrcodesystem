@@ -36,10 +36,10 @@ import logger from '../lib/logger.js';
  * same thing everywhere.
  */
 export async function currentLeafletId(productId, { lang = 'en' } = {}) {
-  const row = await db.get(
-    `SELECT id FROM leaflets WHERE product_id = ? AND language = ?
-      ORDER BY effective_from DESC, id DESC LIMIT 1`,
-    [productId, lang]
+  const row = await db.findOne(
+    'leaflet',
+    { product_id: Number(productId), language: lang },
+    { order: ['effective_from desc', 'id desc'], fields: ['id'] }
   );
   return row?.id ?? null;
 }
@@ -58,24 +58,21 @@ export function leafletUrl(sku, { lang } = {}) {
  * patient to a dead end, so the gap has to be visible on this screen.
  */
 export async function listLeafletCodes({ lang = 'en' } = {}) {
-  const rows = await db.all(
-    `SELECT p.id, p.sku, p.name, p.strength, p.dosage_form, p.manufacturer, p.status,
-            l.id            AS leaflet_id,
-            l.version       AS leaflet_version,
-            l.language      AS leaflet_language,
-            l.effective_from,
-            (SELECT COUNT(*) FROM leaflets x WHERE x.product_id = p.id) AS leaflet_versions
-       FROM products p
-       LEFT JOIN leaflets l
-              ON l.id = (
-                 SELECT id FROM leaflets
-                  WHERE product_id = p.id AND language = ?
-                  ORDER BY effective_from DESC
-                  LIMIT 1
-               )
-      ORDER BY p.name`,
-    [lang]
-  );
+  // The current leaflet per product: newest effective_from, then newest id -
+  // the same ordering currentLeafletId and the public page use.
+  const current = '*[_type == "leaflet" && product_id == ^.id && language == $lang] | order(effective_from desc, id desc)[0]';
+  const rows = await db.findMany('product', {}, {
+    order: 'name asc',
+    fields: ['sku', 'name', 'strength', 'dosage_form', 'manufacturer', 'status'],
+    extra: {
+      leaflet_id: `${current}.id`,
+      leaflet_version: `${current}.version`,
+      leaflet_language: `${current}.language`,
+      effective_from: `${current}.effective_from`,
+      leaflet_versions: 'count(*[_type == "leaflet" && product_id == ^.id])',
+    },
+    params: { lang },
+  });
 
   return rows.map((r) => ({
     ...r,
@@ -86,9 +83,7 @@ export async function listLeafletCodes({ lang = 'en' } = {}) {
 
 /** One product's leaflet QR, as an SVG string. */
 export async function leafletQrSvg(sku, { lang = 'en', width = 240 } = {}) {
-  const product = await db.get('SELECT sku FROM products WHERE sku = ?', [
-    String(sku).toUpperCase(),
-  ]);
+  const product = await db.findOne('product', { sku: String(sku).toUpperCase() }, { fields: ['sku'] });
   if (!product) throw notFound('Product not found');
 
   /*
@@ -150,13 +145,13 @@ export async function leafletSheet({ lang = 'en' } = {}) {
 // leaflet QR opens it directly. The text sections stay the accessible form,
 // which is why the form keeps asking for them even when a PDF is attached.
 //
-// The file lives in the database - a serverless deployment has no disk - and
-// in pieces, never as one value: a Vercel function takes at most 4.5 MB per
-// request, and a hosted libSQL server caps what one query may return, so a
-// 25 MB leaflet has to arrive and leave a few megabytes at a time. The
-// browser uploads the pieces in order, the publish points at the finished
-// file, and the public route streams the pieces back with the total length
-// known up front.
+// The file arrives and leaves in pieces, never as one value: a Vercel
+// function takes at most 4.5 MB per request, so a 25 MB leaflet has to be
+// sent a few megabytes at a time. Each piece is stored as a file asset; a
+// leafletFile document is the index of pieces, in order, and says whether
+// the upload is finished. The browser uploads the pieces, the publish points
+// at the finished file, and the public route streams the pieces back with
+// the total length known up front.
 // ---------------------------------------------------------------------------
 
 /** The most a leaflet PDF may be. */
@@ -193,17 +188,13 @@ export async function beginPdf({ name, size }) {
     throw badRequest(`The PDF is ${mb(total)} MB; the limit is ${PDF_MAX_BYTES / 1048576} MB.`);
   }
   await prunePendingPdfs();
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO leaflet_files (filename, size, sha256, status, received, chunks)
-     VALUES (?, ?, '', 'pending', 0, 0)`,
-    [safeFilename(name), total]
-  );
-  return { fileId: lastInsertRowid, chunkBytes: PDF_CHUNK_BYTES };
+  const file = await db.insert('leafletFile', { filename: safeFilename(name), size: total });
+  return { fileId: file.id, chunkBytes: PDF_CHUNK_BYTES };
 }
 
-/** One piece, in order. Returns how much has arrived so far. */
+/** One piece, in order. Stored as its own asset. Returns how much has arrived so far. */
 export async function addPdfChunk(fileId, seq, bytes) {
-  const file = await db.get('SELECT * FROM leaflet_files WHERE id = ?', [fileId]);
+  const file = await db.get('leafletFile', fileId);
   if (!file) throw notFound('No such upload');
   if (file.status !== 'pending') {
     throw badRequest('That file is already attached to a leaflet and cannot be changed.');
@@ -221,9 +212,20 @@ export async function addPdfChunk(fileId, seq, bytes) {
   const received = Number(file.received) + bytes.length;
   if (received > Number(file.size)) throw badRequest('More data arrived than the announced size.');
 
-  await db.tx(async () => {
-    await db.run('INSERT INTO leaflet_file_chunks (file_id, seq, data) VALUES (?,?,?)', [file.id, seq, bytes]);
-    await db.run('UPDATE leaflet_files SET received = ?, chunks = ? WHERE id = ?', [received, seq + 1, file.id]);
+  const stored = await db.uploadFile(bytes, {
+    filename: `${file.filename.replace(/\.pdf$/i, '')}.part${seq}.pdf`,
+    contentType: 'application/pdf',
+  });
+  const piece = {
+    asset_id: stored.assetId,
+    url: stored.url,
+    size: bytes.length,
+    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+  };
+  await db.update('leafletFile', file, {
+    received,
+    chunks: seq + 1,
+    pieces: [...(file.pieces ?? []), piece],
   });
   return { fileId: file.id, received, size: Number(file.size), complete: received === Number(file.size) };
 }
@@ -233,10 +235,12 @@ export async function addPdfChunk(fileId, seq, bytes) {
  *
  * Called inside the publish transaction: if the publish fails, the file stays
  * pending and can be attached again. Checks that every announced byte
- * arrived, and records the digest so the stored file can be verified later.
+ * arrived. The digest recorded is over the pieces' own digests, in order -
+ * enough to prove the stored file is the one uploaded without pulling all of
+ * it back through the server to hash it.
  */
 export async function finishPdf(fileId) {
-  const file = await db.get('SELECT * FROM leaflet_files WHERE id = ?', [fileId]);
+  const file = await db.get('leafletFile', fileId);
   if (!file) throw badRequest('The PDF upload was not found. Attach the file again.');
   if (file.status !== 'pending') throw badRequest('That PDF is already attached to a leaflet.');
   if (Number(file.received) !== Number(file.size)) {
@@ -244,42 +248,51 @@ export async function finishPdf(fileId) {
       `The PDF upload is incomplete: ${mb(file.received)} of ${mb(file.size)} MB arrived. Attach the file again.`
     );
   }
-  const hash = crypto.createHash('sha256');
-  for (let seq = 0; seq < Number(file.chunks); seq++) hash.update(await pdfChunk(file.id, seq));
-  const sha256 = hash.digest('hex');
-  await db.run(`UPDATE leaflet_files SET status = 'ready', sha256 = ? WHERE id = ?`, [sha256, file.id]);
+  const sha256 = crypto
+    .createHash('sha256')
+    .update((file.pieces ?? []).map((p) => p.sha256).join(''))
+    .digest('hex');
+  await db.update('leafletFile', file, { status: 'ready', sha256 });
   return { ...file, status: 'ready', sha256 };
 }
 
-/** The file's record - never its bytes - or undefined. */
+/** The file's index document, or undefined. Never the bytes. */
 export async function pdfFile(fileId) {
-  return db.get(
-    'SELECT id, filename, size, sha256, status, chunks, created_at FROM leaflet_files WHERE id = ?',
-    [fileId]
-  );
+  return db.get('leafletFile', fileId);
 }
 
-/** One stored piece, as a Buffer. Both drivers hand back bytes. */
-export async function pdfChunk(fileId, seq) {
-  const row = await db.get('SELECT data FROM leaflet_file_chunks WHERE file_id = ? AND seq = ?', [fileId, seq]);
-  if (!row) throw new Error(`leaflet file ${fileId} is missing chunk ${seq}`);
-  return Buffer.from(row.data);
+/** One stored piece of a file, as a Buffer. */
+export async function pdfPiece(file, seq) {
+  const piece = file.pieces?.[seq];
+  if (!piece) throw new Error(`leaflet file ${file.id} is missing piece ${seq}`);
+  const bytes = await db.readFile(piece.asset_id);
+  if (!bytes) throw new Error(`leaflet file ${file.id}: asset ${piece.asset_id} is gone`);
+  return bytes;
+}
+
+/** Is this asset held by any other leaflet file? Assets are content-addressed, so two files can share one. */
+async function assetShared(assetId, exceptFileId) {
+  const n = await db.count(
+    'leafletFile',
+    { id: { ne: exceptFileId }, $raw: '$aid in pieces[].asset_id' },
+    { params: { aid: assetId } }
+  );
+  return n > 0;
 }
 
 /**
  * Drop uploads that were started but never published - a closed drawer, a
- * lost connection. Run when a new upload begins, so the table cannot fill
+ * lost connection. Run when a new upload begins, so the store cannot fill
  * with abandoned pieces. Returns how many were dropped.
  */
 export async function prunePendingPdfs({ olderThanHours = PENDING_PRUNE_HOURS } = {}) {
   const cutoff = new Date(Date.now() - olderThanHours * 3_600_000).toISOString();
-  const stale = await db.all(
-    `SELECT id FROM leaflet_files WHERE status = 'pending' AND created_at < ?`,
-    [cutoff]
-  );
-  for (const { id } of stale) {
-    await db.run('DELETE FROM leaflet_file_chunks WHERE file_id = ?', [id]);
-    await db.run('DELETE FROM leaflet_files WHERE id = ?', [id]);
+  const stale = await db.findMany('leafletFile', { status: 'pending', created_at: { lt: cutoff } });
+  for (const file of stale) {
+    for (const piece of file.pieces ?? []) {
+      if (!(await assetShared(piece.asset_id, file.id))) await db.deleteFile(piece.asset_id);
+    }
+    await db.removeWhere('leafletFile', { id: file.id });
   }
   return stale.length;
 }
@@ -312,19 +325,20 @@ export function pdfInfo(sku, row, { lang, version } = {}) {
  * agree on what "current" means.
  */
 export async function resolveLeaflet(sku, { lang = 'en', version } = {}) {
-  const product = await db.get('SELECT * FROM products WHERE sku = ?', [
-    String(sku).toUpperCase(),
-  ]);
+  const product = await db.findOne('product', { sku: String(sku).toUpperCase() });
   if (!product) throw notFound('Product not found');
 
-  const versions = await db.all(
-    `SELECT l.id, l.version, l.effective_from, l.file_id,
-            f.filename AS pdf_filename, f.size AS pdf_size
-       FROM leaflets l
-       LEFT JOIN leaflet_files f ON f.id = l.file_id
-      WHERE l.product_id = ? AND l.language = ?
-      ORDER BY l.effective_from DESC, l.id DESC`,
-    [product.id, lang]
+  const versions = await db.findMany(
+    'leaflet',
+    { product_id: product.id, language: lang },
+    {
+      order: ['effective_from desc', 'id desc'],
+      fields: ['id', 'version', 'effective_from', 'file_id'],
+      extra: {
+        pdf_filename: '*[_type == "leafletFile" && id == ^.file_id][0].filename',
+        pdf_size: '*[_type == "leafletFile" && id == ^.file_id][0].size',
+      },
+    }
   );
   if (!versions.length) throw notFound('No leaflet is published for this product');
 
@@ -337,5 +351,5 @@ export async function resolveLeaflet(sku, { lang = 'en', version } = {}) {
 export default {
   currentLeafletId, leafletUrl, listLeafletCodes, leafletQrSvg, leafletQrDataUrl, leafletSheet,
   PDF_MAX_BYTES, PDF_CHUNK_BYTES, safeFilename, beginPdf, addPdfChunk, finishPdf, pdfFile,
-  pdfChunk, prunePendingPdfs, leafletPdfUrl, pdfInfo, resolveLeaflet,
+  pdfPiece, prunePendingPdfs, leafletPdfUrl, pdfInfo, resolveLeaflet,
 };

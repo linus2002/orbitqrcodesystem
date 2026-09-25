@@ -48,12 +48,13 @@ beforeEach(async () => {
 async function duplicate(code) {
   await client.post('/api/verify', { code }, { fromIp: '198.51.100.7' });
   await client.post('/api/verify', { code }, { fromIp: '203.0.113.20' });
-  const row = await db.get('SELECT * FROM codes WHERE code = ?', [code]);
-  const alert = await db.get(`SELECT * FROM alerts WHERE code_id = ? AND type = 'duplicate_scan'`, [row.id]);
+  const row = await db.getCode(code);
+  const alert = await db.findOne('alert', { code_id: row.id, type: 'duplicate_scan' });
   return { row, alert };
 }
 
-const codeRow = (id) => db.get('SELECT * FROM codes WHERE id = ?', [id]);
+const codeRow = (id) => db.get('code', id);
+const alertRow = (id) => db.get('alert', id);
 
 // ---------------------------------------------------------------------------
 // False positive
@@ -69,14 +70,14 @@ test('a false positive clears the flag to verified and resolves the alert', asyn
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.codeStatus, { from: 'flagged', to: 'verified' });
   assert.equal((await codeRow(row.id)).status, 'verified');
-  const closed = await db.get('SELECT * FROM alerts WHERE id = ?', [alert.id]);
+  const closed = await alertRow(alert.id);
   assert.equal(closed.status, 'resolved');
   assert.equal(closed.resolution_note, `False positive: ${REASON}`);
 });
 
 test('the counters and scan history are left exactly as they were', async () => {
   const { row, alert } = await duplicate(codes[1]);
-  const scansBefore = await db.scalar('SELECT COUNT(*) FROM scans WHERE code_id = ?', [row.id]);
+  const scansBefore = await db.count('scan', { code_id: row.id });
   await client.login(ADMIN.email, ADMIN.password);
 
   await client.post(`/api/admin/alerts/${alert.id}/false-positive`, { reason: REASON });
@@ -85,7 +86,7 @@ test('the counters and scan history are left exactly as they were', async () => 
   assert.equal(after.scan_count, row.scan_count);
   assert.equal(after.verified_count, row.verified_count);
   assert.equal(after.flagged_at, row.flagged_at, 'when it was flagged stays on record');
-  assert.equal(await db.scalar('SELECT COUNT(*) FROM scans WHERE code_id = ?', [row.id]), scansBefore);
+  assert.equal(await db.count('scan', { code_id: row.id }), scansBefore);
 });
 
 test('after clearing, a scan from yet another device is flagged again', async () => {
@@ -114,29 +115,28 @@ test('a code in a recalled batch stays recalled', async () => {
 
 test('a code never verified goes back to what its batch implies, not to verified', async () => {
   // Flag a code directly, as if it had been flagged before any genuine check.
-  const row = await db.get('SELECT * FROM codes WHERE code = ?', [codes[4]]);
-  await db.run(`UPDATE codes SET status = 'flagged' WHERE id = ?`, [row.id]);
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO alerts (type, severity, status, title, code_id) VALUES ('batch_anomaly', 'medium', 'open', 'Test', ?)`,
-    [row.id]
-  );
+  const row = await db.getCode(codes[4]);
+  await db.update('code', row, { status: 'flagged' });
+  const inserted = await db.insert('alert', {
+    type: 'batch_anomaly', severity: 'medium', status: 'open', title: 'Test', code_id: row.id,
+  });
   await client.login(ADMIN.email, ADMIN.password);
 
-  const res = await client.post(`/api/admin/alerts/${lastInsertRowid}/false-positive`, { reason: REASON });
+  const res = await client.post(`/api/admin/alerts/${inserted.id}/false-positive`, { reason: REASON });
 
   assert.equal(res.body.codeStatus.to, 'released', 'the batch is released; nothing was verified');
 });
 
 test('a voided code cannot be cleared', async () => {
   const { row, alert } = await duplicate(codes[5]);
-  await db.run(`UPDATE codes SET status = 'void' WHERE id = ?`, [row.id]);
+  await db.update('code', row, { status: 'void' });
   await client.login(ADMIN.email, ADMIN.password);
 
   const res = await client.post(`/api/admin/alerts/${alert.id}/false-positive`, { reason: REASON });
 
   assert.equal(res.status, 409);
   assert.equal((await codeRow(row.id)).status, 'void');
-  assert.equal((await db.get('SELECT status FROM alerts WHERE id = ?', [alert.id])).status, 'open');
+  assert.equal((await alertRow(alert.id)).status, 'open');
 });
 
 test('a reason is required, and nothing changes without one', async () => {
@@ -147,7 +147,7 @@ test('a reason is required, and nothing changes without one', async () => {
 
   assert.equal(res.status, 422);
   assert.equal((await codeRow(row.id)).status, 'flagged');
-  assert.equal((await db.get('SELECT status FROM alerts WHERE id = ?', [alert.id])).status, 'open');
+  assert.equal((await alertRow(alert.id)).status, 'open');
 });
 
 test('a closed alert cannot be acted on again', async () => {
@@ -161,12 +161,12 @@ test('a closed alert cannot be acted on again', async () => {
 });
 
 test('an alert with no code is refused', async () => {
-  const { lastInsertRowid } = await db.run(
-    `INSERT INTO alerts (type, severity, status, title) VALUES ('unknown_code', 'medium', 'open', 'Unknown code')`
-  );
+  const inserted = await db.insert('alert', {
+    type: 'unknown_code', severity: 'medium', status: 'open', title: 'Unknown code',
+  });
   await client.login(ADMIN.email, ADMIN.password);
 
-  const res = await client.post(`/api/admin/alerts/${lastInsertRowid}/false-positive`, { reason: REASON });
+  const res = await client.post(`/api/admin/alerts/${inserted.id}/false-positive`, { reason: REASON });
 
   assert.equal(res.status, 400);
 });
@@ -177,7 +177,7 @@ test('who and why are recorded, and the pack code is not', async () => {
 
   await client.post(`/api/admin/alerts/${alert.id}/false-positive`, { reason: REASON });
 
-  const unflag = await db.get(`SELECT * FROM audit_log WHERE action = 'code.unflag'`);
+  const unflag = await db.findOne('auditLog', { action: 'code.unflag' });
   assert.ok(unflag);
   assert.equal(unflag.actor_email, SECURITY.email, 'security may do this too');
   assert.equal(unflag.entity_id, String(row.id));
@@ -185,7 +185,7 @@ test('who and why are recorded, and the pack code is not', async () => {
   assert.deepEqual([detail.from, detail.to, detail.reason], ['flagged', 'verified', REASON]);
   assert.equal(unflag.detail_json.includes(codes[2]), false, 'no pack code in the audit detail');
 
-  const resolved = await db.get(`SELECT * FROM audit_log WHERE action = 'alert.resolved'`);
+  const resolved = await db.findOne('auditLog', { action: 'alert.resolved' });
   assert.equal(JSON.parse(resolved.detail_json).falsePositive, true);
 });
 
@@ -213,7 +213,7 @@ test('voiding from an alert voids the code, resolves the alert, and refuses late
 
   assert.equal(res.status, 200);
   assert.equal((await codeRow(row.id)).status, 'void');
-  const closed = await db.get('SELECT * FROM alerts WHERE id = ?', [alert.id]);
+  const closed = await alertRow(alert.id);
   assert.equal(closed.status, 'resolved');
   assert.equal(closed.resolution_note, 'Code voided: Confirmed counterfeit.');
 
@@ -221,7 +221,7 @@ test('voiding from an alert voids the code, resolves the alert, and refuses late
   assert.equal(scan.body.result, 'flagged');
   assert.equal(scan.body.reason, 'void');
 
-  const entry = await db.get(`SELECT * FROM audit_log WHERE action = 'code.void'`);
+  const entry = await db.findOne('auditLog', { action: 'code.void' });
   assert.equal(entry.actor_email, ADMIN.email);
   assert.equal(JSON.parse(entry.detail_json).reason, 'Confirmed counterfeit.');
 });

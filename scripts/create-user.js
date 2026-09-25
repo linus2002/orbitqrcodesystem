@@ -5,10 +5,9 @@
  *   npm run user:create -- --email you@example.com --name "Your Name" --password "..."
  *   npm run user:create -- --email a@b.com --name "Ada" --password "..." --role security
  *
- * Runs against whichever database is configured, so pointing DATABASE_URL at
- * Supabase creates the account there:
- *
- *   DATABASE_URL='postgresql://...' npm run user:create -- --email ... --name ... --password ...
+ * Runs against whichever store is configured, so with SANITY_PROJECT_ID,
+ * SANITY_DATASET and SANITY_API_TOKEN set (in .env) the account is created in
+ * the Sanity dataset.
  *
  * This is how the FIRST admin is made: a fresh deployment has an empty users
  * table, and there is no sign-up - staff accounts are only ever created by an
@@ -63,19 +62,14 @@ Options:
   --password  required (at least ${config.auth.minPasswordLength} characters)
   --role      admin | security | regulator   (default: admin)
 
-Against a hosted database, set DATABASE_URL first.
+Against the Sanity dataset, set SANITY_PROJECT_ID, SANITY_DATASET and SANITY_API_TOKEN first.
 `);
   process.exit(1);
 }
 
 db.open();
 
-const target = config.db.postgresUrl
-  ? 'PostgreSQL (hosted)'
-  : config.db.url
-    ? 'libSQL (hosted)'
-    : config.db.file;
-console.log(`Database : ${target}`);
+console.log(`Store : ${db.describe()}`);
 
 try {
   const user = await auth.createUser(
