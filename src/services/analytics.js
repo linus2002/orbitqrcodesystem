@@ -228,10 +228,12 @@ export async function listScans({ page, pageSize, result, reason, channel, batch
   const items = await db.all(
     `SELECT s.id, s.code_text, s.result, s.reason, s.channel, s.scan_number,
             s.country, s.region, s.city, s.signature_state, s.is_test, s.created_at,
-            b.batch_number, p.name AS product_name, p.sku
+            b.batch_number, p.name AS product_name, p.sku,
+            s.verifier_id, v.full_name AS checker_name, v.phone AS checker_phone
        FROM scans s
        LEFT JOIN batches b  ON b.id = s.batch_id
        LEFT JOIN products p ON p.id = s.product_id
+       LEFT JOIN verifiers v ON v.id = s.verifier_id
        ${clause}
       ORDER BY s.created_at DESC, s.id DESC
       LIMIT ? OFFSET ?`,

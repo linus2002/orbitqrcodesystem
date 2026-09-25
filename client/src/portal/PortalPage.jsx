@@ -1,8 +1,14 @@
 /**
  * Public verification portal.
  *
- * Flow: scan a QR (camera + jsQR) or type the code -> POST /api/verify ->
- * render a result the patient can act on, without jargon.
+ * Flow: say who you are (once per browser) -> scan a QR (camera + jsQR) or
+ * type the code -> POST /api/verify -> render a result the patient can act
+ * on, without jargon.
+ *
+ * The details step is the server's rule, not the page's: /api/verify refuses
+ * with `details_required` until the browser has given them, and this page
+ * answers that refusal by showing the form and keeping the check waiting.
+ * Staff can switch the step off from Settings.
  *
  * Accessibility: the result region is aria-live, so a screen reader announces
  * the verdict, and every verdict is icon + word + colour, never colour alone.
@@ -15,8 +21,10 @@ import { formatCodeInput } from '../lib/format.js';
 import { useBodyClass, useTheme } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
 import { Logo } from '../components/Logo.jsx';
+import BrandLoader from '../components/BrandLoader.jsx';
 import Scanner from './Scanner.jsx';
 import ResultCard from './ResultCard.jsx';
+import DetailsForm from './DetailsForm.jsx';
 
 export default function PortalPage() {
   const { code: deepLinkCode } = useParams();
@@ -32,20 +40,29 @@ export default function PortalPage() {
   const [notice, setNotice] = useState(null);
   const [fieldError, setFieldError] = useState(null);
 
-  // What staff can change from Settings: a notice, the support number and
-  // the SMS shortcode. The page works without it - if this request fails,
-  // the notice is simply absent and the shortcode falls back to its default.
+  // What staff can change from Settings - a notice, the support number, the
+  // SMS shortcode, whether details are asked for - plus who this browser has
+  // already said it is. Nothing is offered until it arrives, so the page never
+  // shows the check card and then takes it away. If the request fails the
+  // check card is shown anyway: the server still enforces the step, and its
+  // refusal is what brings the form up (see runVerify).
   const [portal, setPortal] = useState(null);
   useEffect(() => {
     let active = true;
     api('/api/portal')
       .then((p) => active && setPortal(p))
-      .catch(() => {});
+      .catch(() => active && setPortal({ detailsRequired: false, checker: null }));
     return () => {
       active = false;
     };
   }, []);
   const shortcode = portal?.smsShortcode || '32123';
+  const checker = portal?.checker ?? null;
+  const needDetails = Boolean(portal && portal.detailsRequired && !checker);
+
+  // A check waiting for the form: a QR deep link opened before the person
+  // gave their details, or a check the server refused for want of them.
+  const [pending, setPending] = useState(null);
 
   const resultRef = useRef(null);
   const inputRef = useRef(null);
@@ -69,7 +86,11 @@ export default function PortalPage() {
       });
       setResult(payload);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 429) {
+      if (err instanceof ApiError && err.code === 'details_required') {
+        // The server asks first. Keep the check; it runs once the form is done.
+        setPending({ code: raw.trim(), signature });
+        setPortal((p) => ({ ...(p ?? {}), detailsRequired: true, checker: null }));
+      } else if (err instanceof ApiError && err.status === 429) {
         setNotice({
           kind: 'warn',
           text: 'Too many checks from this device in a short time. Please wait a minute and try again.',
@@ -96,10 +117,30 @@ export default function PortalPage() {
     const decoded = decodeURIComponent(deepLinkCode);
     const signature = new URLSearchParams(window.location.search).get('s');
     setCode(decoded);
-    runVerify(decoded, signature);
+    setPending({ code: decoded, signature });
     // Tidy the address bar so a shared link does not leak the code.
     navigate('/', { replace: true });
-  }, [deepLinkCode, runVerify, navigate]);
+  }, [deepLinkCode, navigate]);
+
+  // Run a waiting check as soon as the page knows it may: the portal has
+  // loaded, and either no details are asked for or they have been given.
+  useEffect(() => {
+    if (!pending || !portal || needDetails) return;
+    const next = pending;
+    setPending(null);
+    runVerify(next.code, next.signature);
+  }, [pending, portal, needDetails, runVerify]);
+
+  /** "Not you?": forget this browser's details and ask again. */
+  const forget = async () => {
+    try {
+      await api('/api/portal/details', { method: 'DELETE' });
+    } catch {
+      /* the cookie may already be gone; the form is the right answer either way */
+    }
+    setResult(null);
+    setPortal((p) => ({ ...p, detailsRequired: true, checker: null }));
+  };
 
   // Bring the answer into view once it renders.
   useEffect(() => {
@@ -166,14 +207,15 @@ export default function PortalPage() {
             <h1>Is your medicine genuine?</h1>
             <p>
               Scan the QR code on the pack, or type the code from under the scratch panel. It takes
-              a few seconds and you do not need an account.
+              a few seconds. We ask who you are once, so we can reach you if a pack turns out to be
+              unsafe.
             </p>
             <div className="trust-row">
               <span>
                 <Icon name="check" /> No app needed
               </span>
               <span>
-                <Icon name="check" /> No sign-in
+                <Icon name="check" /> No password
               </span>
               <span>
                 <Icon name="check" /> Free
@@ -199,6 +241,32 @@ export default function PortalPage() {
 
           <div className="portal-layout">
             <div className="portal-primary">
+              {!portal && (
+                <section className="card check-card" aria-busy="true">
+                  <BrandLoader message="One moment..." />
+                </section>
+              )}
+
+              {needDetails && (
+                <DetailsForm
+                  pendingCode={pending?.code}
+                  onDone={(c) => setPortal((p) => ({ ...p, checker: c }))}
+                />
+              )}
+
+              {portal && !needDetails && checker && portal.detailsRequired && (
+                <p className="checker-line">
+                  Checking as <strong>{checker.name}</strong>
+                  <button type="button" onClick={forget}>
+                    Not you?
+                  </button>
+                </p>
+              )}
+
+              {/* The check card itself. Kept at its own indentation: it is
+                  the whole point of the page, and the branches above are
+                  the exceptions to it. */}
+              {portal && !needDetails && (
               <section className="card check-card" aria-labelledby="check-title">
                 <h2 id="check-title" className="sr-only">
                   Check a pack
@@ -286,6 +354,7 @@ export default function PortalPage() {
                   </div>
                 )}
               </section>
+              )}
 
               {/* The answer belongs with the form that produced it, so it
                   stays in the left column rather than below both. */}
@@ -295,6 +364,7 @@ export default function PortalPage() {
                     result={result}
                     onCheckAnother={reset}
                     supportPhone={portal?.supportPhone}
+                    checker={checker}
                   />
                 )}
               </section>

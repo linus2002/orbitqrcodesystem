@@ -20,6 +20,7 @@ import * as audit from '../services/audit.js';
 import * as importer from '../services/importer.js';
 import * as leaflets from '../services/leaflets.js';
 import * as settingsService from '../services/settings.js';
+import * as verifierService from '../services/verifiers.js';
 import { validate } from '../lib/validate.js';
 import { buildWorkbook, sendWorkbook, readSheet } from '../lib/spreadsheet.js';
 import { normalizeCode, qrPayload } from '../lib/codes.js';
@@ -188,15 +189,25 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
   const data = validate(req.body, {
     version: { type: 'string', required: true, max: 20 },
     language: { type: 'string', max: 8, default: 'en' },
-    sections: { type: 'array', required: true, max: 40 },
+    sections: { type: 'array', max: 40 },
     // Same bounds as a code void: long enough to mean something, short enough
     // to read in the audit log.
     reason: { type: 'string', required: true, min: 5, max: 300 },
     alsoApplyTo: { type: 'array', max: 50 },
   });
 
-  for (const s of data.sections) {
+  const sections = data.sections ?? [];
+  for (const s of sections) {
     if (!s?.heading || !s?.body) throw badRequest('Every leaflet section needs a heading and a body.');
+  }
+
+  // The PDF, when one was attached: the id of an upload already sent in
+  // pieces (see /leaflet-files below). It is sealed inside the transaction,
+  // so a publish that fails leaves the upload pending and reusable.
+  const pdfFileId = req.body?.pdf?.fileId ? Number.parseInt(req.body.pdf.fileId, 10) : null;
+  if (pdfFileId !== null && !Number.isInteger(pdfFileId)) throw badRequest('pdf.fileId must be a number.');
+  if (!sections.length && !pdfFileId) {
+    throw badRequest('A leaflet needs a PDF or at least one section.');
   }
 
   // Every product this document covers: the named one first, no repeats.
@@ -231,13 +242,18 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
     );
   }
 
-  const sectionsJson = JSON.stringify(data.sections);
+  const sectionsJson = JSON.stringify(sections);
+  let pdf = null;
   const coverage = await db.tx(async () => {
+    // One file, however many strengths the publish covers: they are the same
+    // document, and the sharing is what keeps them saying the same thing.
+    if (pdfFileId) pdf = await leaflets.finishPdf(pdfFileId);
     const rows = [];
     for (const p of products) {
       const { lastInsertRowid } = await db.run(
-        `INSERT INTO leaflets (product_id, version, language, sections_json) VALUES (?,?,?,?)`,
-        [p.id, data.version, data.language, sectionsJson]
+        `INSERT INTO leaflets (product_id, version, language, sections_json, file_id)
+         VALUES (?,?,?,?,?)`,
+        [p.id, data.version, data.language, sectionsJson, pdf?.id ?? null]
       );
       rows.push({ leafletId: lastInsertRowid, productId: p.id, sku: p.sku });
     }
@@ -255,13 +271,46 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
       action: 'leaflet.publish',
       entityType: 'leaflet',
       entityId: c.leafletId,
-      detail: { sku: c.sku, version: data.version, language: data.language, reason: data.reason, covers },
+      detail: {
+        sku: c.sku, version: data.version, language: data.language, reason: data.reason, covers,
+        pdf: pdf ? { filename: pdf.filename, size: pdf.size, sha256: pdf.sha256 } : null,
+      },
     });
   }
 
   // The named product's row, as before, plus what else was written.
   const primary = await db.get('SELECT * FROM leaflets WHERE id = ?', [coverage[0].leafletId]);
-  res.status(201).json({ ...primary, coverage });
+  res.status(201).json({
+    ...primary,
+    coverage,
+    pdf: pdf ? { filename: pdf.filename, size: pdf.size } : null,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Leaflet PDF upload, in pieces
+//
+// A file may be 25 MB; a request may not. So the browser announces the file,
+// sends it 3 MB at a time in order, and the publish above points at the
+// finished upload. Anything announced and never published is dropped after a
+// day (services/leaflets.js).
+// ---------------------------------------------------------------------------
+router.post('/leaflet-files', requirePermission('products:write'), async (req, res) => {
+  const { name, size } = validate(req.body, {
+    name: { type: 'string', max: 200 },
+    size: { type: 'int', required: true, min: 1 },
+  });
+  res.status(201).json(await leaflets.beginPdf({ name, size }));
+});
+
+/** Body: the piece itself, as application/pdf or application/octet-stream. */
+router.put('/leaflet-files/:id/chunks/:seq', requirePermission('products:write'), async (req, res) => {
+  const seq = Number.parseInt(req.params.seq, 10);
+  if (!Number.isInteger(seq) || seq < 0) throw badRequest('The chunk number must be a whole number.');
+  if (!Buffer.isBuffer(req.body)) {
+    throw badRequest('Send the chunk as the raw request body, as application/pdf.');
+  }
+  res.json(await leaflets.addPdfChunk(Number.parseInt(req.params.id, 10), seq, req.body));
 });
 
 // ===========================================================================
@@ -504,6 +553,47 @@ router.get('/scans.csv', requirePermission('scans:read'), async (req, res) => {
   });
   await audit.record({ actor: req.user, req, action: 'scans.export', detail: { rows: items.length } });
   sendCsv(res, `scans-${new Date().toISOString().slice(0, 10)}.csv`, analytics.toCsv(items));
+});
+
+// ===========================================================================
+// Customers - the people who gave their details on the portal
+//
+// Behind 'scans:read' for the same reason the scan log is: these rows name
+// individual patients, and a regulator gets aggregates only.
+// ===========================================================================
+
+router.get('/customers', requirePermission('scans:read'), async (req, res) => {
+  res.json(
+    await verifierService.list({
+      ...listQuery(req),
+      search: req.query.search,
+      role: req.query.role,
+      from: req.query.from,
+      to: req.query.to,
+    })
+  );
+});
+
+router.get('/customers.csv', requirePermission('scans:read'), async (req, res) => {
+  const { items } = await verifierService.list({
+    page: 1,
+    pageSize: 5000,
+    search: req.query.search,
+    role: req.query.role,
+  });
+  await audit.record({ actor: req.user, req, action: 'customers.export', detail: { rows: items.length } });
+  sendCsv(
+    res,
+    `customers-${new Date().toISOString().slice(0, 10)}.csv`,
+    analytics.toCsv(items, [
+      'id', 'full_name', 'phone', 'email', 'role', 'city', 'purchase_location',
+      'check_count', 'flagged_count', 'last_check_at', 'consent_at', 'created_at',
+    ])
+  );
+});
+
+router.get('/customers/:id', requirePermission('scans:read'), async (req, res) => {
+  res.json(await verifierService.detail(req.params.id));
 });
 
 // ===========================================================================

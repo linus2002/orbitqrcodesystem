@@ -257,11 +257,42 @@ try {
 
   await cdp.goto(`${APP}/`, 2000);
   check(
-    'portal renders with a code entry field',
+    'the portal asks who is checking before it offers the check',
     await cdp.json(`JSON.stringify({
       heading: !!document.querySelector('.hero h1'),
+      form: !!document.querySelector('.details-form'),
+      noCodeInputYet: !document.getElementById('codeInput'),
+    })`),
+    cdp
+  );
+
+  // Fill the form the way a person would - through React's own inputs, so
+  // the page's validation and submit path are what is exercised, not a fetch.
+  // Setting .value directly bypasses React, hence the native setter + event.
+  await cdp.json(`(() => {
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
+      el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    };
+    set('dName', 'Maria Santos');
+    set('dPhone', '0917 123 4567');
+    set('dEmail', 'maria@gmail.com');
+    set('dRole', 'patient');
+    set('dCity', 'Quezon City');
+    document.getElementById('dConsent').click();
+    document.querySelector('.details-form button[type=submit]').click();
+    return '"ok"';
+  })()`);
+  await sleep(1400);
+  check(
+    'once details are given, the check card appears and says who is checking',
+    await cdp.json(`JSON.stringify({
+      formGone: !document.querySelector('.details-form'),
       codeInput: !!document.getElementById('codeInput'),
       scanButton: [...document.querySelectorAll('button')].some(b=>b.textContent.includes('Scan the QR code')),
+      checkingAs: (document.querySelector('.checker-line')?.textContent ?? '').includes('Checking as Maria Santos'),
     })`),
     cdp
   );
@@ -366,7 +397,7 @@ try {
   );
 
   const SECTIONS = [
-    ['', 'Overview'], ['alerts', 'Alerts'], ['scans', 'Scan log'], ['reports', 'Patient reports'],
+    ['', 'Overview'], ['alerts', 'Alerts'], ['scans', 'Scan log'], ['reports', 'Patient reports'], ['customers', 'Customers'],
     ['lookup', 'Code lookup'], ['products', 'Products'], ['batches', 'Batches & codes'],
     ['shipments', 'Shipments'], ['compliance', 'Compliance'], ['audit', 'Audit log'],
     ['users', 'Users'], ['settings', 'Settings'],

@@ -23,6 +23,7 @@ import Dashboard from './views/Dashboard.jsx';
 import Alerts from './views/Alerts.jsx';
 import Scans from './views/Scans.jsx';
 import Reports from './views/Reports.jsx';
+import Customers from './views/Customers.jsx';
 import Lookup from './views/Lookup.jsx';
 import Products from './views/Products.jsx';
 import LeafletCodes from './views/LeafletCodes.jsx';
@@ -39,6 +40,7 @@ const ROUTES = [
   { path: 'alerts', label: 'Alerts', icon: 'alert', perm: 'alerts:read', group: 'Monitor', element: <Alerts />, badge: 'alerts' },
   { path: 'scans', label: 'Scan log', icon: 'scan', perm: 'scans:read', group: 'Monitor', element: <Scans /> },
   { path: 'reports', label: 'Patient reports', icon: 'report', perm: 'reports:read', group: 'Monitor', element: <Reports />, badge: 'reports' },
+  { path: 'customers', label: 'Customers', icon: 'users', perm: 'scans:read', group: 'Monitor', element: <Customers /> },
 
   { path: 'lookup', label: 'Code lookup', icon: 'search', perm: 'codes:read', group: 'Investigate', element: <Lookup /> },
 

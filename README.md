@@ -34,6 +34,10 @@ compilation step.
 
 **For a patient or pharmacist** (no account, no app):
 
+- say who you are once per phone - name, mobile number, email and whether
+  you are the patient, a pharmacist and so on - so a pack that later proves
+  counterfeit or recalled can be followed up with you (staff can switch this
+  off from Settings)
 - scan a QR with the phone camera, or type the code
 - get a plain-language verdict plus batch, expiry and the patient information
   leaflet
@@ -251,7 +255,7 @@ src/
     audit.js             Append-only audit trail
     sms.js               SMS fallback and provider adapters
   routes/
-    public.js            /api/verify, /api/report - anonymous, rate limited
+    public.js            /api/verify, /api/report, /api/portal/details - no sign-in, rate limited
     auth.js              /api/auth/*
     admin.js             /api/admin/* - every route permission-gated
     sms.js               /api/sms/inbound webhook

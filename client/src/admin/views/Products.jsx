@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react';
 
-import { api } from '../../lib/api.js';
+import { api, upload } from '../../lib/api.js';
 import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
@@ -248,6 +248,12 @@ function openPublishLeaflet(product, drawer, reload) {
 /** One empty section. Kept as a factory so each row gets its own object. */
 const emptySection = () => ({ heading: '', body: '' });
 
+/** The server's limit for a leaflet PDF (services/leaflets.js), checked here first. */
+const PDF_MAX_BYTES = 25 * 1024 * 1024;
+
+const fmtSize = (bytes) =>
+  bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
 function PublishLeafletForm({ product, drawer, reload }) {
   const toast = useToast();
   const [version, setVersion] = useState('');
@@ -256,6 +262,53 @@ function PublishLeafletForm({ product, drawer, reload }) {
   const [reason, setReason] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  /*
+   * The PDF, if one is attached: { name, size, fileId, progress }. It is
+   * uploaded the moment it is chosen, in pieces the server can accept one
+   * request at a time (a file may be 25 MB; a request may not), and the
+   * publish then points at the finished upload by id. Until fileId is set
+   * the upload is still in flight and the form will not publish.
+   */
+  const [pdf, setPdf] = useState(null);
+  // Bumped on "Remove" to remount the file input: nothing else clears the
+  // browser's own picker, which would otherwise keep showing the old name.
+  const [pickerKey, setPickerKey] = useState(0);
+  const removePdf = () => {
+    setPdf(null);
+    setPickerKey((k) => k + 1);
+  };
+  async function choosePdf(file) {
+    setError(null);
+    if (!file) {
+      setPdf(null);
+      return;
+    }
+    if (file.size > PDF_MAX_BYTES) {
+      setError(`That PDF is ${fmtSize(file.size)}; the limit is 25 MB.`);
+      setPickerKey((k) => k + 1);
+      return;
+    }
+    setPdf({ name: file.name, size: file.size, fileId: null, progress: 0 });
+    try {
+      const { fileId, chunkBytes } = await api('/api/admin/leaflet-files', {
+        method: 'POST',
+        body: { name: file.name, size: file.size },
+      });
+      for (let seq = 0, offset = 0; offset < file.size; seq++, offset += chunkBytes) {
+        const piece = file.slice(offset, offset + chunkBytes, 'application/pdf');
+        await upload(`/api/admin/leaflet-files/${fileId}/chunks/${seq}`, piece, { method: 'PUT' });
+        const done = Math.min(file.size, offset + chunkBytes);
+        setPdf((p) => (p ? { ...p, progress: done / file.size } : p));
+      }
+      setPdf((p) => (p ? { ...p, fileId, progress: 1 } : p));
+    } catch (err) {
+      setPdf(null);
+      setPickerKey((k) => k + 1);
+      setError(err.formMessage ?? err.message);
+    }
+  }
+  const uploading = Boolean(pdf && !pdf.fileId);
 
   /*
    * The other products this document covers. One leaflet usually spans every
@@ -306,8 +359,12 @@ function PublishLeafletForm({ product, drawer, reload }) {
 
     // Checked here as well as on the server: the server's message names the
     // fault but not which section, and a half-filled row is the likely slip.
-    if (!cleaned.length) {
-      setError('A leaflet needs at least one section.');
+    if (!cleaned.length && !pdf) {
+      setError('Attach a PDF, or add at least one section.');
+      return;
+    }
+    if (uploading) {
+      setError('The PDF is still uploading - wait for it to finish.');
       return;
     }
     if (cleaned.some((s) => !s.heading || !s.body)) {
@@ -329,6 +386,7 @@ function PublishLeafletForm({ product, drawer, reload }) {
           sections: cleaned,
           reason: reason.trim(),
           alsoApplyTo: [...selected],
+          pdf: pdf ? { fileId: pdf.fileId } : undefined,
         },
       });
       toast('Leaflet published.', 'success');
@@ -377,7 +435,45 @@ function PublishLeafletForm({ product, drawer, reload }) {
       </div>
 
       <div className="field">
-        <label className="label">Sections</label>
+        <label className="label" htmlFor="lf-pdf">
+          Leaflet PDF <span className="text-muted">(optional)</span>
+        </label>
+        <input
+          className="input"
+          id="lf-pdf"
+          key={pickerKey}
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={(e) => choosePdf(e.target.files?.[0] ?? null)}
+        />
+        {pdf && (
+          <p className="text-sm" aria-live="polite">
+            {uploading ? (
+              <>
+                <span className="spinner" aria-hidden="true" /> Uploading <strong>{pdf.name}</strong>{' '}
+                ({fmtSize(pdf.size)}) - {Math.round(pdf.progress * 100)}%
+              </>
+            ) : (
+              <>
+                Attached: <strong>{pdf.name}</strong> ({fmtSize(pdf.size)}){' '}
+                <button className="btn btn-sm btn-quiet" type="button" onClick={removePdf}>
+                  Remove
+                </button>
+              </>
+            )}
+          </p>
+        )}
+        <p className="hint">
+          Up to 25 MB; it uploads as soon as you choose it. With a PDF attached, the leaflet QR on
+          the carton opens it straight away and the sections below become optional - but they are
+          what a screen reader can read, so keep them where you can.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="label">
+          Sections {pdf && <span className="text-muted">(optional with a PDF)</span>}
+        </label>
         <p className="hint mb-8">
           Each becomes one heading a patient can open. Write them in the order they should be read.
         </p>

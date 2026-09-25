@@ -9,12 +9,14 @@ import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { Icon } from '../components/Icons.jsx';
 
-export default function ReportForm({ result }) {
+export default function ReportForm({ result, checker }) {
+  // Someone who gave their details before checking should not have to type
+  // them again to report; they can still change them here.
   const [fields, setFields] = useState({
     description: '',
     purchaseLocation: '',
-    reporterName: '',
-    reporterContact: '',
+    reporterName: checker?.name ?? '',
+    reporterContact: checker ? [checker.phone, checker.email].filter(Boolean).join(' / ') : '',
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);

@@ -8,7 +8,7 @@
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { freshDb, seedBasics, seedUser, startServer, resetRateLimits } from './helpers.js';
+import { freshDb, seedBasics, seedUser, startServer, resetRateLimits, giveDetails } from './helpers.js';
 import * as db from '../src/db/index.js';
 
 let client;
@@ -32,6 +32,7 @@ beforeEach(async () => {
   await seedUser({ ...SECURITY, role: 'security', name: 'Sam Security' });
   await seedUser({ ...REGULATOR, role: 'regulator', name: 'Rita Regulator' });
   client.clearCookies();
+  await giveDetails(client);
   await resetRateLimits();
 });
 

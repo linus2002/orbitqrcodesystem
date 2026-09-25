@@ -147,6 +147,20 @@ export async function scalar(sql, params = []) {
  */
 const ADDED_COLUMNS = [
   { table: 'users', column: 'avatar', type: 'TEXT' },
+  { table: 'scans', column: 'verifier_id', type: 'INTEGER' },
+  { table: 'leaflets', column: 'file_id', type: 'INTEGER' },
+  { table: 'verifiers', column: 'policy_version', type: 'TEXT' },
+];
+
+/*
+ * Indexes on columns in ADDED_COLUMNS.
+ *
+ * They cannot live in schema.sql: it runs before ensureColumns, and CREATE
+ * INDEX on a column that an old database does not have yet fails the whole
+ * migration. Created here instead, once the column is guaranteed to exist.
+ */
+const ADDED_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_scans_verifier ON scans (verifier_id, created_at)',
 ];
 
 /** Does this table already have that column? */
@@ -192,6 +206,7 @@ export async function migrate({ silent = false } = {}) {
   );
   // New tables come from the schema above; new columns on OLD tables do not.
   await ensureColumns({ silent });
+  for (const sql of ADDED_INDEXES) await run(sql);
 
   if (!silent) console.log('[db] schema applied');
   return conn;

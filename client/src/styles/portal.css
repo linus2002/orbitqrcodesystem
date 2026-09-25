@@ -200,3 +200,44 @@
      side by side again, rather than making the page needlessly long. */
   .portal-aside { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 }
+
+/* --- Who is checking ------------------------------------------------------
+   Takes the check card's place until the form is done. Same padding and
+   width as the card it stands in for, so nothing jumps when it swaps.
+   -------------------------------------------------------------------------- */
+
+.details-card { padding: 22px; }
+.details-card h2 { font-size: 1.25rem; margin-bottom: 6px; letter-spacing: -0.01em; }
+.details-card > p { color: var(--ink-2); font-size: 0.94rem; line-height: 1.55; margin-bottom: 18px; }
+
+.details-form { display: grid; gap: 14px; }
+.details-form .two-up { display: grid; gap: 14px; }
+
+/* The consent box: a real control with a thumb-sized target, never small print. */
+.consent {
+  display: flex; gap: 10px; align-items: flex-start;
+  font-size: 0.9rem; color: var(--ink-2); line-height: 1.5;
+  cursor: pointer;
+}
+.consent input {
+  width: 20px; height: 20px; margin-top: 2px; flex: none;
+  accent-color: var(--brand);
+}
+
+/* "Checking as Maria Santos - Not you?" above the check card. */
+.checker-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  margin-bottom: 12px;
+  font-size: 0.86rem; color: var(--ink-muted);
+}
+.checker-line strong { color: var(--ink); }
+.checker-line button {
+  background: none; border: 0; padding: 0;
+  font: inherit; color: var(--brand); text-decoration: underline;
+  cursor: pointer;
+}
+
+@media (min-width: 640px) {
+  .details-card { padding: 28px; }
+  .details-form .two-up { grid-template-columns: 1fr 1fr; }
+}

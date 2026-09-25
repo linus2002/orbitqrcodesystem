@@ -84,6 +84,19 @@ export function createApp() {
    */
   app.use('/api/auth/profile', express.json({ limit: '512kb' }));
 
+  /*
+   * A leaflet PDF arrives in pieces on this one path, each piece as the raw
+   * request body: one piece, no other fields, no multipart parser. 3 MB per
+   * piece keeps every request under what a Vercel function accepts (4.5 MB);
+   * the route enforces the same number (services/leaflets.js PDF_CHUNK_BYTES).
+   * The JSON that starts an upload on the same path is untouched by this -
+   * it is not one of these content types.
+   */
+  app.use(
+    '/api/admin/leaflet-files',
+    express.raw({ type: ['application/pdf', 'application/octet-stream'], limit: '3mb' })
+  );
+
   app.use(express.json({ limit: '64kb' }));
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(cookieParser());

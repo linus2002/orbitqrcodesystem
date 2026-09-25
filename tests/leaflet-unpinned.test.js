@@ -15,7 +15,7 @@
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { freshDb, seedBasics, startServer, resetRateLimits } from './helpers.js';
+import { freshDb, seedBasics, startServer, resetRateLimits, giveDetails } from './helpers.js';
 import * as db from '../src/db/index.js';
 
 let client;
@@ -33,6 +33,7 @@ beforeEach(async () => {
   // Batch 1 is seeded with leaflet_id = 1, the v1.0 leaflet - pinned.
   codes = (await seedBasics({ quantity: 6 })).codes;
   client.clearCookies();
+  await giveDetails(client);
   await resetRateLimits();
 });
 

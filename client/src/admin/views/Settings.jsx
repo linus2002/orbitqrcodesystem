@@ -129,7 +129,8 @@ export default function Settings() {
 /**
  * Text settings save on blur, so typing does not fire a request per
  * keystroke. Whole-number settings are a picker over their allowed range, so
- * an out-of-range value cannot be typed at all; the server checks it anyway.
+ * an out-of-range value cannot be typed at all, and a choice is a picker over
+ * its options; the server checks both anyway.
  */
 function SettingInput({ setting }) {
   const toast = useToast();
@@ -151,6 +152,26 @@ function SettingInput({ setting }) {
       toast(err.message, 'error');
       setValue(saved);
     }
+  }
+
+  if (setting.kind === 'choice') {
+    return (
+      <select
+        className="select input-inline"
+        id={`setting-${setting.key}`}
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          save(e.target.value);
+        }}
+      >
+        {setting.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
   }
 
   if (setting.kind === 'int') {

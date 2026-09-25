@@ -142,7 +142,7 @@ export async function download(path, { filename } = {}) {
  * The import endpoint takes one file and nothing else, so there is no reason
  * to build a multipart form - the file IS the body.
  */
-export async function upload(path, file, { query } = {}) {
+export async function upload(path, file, { query, method = 'POST' } = {}) {
   let url = path;
   if (query) {
     const qs = new URLSearchParams(
@@ -152,7 +152,7 @@ export async function upload(path, file, { query } = {}) {
   }
 
   const res = await fetch(url, {
-    method: 'POST',
+    method,
     headers: {
       Accept: 'application/json',
       'Content-Type': file.type || 'application/octet-stream',

@@ -26,6 +26,7 @@ import * as db from '../db/index.js';
 import { config } from '../config.js';
 import { parseCode, checkSignature } from '../lib/codes.js';
 import { pseudonymize } from '../lib/crypto.js';
+import * as leaflets from './leaflets.js';
 import * as alerts from './alerts.js';
 import * as settings from './settings.js';
 import logger from '../lib/logger.js';
@@ -119,8 +120,11 @@ function daysUntil(isoDate) {
  */
 async function loadLeaflet(batch) {
   const leaflet = await db.get(
-    `SELECT * FROM leaflets WHERE product_id = ? AND language = 'en'
-      ORDER BY effective_from DESC, id DESC LIMIT 1`,
+    `SELECT l.*, f.filename AS pdf_filename, f.size AS pdf_size
+       FROM leaflets l
+       LEFT JOIN leaflet_files f ON f.id = l.file_id
+      WHERE l.product_id = ? AND l.language = 'en'
+      ORDER BY l.effective_from DESC, l.id DESC LIMIT 1`,
     [batch.product_id]
   );
   if (!leaflet) return null;
@@ -130,7 +134,14 @@ async function loadLeaflet(batch) {
   } catch {
     logger.error('leaflet sections_json is not valid JSON', { leafletId: leaflet.id });
   }
-  return { version: leaflet.version, language: leaflet.language, sections };
+  return {
+    version: leaflet.version,
+    language: leaflet.language,
+    sections,
+    // The PDF, when this version has one: the result card offers it, and the
+    // sections stay for a screen reader.
+    pdf: leaflets.pdfInfo(batch.sku, leaflet),
+  };
 }
 
 /**
@@ -177,10 +188,11 @@ async function detectGuessing(ipHash, scanId) {
  * @param {string} [ctx.signature] the `s` parameter from a scanned QR URL
  * @param {object} [ctx.req]       express request (ip, user-agent, geo)
  * @param {string} [ctx.msisdn]    phone number, SMS channel only
+ * @param {number} [ctx.verifierId] who is checking, when the portal asked (see verifiers)
  * @returns {object} public-safe result
  */
 export async function verify(rawCode, ctx = {}) {
-  const { channel = 'web', signature = null, req = null, msisdn = null } = ctx;
+  const { channel = 'web', signature = null, req = null, msisdn = null, verifierId = null } = ctx;
 
   const ipHash = pseudonymize(req?.clientIp, config.secrets.session);
   const msisdnHash = pseudonymize(msisdn, config.secrets.session);
@@ -207,6 +219,7 @@ export async function verify(rawCode, ctx = {}) {
         reason,
         channel,
         ipHash,
+        verifierId,
         msisdnHash,
         userAgent,
         geo,
@@ -248,6 +261,7 @@ export async function verify(rawCode, ctx = {}) {
       reason: REASONS.UNKNOWN_CODE,
       channel,
       ipHash,
+      verifierId,
       msisdnHash,
       userAgent,
       geo,
@@ -333,6 +347,7 @@ export async function verify(rawCode, ctx = {}) {
       channel,
       scanNumber,
       ipHash,
+      verifierId,
       msisdnHash,
       userAgent,
       geo,
@@ -445,6 +460,7 @@ async function logScan({
   channel,
   scanNumber = null,
   ipHash = null,
+  verifierId = null,
   msisdnHash = null,
   userAgent = null,
   geo = {},
@@ -454,9 +470,9 @@ async function logScan({
   const { lastInsertRowid } = await db.run(
     `INSERT INTO scans
        (code_text, code_id, batch_id, product_id, result, reason, channel,
-        signature_state, scan_number, ip_hash, msisdn_hash, user_agent,
+        signature_state, scan_number, ip_hash, verifier_id, msisdn_hash, user_agent,
         country, region, city, is_test)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       String(codeText).slice(0, 64),
       codeId,
@@ -468,6 +484,7 @@ async function logScan({
       signatureState,
       scanNumber,
       ipHash,
+      verifierId,
       msisdnHash,
       userAgent,
       geo.country ?? null,

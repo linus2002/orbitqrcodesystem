@@ -5,7 +5,8 @@
  * not in their navigation and the API refuses it directly.
  *
  * Raw IP addresses are never returned by the API - only a keyed one-way digest
- * held server-side - so nothing identifying a patient appears in this table.
+ * held server-side. A web check made after the portal asked who was checking
+ * names that person, from the details they gave under consent (see Customers).
  */
 import { useState } from 'react';
 
@@ -22,7 +23,7 @@ export default function Scans() {
 
   useHeader(
     'Scan log',
-    'Every verification attempt. Locations are approximate and no patient identity is stored.'
+    'Every verification attempt. Locations are approximate; web checks name the person who gave their details on the portal.'
   );
 
   const { data, error, loading } = useApi('/api/admin/scans', {
@@ -106,6 +107,19 @@ export default function Scans() {
             { label: 'Result', render: (r) => <ResultBadge result={r.result} /> },
             { label: 'Reason', render: (r) => <span className="text-sm">{humanise(r.reason)}</span> },
             { label: 'Channel', render: (r) => r.channel },
+            {
+              label: 'Who',
+              render: (r) =>
+                r.checker_name ? (
+                  <>
+                    {r.checker_name}
+                    <br />
+                    <span className="text-muted text-sm mono">{r.checker_phone}</span>
+                  </>
+                ) : (
+                  <span className="text-muted">anonymous</span>
+                ),
+            },
             {
               label: 'Where',
               render: (r) => [r.city, r.region, r.country].filter(Boolean).join(', ') || '-',

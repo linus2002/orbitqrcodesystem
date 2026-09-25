@@ -85,6 +85,22 @@ export const SETTINGS = {
       return n;
     },
   },
+
+  'portal.require_details': {
+    label: 'Ask who is checking',
+    description:
+      'When on, the public portal asks for a name, mobile number and email before it will ' +
+      'check a pack, and each check is recorded against that person. Off lets anyone check ' +
+      'anonymously, as before.',
+    kind: 'choice',
+    options: ['on', 'off'],
+    default: 'on',
+    check(v) {
+      const s = String(v ?? '').trim().toLowerCase();
+      if (!['on', 'off'].includes(s)) throw badRequest('Set this to on or off.');
+      return s;
+    },
+  },
 };
 
 const known = (key) => Object.prototype.hasOwnProperty.call(SETTINGS, key);
@@ -116,6 +132,7 @@ export async function list() {
       kind: spec.kind,
       min: spec.min,
       max: spec.max,
+      options: spec.options,
       value: String(await get(key)),
       updatedAt: stored[key]?.updated_at ?? null,
     });
@@ -150,6 +167,7 @@ export async function portal() {
     banner: await get('portal.banner'),
     supportPhone: await get('support.phone'),
     smsShortcode: await get('support.sms_shortcode'),
+    detailsRequired: (await get('portal.require_details')) === 'on',
   };
 }
 

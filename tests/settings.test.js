@@ -12,7 +12,7 @@
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { freshDb, seedBasics, seedUser, startServer, resetRateLimits } from './helpers.js';
+import { freshDb, seedBasics, seedUser, startServer, resetRateLimits, giveDetails } from './helpers.js';
 import * as db from '../src/db/index.js';
 
 let client;
@@ -34,6 +34,7 @@ beforeEach(async () => {
   await seedUser({ ...ADMIN, role: 'admin', name: 'Ada Admin' });
   await seedUser({ ...SECURITY, role: 'security', name: 'Sam Security' });
   client.clearCookies();
+  await giveDetails(client);
   await resetRateLimits();
 });
 
@@ -170,7 +171,7 @@ test('the Settings screen lists every defined setting and nothing else', async (
 
   assert.deepEqual(
     res.body.items.map((s) => s.key).sort(),
-    ['alerts.duplicate_threshold', 'portal.banner', 'support.phone', 'support.sms_shortcode']
+    ['alerts.duplicate_threshold', 'portal.banner', 'portal.require_details', 'support.phone', 'support.sms_shortcode']
   );
   const threshold = res.body.items.find((s) => s.key === 'alerts.duplicate_threshold');
   assert.deepEqual([threshold.value, threshold.kind, threshold.min, threshold.max], ['1', 'int', 1, 3]);
@@ -183,7 +184,21 @@ test('the Settings screen lists every defined setting and nothing else', async (
 test('the portal reads the notice, the support number and the shortcode, with safe defaults', async () => {
   const before = await client.get('/api/portal');
   assert.equal(before.status, 200);
-  assert.deepEqual(before.body, { banner: '', supportPhone: '', smsShortcode: '32123' });
+  // beforeEach gave details for this browser, so the portal knows who it is.
+  assert.deepEqual(before.body, {
+    banner: '',
+    supportPhone: '',
+    smsShortcode: '32123',
+    detailsRequired: true,
+    checker: {
+      name: 'Maria Santos',
+      phone: '+639171234567',
+      email: 'maria@gmail.com',
+      role: 'patient',
+      roleLabel: 'Patient',
+      city: 'Quezon City',
+    },
+  });
 
   await client.login(ADMIN.email, ADMIN.password);
   await client.patch('/api/admin/settings/portal.banner', { value: 'Batch AMX25-2608A recalled.' });
@@ -191,9 +206,12 @@ test('the portal reads the notice, the support number and the shortcode, with sa
   client.clearCookies();
 
   const after = await client.get('/api/portal');
+  // A fresh browser: no details yet.
   assert.deepEqual(after.body, {
     banner: 'Batch AMX25-2608A recalled.',
     supportPhone: '+63 2 8123 4567',
     smsShortcode: '32123',
+    detailsRequired: true,
+    checker: null,
   });
 });

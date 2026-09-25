@@ -25,7 +25,7 @@ const PRESENTATION = {
   invalid: { cls: 'banner-invalid', icon: 'help', heading: 'Check the code' },
 };
 
-export default function ResultCard({ result, onCheckAnother, supportPhone }) {
+export default function ResultCard({ result, onCheckAnother, supportPhone, checker }) {
   const [reporting, setReporting] = useState(false);
   const presentation = PRESENTATION[result.result] ?? PRESENTATION.invalid;
   const genuine = result.result === 'genuine';
@@ -98,7 +98,7 @@ export default function ResultCard({ result, onCheckAnother, supportPhone }) {
         </div>
       </div>
 
-      {reporting && <ReportForm result={result} />}
+      {reporting && <ReportForm result={result} checker={checker} />}
     </article>
   );
 }
@@ -150,7 +150,8 @@ function Details({ result }) {
 function Leaflet({ leaflet }) {
   const [open, setOpen] = useState(0);
 
-  if (!leaflet?.sections?.length) return null;
+  const sections = leaflet?.sections ?? [];
+  if (!sections.length && !leaflet?.pdf) return null;
 
   return (
     <div className="leaflet">
@@ -158,7 +159,17 @@ function Leaflet({ leaflet }) {
         <h3>Patient information leaflet</h3>
         <span className="badge badge-neutral">v{leaflet.version}</span>
       </div>
-      {leaflet.sections.map((section, i) => (
+      {/* The document, when the leaflet was published as one. The sections
+          below, if any, are the same content in the form a screen reader
+          can use. */}
+      {leaflet.pdf && (
+        <div className="card-body">
+          <a className="btn btn-primary btn-block" href={leaflet.pdf.url} target="_blank" rel="noopener">
+            <Icon name="download" /> Open the patient leaflet (PDF)
+          </a>
+        </div>
+      )}
+      {sections.map((section, i) => (
         <div className="leaflet-section" key={`${section.heading}-${i}`}>
           <button
             className="leaflet-toggle"

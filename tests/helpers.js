@@ -160,6 +160,18 @@ export async function startServer() {
     post: (p, body, o) => client.request(p, { ...o, method: 'POST', body }),
     patch: (p, body, o) => client.request(p, { ...o, method: 'PATCH', body }),
 
+    /** Send a binary body (a PDF chunk), with the session cookies and CSRF token. */
+    async raw(path, { method = 'PUT', body, contentType = 'application/octet-stream' } = {}) {
+      const h = { 'Content-Type': contentType };
+      if (cookies.size) h.Cookie = cookieHeader();
+      if (csrf) h['X-CSRF-Token'] = csrf;
+      const res = await fetch(`${base}${path}`, { method, headers: h, body });
+      storeCookies(res);
+      const type = res.headers.get('content-type') ?? '';
+      const payload = type.includes('application/json') ? await res.json() : await res.text();
+      return { status: res.status, body: payload, headers: res.headers };
+    },
+
     /** Sign in and keep the session for subsequent calls. */
     async login(email, password) {
       const res = await client.post('/api/auth/login', { email, password });
@@ -188,6 +200,27 @@ export async function startServer() {
   };
 
   return client;
+}
+
+/**
+ * The details the portal asks for before it will check a pack.
+ *
+ * Most suites want checking to just work, so their beforeEach calls
+ * giveDetails() right after clearCookies(); details.test.js is where the gate
+ * itself is exercised.
+ */
+export const DETAILS = {
+  fullName: 'Maria Santos',
+  phone: '0917 123 4567',
+  email: 'Maria@gmail.com',
+  role: 'patient',
+  city: 'Quezon City',
+  consent: true,
+};
+
+/** Give the portal details for this client, so verification is allowed. */
+export async function giveDetails(client, overrides = {}) {
+  return client.post('/api/portal/details', { ...DETAILS, ...overrides });
 }
 
 /** Clear rate-limit state between tests, whichever store is in use. */

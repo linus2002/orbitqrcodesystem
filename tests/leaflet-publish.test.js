@@ -116,16 +116,16 @@ test('a section missing its body is refused', async () => {
   assert.equal(await countFor(id), 0);
 });
 
-test('sections are required, so an empty leaflet cannot be published', async () => {
+test('a leaflet with neither sections nor a PDF cannot be published', async () => {
   const id = await product('TES12');
   await client.login(ADMIN.email, ADMIN.password);
 
   const res = await client.post(`/api/admin/products/${id}/leaflets`, { version: '1.0', reason: REASON });
 
-  // 422, not 400: a missing required field is caught by validate() before the
-  // handler runs, whereas a section with a heading and no body reaches the
-  // handler and is rejected there. The two are worth keeping distinct.
-  assert.equal(res.status, 422);
+  // Sections stopped being required when a PDF became an alternative, so
+  // this is the handler's own check, not validate()'s: hence 400, not 422.
+  assert.equal(res.status, 400);
+  assert.match(res.body.error.message, /PDF or at least one section/);
   assert.equal(await countFor(id), 0);
 });
 

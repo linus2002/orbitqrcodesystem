@@ -38,6 +38,9 @@ sql = sql.replace(
   NOW_ISO
 );
 
+// 2b. Binary columns: SQLite's BLOB is Postgres's BYTEA.
+sql = sql.replace(/\bBLOB\b/g, 'BYTEA');
+
 // 3. Case-insensitive email uniqueness. Postgres has no NOCASE collation, so
 //    the guarantee moves to a unique index over lower(email) - which is what
 //    NOCASE was buying. The application lowercases on the way in regardless.
