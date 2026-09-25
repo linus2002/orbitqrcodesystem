@@ -12,6 +12,7 @@
     "prestart": "node scripts/migrate.js",
     "start": "node src/server.js",
     "build": "vite build",
+    "build:vercel": "node scripts/migrate.js --hosted-only && npm run build",
     "dev": "node scripts/dev.js",
     "dev:server": "node --watch src/server.js",
     "dev:client": "vite",

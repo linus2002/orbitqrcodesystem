@@ -11,9 +11,11 @@
  *  - No `listen`. Vercel invokes the exported handler; Express is used purely
  *    as a request handler here.
  *  - No migrate-on-boot and no hourly session pruner. A function instance is
- *    short-lived and may be one of many, so schema changes are applied by
- *    `npm run db:migrate` against Turso as a deploy step, and expired sessions
- *    are cleaned opportunistically rather than on a timer this process owns.
+ *    short-lived and may be one of many, so schema changes are applied at
+ *    build time instead: vercel.json runs `npm run build:vercel`, which calls
+ *    `scripts/migrate.js --hosted-only` against the hosted database before
+ *    bundling the client. Expired sessions are cleaned opportunistically
+ *    rather than on a timer this process owns.
  *
  * Static files are served by Vercel's CDN, not by this function - vercel.json
  * routes only /api/* here.

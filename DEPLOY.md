@@ -148,9 +148,21 @@ Copy the pooling URI and substitute your password for `[YOUR-PASSWORD]`.
 
 ### 2. Apply the schema
 
+Every Vercel build does this for you: `vercel.json` runs `npm run build:vercel`,
+which calls `scripts/migrate.js --hosted-only` against the hosted database
+before bundling the client. New tables, indexes and columns land on the same
+deploy as the code that needs them, and a build with no hosted database
+configured (a preview, say) skips the step rather than failing.
+
+To apply it by hand instead - to check a database, or before the first
+deploy - run the same script with the production connection string:
+
 ```bash
 DATABASE_URL='postgresql://postgres.xxxx:PASSWORD@aws-0-region.pooler.supabase.com:6543/postgres'   npm run db:migrate
 ```
+
+Never run `npm run db:seed` or `npm test` in that same shell: both would
+target the live database, and both empty tables.
 
 The schema applied is [`schema.postgres.sql`](src/db/schema.postgres.sql),
 which is **generated** from `schema.sql`. After changing the SQLite schema,
