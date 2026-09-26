@@ -163,6 +163,23 @@ router.post(
  * a HIGH severity alert, because a human bothering to fill in this form is a
  * stronger signal than most automated ones.
  */
+/**
+ * The check a report is about, kept only when it is this browser's own.
+ *
+ * The scan id comes from the browser, and staff see the report beside the
+ * person who made that check - so a report naming somebody else's check
+ * (or one that does not exist) is kept without it, never tied to them.
+ * A check made without details given matches a report made without them,
+ * which is how it worked before details were asked for.
+ */
+async function ownScan(scanId, req) {
+  if (!scanId) return null;
+  const scan = await db.get('scan', scanId);
+  if (!scan) return null;
+  const me = await verifiers.fromRequest(req);
+  return (scan.verifier_id ?? null) === (me?.id ?? null) ? scan.id : null;
+}
+
 router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res) => {
   const data = validate(req.body, {
     code: { type: 'string', max: 64 },
@@ -175,13 +192,14 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
 
   const normalized = data.code ? normalizeCode(data.code) : null;
   const codeRow = normalized ? await db.getCode(normalized) : null;
+  const scanId = await ownScan(data.scanId, req);
 
   // The report, its alert and the link between them land together or not at all.
   const report = await db.tx(async () => {
     const row = await db.insert('consumerReport', {
       code_text: normalized,
       code_id: codeRow?.id ?? null,
-      scan_id: data.scanId ?? null,
+      scan_id: scanId,
       reporter_name: data.reporterName ?? null,
       reporter_contact: data.reporterContact ?? null,
       purchase_location: data.purchaseLocation ?? null,
@@ -192,7 +210,7 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
       type: 'consumer_report',
       codeId: codeRow?.id ?? null,
       batchId: codeRow?.batch_id ?? null,
-      scanId: data.scanId ?? null,
+      scanId,
       context: {
         summary: data.description.slice(0, 120),
         code: normalized,

@@ -68,6 +68,7 @@ test('giving details unlocks checking, and every check is recorded against the p
     role: 'patient',
     roleLabel: 'Patient',
     city: 'Quezon City',
+    purchaseLocation: null,
   });
   assert.equal(given.body.token, undefined, 'the token travels only in the cookie');
 
