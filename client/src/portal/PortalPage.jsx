@@ -14,10 +14,11 @@
  * the verdict, and every verdict is icon + word + colour, never colour alone.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { api, ApiError } from '../lib/api.js';
 import { formatCodeInput } from '../lib/format.js';
+import { readScannedQr, leafletPath } from '../lib/scanned.js';
 import { useBodyClass } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
@@ -149,18 +150,25 @@ export default function PortalPage() {
     (text) => {
       setScanning(false);
 
-      let scanned = text;
-      let signature = null;
-      try {
-        const url = new URL(text);
-        signature = url.searchParams.get('s');
-        scanned = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? text);
-      } catch {
-        /* not a URL - treat the payload as the bare code */
+      const scanned = readScannedQr(text);
+
+      // The carton's leaflet QR, not the pack's own: say so, and offer the
+      // leaflet, rather than check it as a code and call it malformed.
+      if (scanned.kind === 'leaflet') {
+        setResult(null);
+        setNotice({
+          kind: 'info',
+          text:
+            "That is the medicine's leaflet QR code. It opens the information about the medicine, " +
+            "but it cannot tell you whether your pack is genuine. To check the pack, scan its own " +
+            'QR code - the one printed with its unique code.',
+          link: { to: leafletPath(scanned), label: 'Read the leaflet instead' },
+        });
+        return;
       }
 
-      setCode(scanned);
-      runVerify(scanned, signature);
+      setCode(scanned.code);
+      runVerify(scanned.code, scanned.signature);
     },
     [runVerify]
   );
@@ -227,7 +235,15 @@ export default function PortalPage() {
           {notice && (
             <div className={`alert alert-${notice.kind} mb-16`} role="status">
               <Icon name={notice.kind === 'error' ? 'alert' : 'help'} />
-              <span>{notice.text}</span>
+              <span>
+                {notice.text}
+                {notice.link && (
+                  <>
+                    {' '}
+                    <Link to={notice.link.to}>{notice.link.label}</Link>.
+                  </>
+                )}
+              </span>
             </div>
           )}
 
