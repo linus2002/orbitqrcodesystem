@@ -352,13 +352,31 @@ export async function complianceReport({ from, to } = {}) {
 export function toCsv(rows, columns) {
   if (!rows.length) return '';
   const cols = columns ?? Object.keys(rows[0]);
-  const escape = (v) => {
-    if (v === null || v === undefined) return '';
-    const s = String(v);
-    // Quote when the value contains a delimiter, quote or newline.
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [cols.join(','), ...rows.map((r) => cols.map((c) => escape(r[c])).join(','))].join('\n');
+  return [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\n');
+}
+
+/*
+ * A cell a spreadsheet would run as a formula: one starting with = + - or @,
+ * or with a tab or carriage return (OWASP's list), also after leading
+ * spaces. These exports carry text the public typed - a checker's name, a
+ * code, where they bought the pack - so a name like =HYPERLINK(...) would
+ * otherwise run on the computer of whoever opens the export.
+ */
+const FORMULA_START = /^[\t\r]|^\s*[=+\-@]/;
+// A plain number is inert even as a formula, and a mobile number (+63...)
+// is one, so these are left exactly as they were.
+const PLAIN_NUMBER = /^[+-]?\d+(\.\d+)?$/;
+
+/** One CSV cell, safe to open in a spreadsheet. */
+export function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  let s = String(value);
+  // A leading apostrophe makes a spreadsheet read the cell as text.
+  if (FORMULA_START.test(s) && !PLAIN_NUMBER.test(s)) s = `'${s}`;
+  // Quote when the value contains a quote, a line break, or a delimiter -
+  // a semicolon and a tab included, since some spreadsheets split on those,
+  // and a value split there could start a new cell with a formula.
+  return /[",;\t\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export default {
