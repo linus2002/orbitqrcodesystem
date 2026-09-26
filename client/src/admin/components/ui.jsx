@@ -245,24 +245,19 @@ export function Pager({ page, pageSize, total, onPage }) {
 // ---------------------------------------------------------------------------
 // Badges
 //
-// Every badge carries an icon or a word as well as colour. Status is never
+// Every badge carries a word as well as colour. Status is never
 // communicated by colour alone.
 // ---------------------------------------------------------------------------
 
 const RESULT_BADGE = {
-  genuine: ['badge-good', 'check', 'Genuine'],
-  flagged: ['badge-danger', 'alert', 'Flagged'],
-  invalid: ['badge-warn', 'alert', 'Invalid'],
+  genuine: ['badge-good', 'Genuine'],
+  flagged: ['badge-danger', 'Flagged'],
+  invalid: ['badge-warn', 'Invalid'],
 };
 
 export function ResultBadge({ result }) {
-  const [cls, icon, label] = RESULT_BADGE[result] ?? ['badge-neutral', 'alert', result];
-  return (
-    <span className={`badge ${cls}`}>
-      <Icon name={icon} />
-      {label}
-    </span>
-  );
+  const [cls, label] = RESULT_BADGE[result] ?? ['badge-neutral', result];
+  return <span className={`badge ${cls}`}>{label}</span>;
 }
 
 const SEVERITY_CLASS = {

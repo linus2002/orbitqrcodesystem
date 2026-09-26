@@ -181,6 +181,7 @@ async function openBatch(id, drawer, reload, canWrite) {
   drawer.open({
     title: batch.batch_number,
     subtitle: batch.product_name,
+    headerImage: '/img/productmodalbg.webp',
     body: <BatchDetail batch={batch} drawer={drawer} reload={reload} canWrite={canWrite} />,
     footer: canWrite ? (
       <BatchActions batch={batch} drawer={drawer} reload={reload} />

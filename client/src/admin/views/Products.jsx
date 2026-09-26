@@ -78,6 +78,22 @@ export default function Products() {
             { label: 'Batches', className: 'num', render: (r) => fmtNumber(r.batch_count) },
             { label: 'Codes', className: 'num', render: (r) => fmtNumber(r.code_count) },
             { label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+            {
+              label: 'Actions',
+              render: (r) => (
+                <button
+                  type="button"
+                  className="btn-pill"
+                  onClick={(e) => {
+                    // The row opens the product too; one open is enough.
+                    e.stopPropagation();
+                    openProduct(r.id, drawer, reload, canWrite);
+                  }}
+                >
+                  View
+                </button>
+              ),
+            },
           ]}
         />
       </TableCard>
@@ -90,6 +106,7 @@ async function openProduct(id, drawer, reload, canWrite) {
   drawer.open({
     title: p.name,
     subtitle: `${p.sku} - ${p.strength ?? ''}`,
+    headerImage: '/img/productmodalbg.webp',
     body: (
       <>
         <KV

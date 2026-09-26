@@ -42,6 +42,7 @@ export default function Users() {
     drawer.open({
       title: row.fullName,
       subtitle: row.email,
+      avatar: row.avatar ? <img src={row.avatar} alt="" /> : initials(row.fullName),
       body: <UserDetail user={row} isSelf={row.id === session.user.id} />,
       footer:
         row.id === session.user.id ? null : (

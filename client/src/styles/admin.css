@@ -141,7 +141,7 @@
   flex: none; line-height: 1.15; margin-right: 8px;
   font-variant-numeric: tabular-nums;
 }
-.shell-clock strong { font-size: 1.02rem; font-weight: 700; color: var(--ink); }
+.shell-clock strong { font-size: 1.02rem; font-weight: 500; color: var(--ink); }
 .shell-clock span {
   font-size: 0.7rem; font-weight: 600; color: var(--ink-muted);
   margin-top: 2px; white-space: nowrap;
@@ -389,26 +389,108 @@
 .drawer-backdrop {
   position: fixed; inset: 0; z-index: 90;
   background: rgba(15, 23, 42, 0.45);
-  display: none;
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0s linear 0.22s;
 }
-.drawer-backdrop.open { display: block; }
+.drawer-backdrop.open { opacity: 1; visibility: visible; transition: opacity 0.22s ease; }
 
+/* Centered modal; the class keeps its old name so every view's useDrawer() is unchanged. */
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 100;
-  width: min(520px, 100%);
+  position: fixed; top: 50%; left: 50%; z-index: 100;
+  width: min(560px, calc(100% - 32px));
+  max-height: min(85vh, 760px);
   background: var(--surface);
-  border-left: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg);
-  transform: translateX(100%);
-  transition: transform 0.2s ease;
+  overflow: hidden;
+  opacity: 0; visibility: hidden;
+  transform: translate(-50%, -48%) scale(0.97);
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0s linear 0.22s;
   display: flex; flex-direction: column;
 }
-.drawer.open { transform: translateX(0); }
+.drawer.open {
+  opacity: 1; visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .drawer.open, .drawer-backdrop, .drawer-backdrop.open { transition: none; }
+}
 .drawer-head {
-  padding: 16px 20px; border-bottom: 1px solid var(--line);
+  padding: 16px 20px 4px;
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
 }
-.drawer-body { padding: 20px; overflow-y: auto; flex: 1; display: grid; gap: 16px; align-content: start; }
+.drawer-head .icon-btn { width: 30px; height: 30px; margin: -4px -6px 0 0; }
+.drawer-head .icon-btn svg { width: 16px; height: 16px; }
+/* A banner header (products): the artwork sits right, the title left in white */
+.drawer-head-hero {
+  min-height: 150px; padding: 22px 20px;
+  margin-bottom: 8px;
+  background-color: #0a9be3;
+  background-size: cover; background-position: right center; background-repeat: no-repeat;
+}
+.drawer-head.drawer-head-hero h2 { color: #fff; font-size: 1.35rem; max-width: 60%; }
+.drawer-head-hero .sub { color: rgba(255, 255, 255, 0.82); max-width: 60%; }
+/* Frosted-glass circle so the close button reads against the artwork */
+.drawer-head-hero .icon-btn {
+  width: 32px; height: 32px; margin: -2px -4px 0 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition: background 0.15s ease;
+}
+.drawer-head-hero .icon-btn:hover,
+.drawer-head-profile .icon-btn:hover { background: rgba(255, 255, 255, 0.32); color: #fff; }
+
+/* A person's header: brand blue-to-green banner with frosted glass shapes,
+   the avatar overlapping its lower edge. All CSS - no image to load. */
+.drawer-head-profile { display: block; padding: 0; position: relative; margin-bottom: 4px; }
+.profile-banner {
+  position: relative; height: 84px; overflow: hidden;
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(255, 255, 255, 0.18), transparent 55%),
+    linear-gradient(120deg, #1a73d9 0%, #1ea0da 42%, #2fb3a0 72%, #61a644 100%);
+}
+.profile-banner .glass {
+  position: absolute; display: block;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.08));
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 8px 24px rgba(10, 40, 80, 0.12);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.profile-banner .glass-1 { width: 150px; height: 150px; border-radius: 50%; right: -36px; top: -72px; }
+.profile-banner .glass-2 { width: 92px; height: 92px; border-radius: 26px; right: 120px; bottom: -52px; transform: rotate(22deg); }
+.profile-banner .glass-3 { width: 190px; height: 44px; border-radius: 999px; left: 34%; top: 4px; transform: rotate(-24deg); opacity: 0.8; }
+.profile-banner .glass-4 { width: 34px; height: 34px; border-radius: 50%; right: 62px; top: 14px; }
+.drawer-head-profile > .icon-btn {
+  position: absolute; top: 12px; right: 12px; margin: 0;
+  width: 32px; height: 32px; border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.profile-id { position: relative; padding: 0 20px 4px; margin-top: -44px; }
+.profile-id-avatar {
+  width: 84px; height: 84px; border-radius: 50%;
+  display: grid; place-items: center; overflow: hidden;
+  background: var(--brand); color: #fff;
+  font: 500 1.6rem var(--sans);
+  border: 4px solid var(--surface);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.16);
+  margin-bottom: 10px;
+}
+.profile-id-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.drawer-head.drawer-head-profile h2 { font-size: 1.25rem; }
+.drawer-body { padding: 12px 20px 20px; overflow-y: auto; flex: 1; display: grid; gap: 16px; align-content: start; }
 .drawer-foot { padding: 14px 20px; border-top: 1px solid var(--line); background: var(--surface-2); }
 
 /* Key/value list used inside drawers */
@@ -420,6 +502,23 @@
 .kv > div:last-child { border-bottom: 0; }
 .kv dt { color: var(--ink-muted); font-weight: 500; }
 .kv dd { margin: 0; word-break: break-word; }
+
+/* Drawer detail: a size down from the page, and medium weight rather than bold */
+.drawer-head h2 { font-size: 1.1rem; font-weight: 500; }
+.drawer-head .sub { font-size: 0.8rem; }
+.drawer-body { gap: 14px; font-size: 0.84rem; }
+.drawer-body h3 { font-size: 0.92rem; font-weight: 500; }
+.drawer-body .kv > div { grid-template-columns: 120px minmax(0, 1fr); padding: 7px 0; font-size: 0.82rem; }
+.drawer-body .tl-body { font-size: 0.82rem; }
+.drawer-body .tl-body b,
+.drawer-body strong,
+.drawer-body b { font-weight: 500; }
+.drawer-body .tl-body .meta { font-size: 0.76rem; }
+.drawer-body .text-sm { font-size: 0.78rem; }
+.drawer .btn { font-weight: 500; }
+.drawer .btn-sm { font-size: 0.78rem; padding: 5px 10px; min-height: 30px; }
+.drawer .btn-sm svg { width: 15px; height: 15px; }
+.drawer .badge { font-size: 0.7rem; padding: 5px 10px; }
 
 /* --- Timeline (scan history in a drawer) --------------------------------- */
 
@@ -518,7 +617,7 @@
      wide window, so they do not appear to move house when the window narrows. */
   .shell-tools { margin-left: auto; }
   .view { padding: 16px 16px 60px; }
-  .drawer { width: 100%; }
+  .drawer { max-height: calc(100vh - 32px); }
 }
 
 /* Rows that open a detail drawer. */

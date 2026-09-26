@@ -91,7 +91,7 @@ export default function LoginPage() {
     <main className="signin-shell">
       <section className="signin-form-pane">
         <div className="signin-brand">
-          <Logo size="lg" />
+          <Logo size="lg" text={false} />
         </div>
 
         <div className="signin-body">

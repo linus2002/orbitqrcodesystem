@@ -337,46 +337,61 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
    Buttons
    -------------------------------------------------------------------------- */
 
+/*
+ * Buttons share the pill look of the status badges: a solid colour that
+ * lightens toward the bottom edge, white text, a soft shadow. Blue is the
+ * button colour; --pill swaps it (red for a destructive action). The quiet
+ * and ghost variants stay transparent - they are the low-weight actions.
+ */
 .btn {
+  --pill: var(--brand);
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  font: 600 0.94rem/1 var(--sans);
-  padding: 11px 18px;
-  border-radius: var(--r);
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  color: var(--ink);
+  font: 500 0.94rem/1 var(--sans);
+  padding: 11px 20px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: #fff;
+  background: linear-gradient(
+    180deg,
+    var(--pill) 0%,
+    var(--pill) 45%,
+    color-mix(in srgb, var(--pill) 72%, #fff) 100%
+  );
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 3px color-mix(in srgb, var(--pill) 40%, transparent);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
   cursor: pointer;
   text-decoration: none;
-  transition: background 0.14s, border-color 0.14s, transform 0.06s;
+  transition: filter 0.14s, background 0.14s, transform 0.06s;
   min-height: 42px;
 }
-.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--line-strong); }
+.btn:hover:not(:disabled) { filter: brightness(1.06); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /*
  * A secondary action: no border, no fill, until you point at it. For controls
  * that sit beside the thing they act on - a download next to a row, a print
- * button above a grid - where an outline would give each one the same weight
- * as the page's primary action.
+ * button above a grid - where a filled pill would give each one the same
+ * weight as the page's primary action.
  */
-.btn-quiet {
-  border-color: transparent;
+.btn-quiet,
+.btn-ghost {
   background: none;
+  border-color: transparent;
+  color: var(--ink);
+  box-shadow: none;
+  text-shadow: none;
 }
-.btn-quiet:hover:not(:disabled) { background: var(--surface-3); border-color: transparent; }
+.btn-quiet:hover:not(:disabled),
+.btn-ghost:hover:not(:disabled) { background: var(--surface-3); filter: none; }
 
-.btn-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-contrast); }
-.btn-primary:hover:not(:disabled) { background: var(--brand-ink); border-color: var(--brand-ink); }
+.btn-primary { --pill: var(--brand); }
+.btn-danger { --pill: #e0402f; }
 
-.btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-.btn-danger:hover:not(:disabled) { filter: brightness(0.92); }
-
-.btn-ghost { background: transparent; border-color: transparent; }
-.btn-ghost:hover:not(:disabled) { background: var(--surface-3); }
-
-.btn-lg { font-size: 1.05rem; padding: 15px 24px; min-height: 52px; border-radius: var(--r-lg); }
-.btn-sm { font-size: 0.83rem; padding: 7px 12px; min-height: 34px; }
+.btn-lg { font-size: 1.05rem; padding: 15px 26px; min-height: 52px; }
+.btn-sm { font-size: 0.83rem; padding: 7px 14px; min-height: 34px; }
 .btn-block { width: 100%; }
 .btn svg { width: 18px; height: 18px; flex: none; }
 .btn-lg svg { width: 22px; height: 22px; }
@@ -504,20 +519,58 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
    Badges + pills
    -------------------------------------------------------------------------- */
 
+/* Solid pills: one colour per tone, lightening toward the bottom edge, with
+   white text. --pill is the tone; the gradient and shadow derive from it. */
 .badge {
+  --pill: #7b8494;
   display: inline-flex; align-items: center; gap: 5px;
-  font: 600 0.75rem/1 var(--sans);
-  padding: 5px 9px;
+  font: 500 0.75rem/1 var(--sans);
+  padding: 6px 11px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 0;
+  color: #fff;
+  background: linear-gradient(
+    180deg,
+    var(--pill) 0%,
+    var(--pill) 45%,
+    color-mix(in srgb, var(--pill) 72%, #fff) 100%
+  );
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 2px color-mix(in srgb, var(--pill) 35%, transparent);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
   white-space: nowrap;
 }
 .badge svg { width: 13px; height: 13px; }
-.badge-good { background: var(--good-tint); color: var(--good-ink); border-color: color-mix(in srgb, var(--good) 35%, transparent); }
-.badge-danger { background: var(--danger-tint); color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-.badge-warn { background: var(--warn-tint); color: var(--warn-ink); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-.badge-info { background: var(--info-tint); color: var(--info-ink); border-color: color-mix(in srgb, var(--info) 35%, transparent); }
-.badge-neutral { background: var(--surface-3); color: var(--ink-2); border-color: var(--line); }
+.badge-good { --pill: #16a34a; }
+.badge-danger { --pill: #e0402f; }
+.badge-warn { --pill: #f07a12; }
+.badge-info { --pill: #2a78d6; }
+.badge-neutral { --pill: #7b8494; }
+
+/* A small action button in the same solid-pill style (the "View" in a table row) */
+.btn-pill {
+  --pill: #2a78d6;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 500 0.78rem/1 var(--sans);
+  padding: 7px 16px;
+  border: 0; border-radius: 999px;
+  color: #fff; cursor: pointer;
+  background: linear-gradient(
+    180deg,
+    var(--pill) 0%,
+    var(--pill) 45%,
+    color-mix(in srgb, var(--pill) 72%, #fff) 100%
+  );
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 3px color-mix(in srgb, var(--pill) 40%, transparent);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+.btn-pill:hover { filter: brightness(1.06); }
+.btn-pill:active { transform: translateY(1px); }
+.btn-pill:focus-visible { outline: 2px solid var(--pill); outline-offset: 2px; }
 
 /* --------------------------------------------------------------------------
    Tables
@@ -582,27 +635,11 @@ table.data td.code { font-family: var(--mono); font-size: 0.76rem; white-space: 
 /* The secondary line under a row's subject. */
 table.data td .text-sm { font-size: 0.78rem; }
 
-/*
- * Status pills in a table cell: bold white text on a solid fill, a step smaller
- * than a pill elsewhere in the dashboard.
- *
- * The fill has to be the deep "-ink" step rather than the brighter --good /
- * --warn / --danger tokens: white on those measures 2-3:1, while every fill
- * below clears 6:1. The same fills serve both themes - they are dark enough to
- * hold white and saturated enough to read against the dark page.
- */
+/* Status pills in a table cell: the same gradient pills, a step smaller. */
 table.data .badge {
   font-size: 0.68rem;
-  font-weight: 500;
-  color: #fff;
-  border-color: transparent;
-  padding: 3px 8px;
+  padding: 4px 9px;
 }
-table.data .badge-good { background: #046b04; }    /* white 8.0:1 */
-table.data .badge-danger { background: #a32424; }  /* white 6.9:1 */
-table.data .badge-warn { background: #92540a; }    /* white 6.1:1 */
-table.data .badge-info { background: #1c5cab; }    /* white 6.6:1 */
-table.data .badge-neutral { background: #4a5a6b; } /* white 6.3:1 */
 
 .empty {
   padding: 44px 20px;
@@ -694,7 +731,11 @@ table.data .badge-neutral { background: #4a5a6b; } /* white 6.3:1 */
   content: "";
   position: fixed; inset: 0; z-index: -1;
   background-color: #ffffff;
-  background-image: url("/img/backgroundcustomer.webp");
+  /* Darkened on the left, where the white hero text sits, fading out before
+     the subject on the right. */
+  background-image:
+    linear-gradient(90deg, rgba(8, 30, 52, 0.66) 0%, rgba(8, 30, 52, 0.5) 38%, rgba(8, 30, 52, 0) 62%),
+    url("/img/bgimage.jpg");
   background-size: cover;
   background-position: right center;
   background-repeat: no-repeat;
@@ -703,18 +744,22 @@ table.data .badge-neutral { background: #4a5a6b; } /* white 6.3:1 */
 /* A phone shows a narrow slice of the photo: keep it to the open side, so
    the words at the top are not laid over the subject's face. */
 @media (max-width: 900px) {
-  .page-white::before { background-position: 32% top; }
+  .page-white::before {
+    background-position: 32% top;
+    /* A phone shows only the left of the photo: darken all of it. */
+    background-image: linear-gradient(rgba(8, 30, 52, 0.58), rgba(8, 30, 52, 0.58)), url("/img/bgimage.jpg");
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .page-white::before {
     background-color: var(--page);
-    background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/backgroundcustomer.webp");
+    background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/bgimage.jpg");
   }
 }
 :root[data-theme="dark"] .page-white::before {
   background-color: var(--page);
-  background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/backgroundcustomer.webp");
+  background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/bgimage.jpg");
 }
 
 /* On the customer page a card has no border line: a soft shadow lifts it

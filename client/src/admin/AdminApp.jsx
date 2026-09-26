@@ -248,6 +248,7 @@ function useOpenAccount(user) {
       drawer.open({
         title: user.fullName,
         subtitle: user.email,
+        avatar: user.avatar ? <img src={user.avatar} alt="" /> : initials(user.fullName),
         body: <Account />,
       });
     } finally {
@@ -282,7 +283,7 @@ function Sidebar({ open, routes, session }) {
   return (
     <aside className={`sidebar${open ? ' open' : ''}`}>
       <div className="sidebar-head">
-        <Logo size="sm" />
+        <Logo size="lg" text={false} />
       </div>
 
       <nav className="nav" aria-label="Dashboard sections">

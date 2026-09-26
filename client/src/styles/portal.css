@@ -22,24 +22,34 @@
  * leaving a strip of empty page below the image panel. Stylesheets here are
  * all loaded together into one bundle, so element selectors must be scoped.
  */
-.portal-main { padding-bottom: 60px; }
+.portal-main { padding-bottom: 24px; }
 
 /* --- Hero ---------------------------------------------------------------- */
 
 /* The hero sits straight on the photo, left-aligned like everything else on
    this page: the subject of the photo is on the right, so the words keep to
-   the open space on the left and never cross her. */
+   the open space on the left and never cross her. The words are white; the
+   photo is darkened on that side (app.css) so they hold their contrast.
+
+   The white logo sits above the heading, on the same darkened side. */
 .portal-brand { padding-top: 36px; }
-.hero { padding: 26px 0 22px; text-align: left; }
-.hero h1 { font-size: clamp(1.7rem, 4vw, 2.6rem); margin-bottom: 12px; }
-.hero p { color: var(--ink-2); max-width: 46ch; font-size: 1.05rem; }
+.portal-logo { display: block; width: auto; height: 64px; filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.2)); }
+.hero { padding: 22px 0 22px; text-align: left; color: #fff; }
+.hero h1 {
+  font-size: clamp(1.5rem, 3.2vw, 2.15rem); margin-bottom: 10px; color: #fff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+.hero p {
+  color: rgba(255, 255, 255, 0.92); max-width: 46ch; font-size: 0.95rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
+}
 
 .trust-row {
   display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px 18px;
-  margin-top: 18px; font-size: 0.83rem; color: var(--ink-muted);
+  margin-top: 16px; font-size: 0.8rem; color: rgba(255, 255, 255, 0.9);
 }
 .trust-row span { display: inline-flex; align-items: center; gap: 6px; }
-.trust-row svg { width: 15px; height: 15px; color: var(--good); }
+.trust-row svg { width: 15px; height: 15px; color: #8be38b; }
 
 /* --- Check card ---------------------------------------------------------- */
 
@@ -153,12 +163,8 @@
 
 /* --- SMS / offline help -------------------------------------------------- */
 
-/* --- Two-column body ------------------------------------------------------
-   The check form leads on the left; the supporting notes sit beside it on the
-   right so they are visible without scrolling past the thing people came to
-   do. Below 900px the columns collapse and the notes fall underneath the
-   form - never above it, because on a phone the form must be the first thing
-   in reach.
+/* --- Body ----------------------------------------------------------------
+   The check form (or its answer) alone, with the footer lines under it.
    -------------------------------------------------------------------------- */
 
 /* Kept to the left of the page, with the photo's subject on the right. The
@@ -168,8 +174,6 @@
   .portal-wrap { max-width: min(960px, 60vw); margin-inline: clamp(24px, 6vw, 120px) auto; }
 }
 
-/* One column: the form (or the check card) first, at full width, and the
-   three help notes in a row beneath it. */
 .portal-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -180,50 +184,21 @@
 /* The form and its answer stay together in the left column. */
 .portal-primary { min-width: 0; }
 
-.portal-aside {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  align-content: start;
-  min-width: 0;
-}
-
-.help-card { padding: 26px 24px; }
-.help-card h3 { font-size: 1.08rem; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
-.help-card h3 svg { width: 22px; height: 22px; color: var(--brand); flex: none; }
-.help-card p { font-size: 0.96rem; color: var(--ink-2); line-height: 1.6; }
-.help-card .mono { color: var(--ink); font-weight: 600; }
-
-/* A frosted strip: the footer's two lines cross the photo on wide screens,
-   and the strip keeps them readable whatever is behind them. */
+/* No strip: the footer's lines sit straight on the darkened side of the
+   photo in white, kept to the form's width so they never cross onto the
+   bright half, and close under the form. */
 .portal-footer {
-  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  margin-top: 44px; padding: 24px 0 40px;
-  font-size: 0.84rem; color: var(--ink-2);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  margin-top: 0; padding: 4px 0 40px;
+  font-size: 0.84rem; color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
 }
-.portal-footer a { color: var(--ink-2); }
-/* The footer runs the full page width, so on a desktop each of its two
-   sentences sits on one line; on a phone they wrap as they must. */
-.portal-footer .portal-wrap { max-width: 1180px; }
-@media (min-width: 1100px) {
-  /* width auto, not the shared .wrap's 100%: a full-width box plus side
-     margins is wider than the page. */
-  .portal-footer .portal-wrap { max-width: none; width: auto; margin-inline: clamp(24px, 6vw, 120px); }
-  .portal-footer p { white-space: nowrap; }
-}
-
+.portal-footer strong { color: #fff; }
+.portal-footer a { color: #fff; }
 @media (min-width: 640px) {
   .portal-brand { padding-top: 48px; }
-  .hero { padding-top: 30px; }
+  .portal-logo { height: 76px; }
+  .hero { padding-top: 26px; }
   .check-card { padding: 28px; }
-}
-
-/* On a narrower screen the three notes go two-up, then one-up, rather
-   than squeezing into three thin columns. */
-@media (max-width: 900px) {
-  .portal-aside { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 }
 
 /* --- Who is checking ------------------------------------------------------

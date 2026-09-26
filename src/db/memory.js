@@ -77,7 +77,15 @@ export class MemoryBackend {
     this.timer = null;
 
     if (this.file && fs.existsSync(this.file)) {
-      const stored = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      const raw = fs.readFileSync(this.file, 'utf8');
+      // A leftover DB_FILE=./data/qrshield.db from the SQLite days points here.
+      if (raw.startsWith('SQLite format 3')) {
+        throw new Error(
+          `DB_FILE (${this.file}) is an old SQLite database, not the JSON document store. ` +
+            'Set DB_FILE=./data/qrshield.json in .env (or remove it) and run `npm run db:seed`.',
+        );
+      }
+      const stored = JSON.parse(raw);
       // An older file is a bare list of documents; a newer one also carries assets.
       const list = Array.isArray(stored) ? stored : stored.docs ?? [];
       for (const d of list) this.docs.set(d._id, d);

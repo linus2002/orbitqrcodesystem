@@ -20,7 +20,6 @@ import { api, ApiError } from '../lib/api.js';
 import { formatCodeInput } from '../lib/format.js';
 import { useBodyClass } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
-import { Logo } from '../components/Logo.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
 import Scanner from './Scanner.jsx';
 import ResultCard from './ResultCard.jsx';
@@ -55,7 +54,6 @@ export default function PortalPage() {
       active = false;
     };
   }, []);
-  const shortcode = portal?.smsShortcode || '32123';
   const checker = portal?.checker ?? null;
   const needDetails = Boolean(portal && portal.detailsRequired && !checker);
 
@@ -184,11 +182,17 @@ export default function PortalPage() {
           who scans a pack. Staff reach /login directly. */}
       <main id="main" className="portal-main">
         <div className="wrap portal-wrap">
-          {/* The masthead: the company logo, large, above the heading - the
-              page has no header bar, and the logo's own wordmark carries the
-              name, so no text is set beside it. */}
+          {/* The company logo in white, above the heading - it sits on the
+              darkened side of the photo with the white hero text. The page
+              has no header bar, and the wordmark carries the name. */}
           <div className="portal-brand">
-            <Logo size="xl" text={false} />
+            <img
+              className="portal-logo"
+              src="/img/getmedslogowhite.png"
+              alt="Getmeds"
+              width="720"
+              height="397"
+            />
           </div>
 
           <section className="hero">
@@ -359,35 +363,6 @@ export default function PortalPage() {
               </section>
             </div>
 
-            <aside className="portal-aside" aria-label="Help">
-              <article className="card help-card">
-                <h3>
-                  <Icon name="message" /> No internet?
-                </h3>
-                <p>
-                  Text the code to <span className="mono">{shortcode}</span> and you will get the same
-                  answer by SMS. Standard message rates apply.
-                </p>
-              </article>
-              <article className="card help-card">
-                <h3>
-                  <Icon name="help" /> Where is the code?
-                </h3>
-                <p>
-                  Look for the QR square on the carton. The typed code sits under the silver scratch
-                  panel - scratch it off only when you open the pack.
-                </p>
-              </article>
-              <article className="card help-card">
-                <h3>
-                  <Icon name="flag" /> Something looks wrong?
-                </h3>
-                <p>
-                  Report it even if the check passed. Blurry printing, a broken seal or an odd smell
-                  are all worth telling us about.
-                </p>
-              </article>
-            </aside>
           </div>
         </div>
       </main>
