@@ -98,6 +98,18 @@ SVG markup produced by our own server-side `qrcode` renderer from a code in
 our own registry - never from user input. Any future use of that API should be
 treated as requiring the same justification.
 
+The same applies to spreadsheet exports. The scan log and customer CSVs carry
+text the public typed on the portal - a checker's name, a code, where they
+bought the pack - and a spreadsheet runs a cell that starts with `=`, `+`, `-`
+or `@` as a formula. `csvCell` in `src/services/analytics.js` writes such a
+cell as text (a leading apostrophe) and quotes any value containing a
+semicolon or tab as well as a comma, so it cannot be split into a new cell.
+Plain numbers, mobile numbers included, are left as they are. Any new CSV
+export should go through `toCsv`. The `.xlsx` exports need nothing: the
+library stores text as text and only writes a formula when told to. The
+packaging line's `codes.csv` has its own writer and holds only values the
+system generates or restricts to letters, digits and hyphens.
+
 ### Separating staff access from the public portal
 
 The public portal carries **no link to the staff sign-in page**. Patients and
