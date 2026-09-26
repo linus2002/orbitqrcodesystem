@@ -460,6 +460,35 @@ try {
     cdp
   );
 
+  // A person's request under the privacy notice: an administrator can correct
+  // or remove their details from the customer drawer. Opened, never sent.
+  await cdp.goto(`${APP}/admin/customers`, 2600);
+  await cdp.json(`(()=>{document.querySelector('table.data tbody tr').click();return JSON.stringify(1)})()`);
+  await sleep(1500);
+  const customerButtons = await cdp.json(`(() => {
+    const foot = document.querySelector('.drawer.open .drawer-foot');
+    const labels = [...(foot?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim());
+    return JSON.stringify({ correct: labels.includes('Correct details'), remove: labels.includes('Remove details') });
+  })()`);
+  await cdp.json(`(()=>{[...document.querySelectorAll('.drawer.open .drawer-foot button')]
+    .find((b) => b.textContent.trim() === 'Remove details')?.click();return JSON.stringify(1)})()`);
+  await sleep(1200);
+  check(
+    'an administrator can correct or remove a customer, with a warning and a reason',
+    {
+      ...customerButtons,
+      ...(await cdp.json(`JSON.stringify({
+        warned: /cannot be undone/i.test(document.querySelector('.drawer.open')?.textContent ?? ''),
+        reasonBox: !!document.querySelector('.drawer.open #rReason'),
+      })`)),
+    },
+    cdp
+  );
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+  });
+  await sleep(600);
+
   // Regression: the account panel used to render its own overlay inside the
   // sidebar. `position: sticky` there creates a stacking context, so the
   // page's sticky table headers painted straight through the panel. It now

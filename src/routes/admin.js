@@ -625,13 +625,28 @@ router.get('/customers.csv', requirePermission('scans:read'), async (req, res) =
     `customers-${new Date().toISOString().slice(0, 10)}.csv`,
     analytics.toCsv(items, [
       'id', 'full_name', 'phone', 'email', 'role', 'city', 'purchase_location',
-      'check_count', 'flagged_count', 'last_check_at', 'consent_at', 'created_at',
+      'check_count', 'flagged_count', 'last_check_at', 'consent_at', 'created_at', 'browsers',
     ])
   );
 });
 
 router.get('/customers/:id', requirePermission('scans:read'), async (req, res) => {
   res.json(await verifierService.detail(req.params.id));
+});
+
+/*
+ * A person's own request, under the privacy notice: correct their details,
+ * or remove them (which is also how a withdrawn agreement is honoured).
+ * Admin only, a reason every time, both in the audit log. See
+ * services/verifiers.js for what removal keeps and what it clears.
+ */
+router.patch('/customers/:id', requirePermission('customers:write'), async (req, res) => {
+  res.json(await verifierService.correct(req.params.id, req.body, { actor: req.user, req }));
+});
+
+router.post('/customers/:id/remove', requirePermission('customers:write'), async (req, res) => {
+  const { reason } = validate(req.body, { reason: { type: 'string', required: true, min: 5, max: 300 } });
+  res.json(await verifierService.remove(req.params.id, { reason, actor: req.user, req }));
 });
 
 // ===========================================================================
