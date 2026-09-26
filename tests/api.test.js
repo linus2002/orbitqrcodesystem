@@ -153,6 +153,31 @@ test('a wrong password gives the same message as an unknown account', async () =
   );
 });
 
+test('an unknown email takes as long to refuse as a wrong password', async () => {
+  /** The fastest of three sign-ins: the least noisy measure of the work done. */
+  const fastest = async (body) => {
+    let best = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      const res = await client.post('/api/auth/login', body);
+      best = Math.min(best, performance.now() - started);
+      assert.equal(res.status, 401);
+    }
+    return best;
+  };
+
+  // Three failures, under the lockout threshold of five.
+  const wrongPassword = await fastest({ ...ADMIN, password: 'nope-not-it' });
+  const unknownUser = await fastest({ email: 'nobody@test.local', password: 'nope-not-it' });
+
+  // Both pay for one password hash (~100ms). Without it an unknown email is
+  // answered in a few milliseconds, a gap far wider than this margin.
+  assert.ok(
+    unknownUser >= wrongPassword * 0.5,
+    `unknown email ${unknownUser.toFixed(1)}ms vs wrong password ${wrongPassword.toFixed(1)}ms`
+  );
+});
+
 test('an account locks after repeated failures', async () => {
   for (let i = 0; i < 5; i++) {
     await client.post('/api/auth/login', { ...ADMIN, password: `wrong-${i}` });
