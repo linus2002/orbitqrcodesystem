@@ -47,7 +47,9 @@ const ROUTES = [
   { path: 'products', label: 'Products', icon: 'pill', perm: 'products:read', group: 'Manage', element: <Products /> },
   { path: 'leaflet-codes', label: 'Leaflet QR codes', icon: 'qr', perm: 'products:read', group: 'Manage', element: <LeafletCodes /> },
   { path: 'batches', label: 'Batches & codes', icon: 'box', perm: 'batches:read', group: 'Manage', element: <Batches /> },
-  { path: 'shipments', label: 'Shipments', icon: 'truck', perm: 'batches:read', group: 'Manage', element: <Shipments /> },
+  // Switched off: no role holds shipments:read, so this entry never shows.
+  // SHIPMENTS_ENABLED in src/services/auth.js brings it back.
+  { path: 'shipments', label: 'Shipments', icon: 'truck', perm: 'shipments:read', group: 'Manage', element: <Shipments /> },
 
   { path: 'compliance', label: 'Compliance', icon: 'log', perm: 'batches:read', group: 'Governance', element: <Compliance /> },
   { path: 'audit', label: 'Audit log', icon: 'log', perm: 'audit:read', group: 'Governance', element: <Audit /> },

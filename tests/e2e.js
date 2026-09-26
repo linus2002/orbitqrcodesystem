@@ -407,7 +407,7 @@ try {
   const SECTIONS = [
     ['', 'Overview'], ['alerts', 'Alerts'], ['scans', 'Scan log'], ['reports', 'Patient reports'], ['customers', 'Customers'],
     ['lookup', 'Code lookup'], ['products', 'Products'], ['batches', 'Batches & codes'],
-    ['shipments', 'Shipments'], ['compliance', 'Compliance'], ['audit', 'Audit log'],
+    ['compliance', 'Compliance'], ['audit', 'Audit log'],
     ['users', 'Users'], ['settings', 'Settings'],
   ];
 
@@ -427,6 +427,19 @@ try {
       cdp
     );
   }
+
+  // Shipments are switched off (src/services/auth.js): even an admin has no
+  // menu entry, and the address typed by hand shows a refusal, not the screen.
+  await cdp.goto(`${APP}/admin/shipments`, 2400);
+  check(
+    'Shipments is switched off, even for an admin',
+    await cdp.json(`JSON.stringify({
+      notInMenu: ![...document.querySelectorAll('.nav a')].some(a=>a.textContent.includes('Shipments')),
+      refused: /does not have access/i.test(document.querySelector('main.view')?.textContent ?? ''),
+      noTable: !document.querySelector('table.data'),
+    })`),
+    cdp
+  );
 
   // =========================================================================
   // Interaction

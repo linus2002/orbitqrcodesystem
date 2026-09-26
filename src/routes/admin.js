@@ -427,7 +427,11 @@ router.get('/batches/:id', requirePermission('batches:read'), async (req, res) =
   res.json({
     ...batch,
     stats: await serialization.batchStats(batch.id),
-    shipments: await db.findMany('shipment', { batch_id: batch.id }, { order: 'shipped_at desc' }),
+    // Empty while shipments are switched off (services/auth.js), so the field
+    // stays for anything that reads it but no shipment shows through here.
+    shipments: authService.can(req.user.role, 'shipments:read')
+      ? await db.findMany('shipment', { batch_id: batch.id }, { order: 'shipped_at desc' })
+      : [],
     openAlerts: await db.count('alert', { batch_id: batch.id, status: { in: ['open', 'investigating'] } }),
   });
 });
@@ -876,9 +880,13 @@ router.patch('/reports/:id', requirePermission('reports:write'), async (req, res
 
 // ===========================================================================
 // Shipments (distribution leg)
+//
+// Switched off: no role holds shipments:read or shipments:write, so every
+// route here answers 403. They are kept, and tested, so switching shipments
+// back on is one line (SHIPMENTS_ENABLED in services/auth.js).
 // ===========================================================================
 
-router.get('/shipments', requirePermission('batches:read'), async (req, res) => {
+router.get('/shipments', requirePermission('shipments:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
   const total = await db.count('shipment');
   const items = await db.findMany('shipment', {}, {
@@ -893,7 +901,7 @@ router.get('/shipments', requirePermission('batches:read'), async (req, res) => 
   res.json({ items, total, ...meta });
 });
 
-router.post('/shipments', requirePermission('batches:write'), async (req, res) => {
+router.post('/shipments', requirePermission('shipments:write'), async (req, res) => {
   const data = validate(req.body, {
     batchId: { type: 'int', required: true, min: 1 },
     reference: { type: 'string', required: true, max: 40 },
@@ -928,7 +936,7 @@ router.post('/shipments', requirePermission('batches:write'), async (req, res) =
   res.status(201).json(shipment);
 });
 
-router.patch('/shipments/:id/receive', requirePermission('batches:write'), async (req, res) => {
+router.patch('/shipments/:id/receive', requirePermission('shipments:write'), async (req, res) => {
   const shipment = await db.get('shipment', req.params.id);
   if (!shipment) throw notFound('Shipment not found');
 
