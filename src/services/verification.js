@@ -92,8 +92,22 @@ export function resolveGeo(req) {
   return {
     country: h('cf-ipcountry') || h('x-vercel-ip-country') || h('x-geo-country') || null,
     region: h('x-vercel-ip-country-region') || h('x-geo-region') || null,
-    city: h('x-vercel-ip-city') || h('x-geo-city') || null,
+    city: decodeHeader(h('x-vercel-ip-city') || h('x-geo-city')),
   };
+}
+
+/**
+ * Vercel sends the city percent-encoded ("Quezon%20City", "Las%20Pi%C3%B1as"),
+ * so it is decoded before it is stored. A value that is not valid encoding
+ * is kept as it came rather than dropped, and never allowed to throw.
+ */
+function decodeHeader(value) {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 /** Days from today until `isoDate` (negative when already past). */

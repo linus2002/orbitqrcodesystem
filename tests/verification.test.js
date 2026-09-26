@@ -214,3 +214,22 @@ function fabricateValidLookingCode(n = 0) {
     secret: config.secrets.code,
   });
 }
+
+test('a scan stores the city Vercel sends as readable text, not percent-encoded', async () => {
+  const headers = { 'x-vercel-ip-country': 'PH', 'x-vercel-ip-country-region': '00', 'x-vercel-ip-city': 'Quezon%20City' };
+  const req = { clientIp: '198.51.100.1', get: (name) => headers[name] ?? null };
+
+  const r = await verification.verify(codes[0], { req });
+  const scan = await db.get('scan', r.scanId);
+  assert.equal(scan.city, 'Quezon City');
+  assert.equal(scan.region, '00');
+  assert.equal(scan.country, 'PH');
+});
+
+test('the city header is decoded safely whatever arrives', () => {
+  const geo = (city) => verification.resolveGeo({ get: (n) => (n === 'x-vercel-ip-city' ? city : null) }).city;
+  assert.equal(geo('Las%20Pi%C3%B1as'), 'Las Piñas', 'non-ASCII letters come through');
+  assert.equal(geo('Makati City'), 'Makati City', 'an unencoded value is unchanged');
+  assert.equal(geo('100%'), '100%', 'invalid encoding is kept as it came, not thrown');
+  assert.equal(geo(null), null);
+});
