@@ -39,10 +39,18 @@ import logger from '../lib/logger.js';
  */
 const SAME_SOURCE_GRACE_MS = 15 * 60 * 1000;
 
-/** Machine-readable reasons; also stored in scans.reason. */
+/**
+ * How many times one person (someone who gave their details) may check the
+ * same pack. After that it is not checked again for them - see
+ * personalDecision().
+ */
+const PERSONAL_CHECK_LIMIT = 2;
+
+/** Machine-readable reasons; also stored in scans.reason (check_limit never is). */
 export const REASONS = {
   OK: 'ok',
   OK_REPEAT_SAME_SOURCE: 'ok_repeat_same_source',
+  CHECK_LIMIT: 'check_limit',
   EMPTY: 'empty',
   MALFORMED: 'malformed',
   CHECKSUM_FAILED: 'checksum_failed',
@@ -57,8 +65,7 @@ export const REASONS = {
 /** Patient-facing copy. Deliberately plain, non-technical, and actionable. */
 const MESSAGES = {
   [REASONS.OK]: 'This pack is genuine. It has been verified for the first time.',
-  [REASONS.OK_REPEAT_SAME_SOURCE]:
-    'This pack is genuine. You have already checked it from this device.',
+  [REASONS.OK_REPEAT_SAME_SOURCE]: 'This pack is genuine. You have checked it before.',
   [REASONS.EMPTY]: 'Please enter the code printed on the pack.',
   [REASONS.MALFORMED]:
     'That code is not in the expected format. It should look like AMX25-260921-00483-K7.',
@@ -76,6 +83,14 @@ const MESSAGES = {
     'This code exists but the batch was never released for sale. Do not use this product and please report it.',
   [REASONS.VOID]:
     'This code has been withdrawn by the manufacturer. Do not use this product.',
+};
+
+/** What someone who has checked a pack PERSONAL_CHECK_LIMIT times is told, by their last answer. */
+const LIMIT_MESSAGES = {
+  genuine:
+    'You have already checked this pack twice, so it is not checked again. It was genuine when you checked it. If something about it worries you, report it below.',
+  flagged:
+    'You have already checked this pack twice, so it is not checked again. It had already been verified elsewhere - do not use it until you have checked with your pharmacist.',
 };
 
 /**
@@ -278,6 +293,8 @@ export async function verify(rawCode, ctx = {}) {
   // --- 3-7. Ordered status rules ------------------------------------------
   let result = 'genuine';
   let reason = REASONS.OK;
+  // Set when the per-person rule decided (see personalDecision).
+  let personal = null;
 
   if (row.batch_status === 'recalled') {
     result = 'flagged';
@@ -293,6 +310,11 @@ export async function verify(rawCode, ctx = {}) {
   } else if (daysUntil(row.expiry_date) < 0) {
     result = 'flagged';
     reason = REASONS.EXPIRED;
+  } else if (verifierId) {
+    // Someone who gave their details: their checks are theirs, whatever
+    // network or device they come from.
+    personal = await personalDecision(row, verifierId);
+    ({ result, reason } = personal);
   } else if (
     row.verified_count > 0 &&
     // How many devices may verify a pack before it counts as a duplicate.
@@ -322,8 +344,12 @@ export async function verify(rawCode, ctx = {}) {
     }
   }
 
+  // Past their limit, nothing is recorded and no alert is raised: they are
+  // shown their last answer, and the report form links to that check.
+  const limited = reason === REASONS.CHECK_LIMIT;
+
   // --- Persist: scan row, counters and alert, atomically -------------------
-  const scanId = await db.tx(async () => {
+  const scanId = limited ? personal.lastScanId : await db.tx(async () => {
     const id = await logScan({
       codeText: code,
       codeId: row.id,
@@ -370,7 +396,9 @@ export async function verify(rawCode, ctx = {}) {
     [REASONS.VOID]: 'batch_anomaly',
   }[reason];
 
-  if (alertType) {
+  // A person re-checking a pack they were already warned about is the same
+  // event, not a new one: it must not raise or escalate the alert.
+  if (alertType && !personal?.repeat) {
     await alerts.raise({
       type: alertType,
       codeId: row.id,
@@ -400,7 +428,9 @@ export async function verify(rawCode, ctx = {}) {
     reason,
     scanId,
     code,
-    scanNumber,
+    // Past the limit this is not a check, so it has no number.
+    scanNumber: limited ? undefined : scanNumber,
+    ...(limited ? { message: LIMIT_MESSAGES[result] } : {}),
     isTest,
     product: {
       sku: row.sku,
@@ -427,6 +457,51 @@ export async function verify(rawCode, ctx = {}) {
     firstVerifiedAt: row.first_scan_at,
     reportable: result !== 'genuine',
   });
+}
+
+/** The answers the per-person rule gives, and so the checks its limit counts. */
+const PERSONAL_REASONS = [REASONS.OK, REASONS.OK_REPEAT_SAME_SOURCE, REASONS.DUPLICATE_SCAN];
+
+/**
+ * The duplicate rule for someone who gave their details.
+ *
+ * Before, a re-check counted as the same source only from the same internet
+ * address within 15 minutes, so a patient re-checking their own pack the
+ * next day, or after moving from Wi-Fi to mobile data, was told it might be
+ * a copy. With details given, the person is known:
+ *
+ *   - Their own earlier genuine check makes this one a repeat: genuine, not
+ *     counted as another person, no alert.
+ *   - Their own earlier "already verified elsewhere" gives the same answer
+ *     again, without a new or escalated alert: one person re-checking is one
+ *     event, so nobody can raise alarms on a pack by checking it repeatedly.
+ *   - After PERSONAL_CHECK_LIMIT checks the pack is not checked again for
+ *     them: they are shown their last answer and nothing is recorded.
+ *   - Anyone else is judged by the usual rule and threshold.
+ *
+ * Only these answers count toward the limit. A recall, withdrawal, expiry or
+ * unreleased batch is decided before this, and always shown.
+ */
+async function personalDecision(row, verifierId) {
+  const mine = await db.findMany(
+    'scan',
+    { code_id: row.id, verifier_id: verifierId, reason: { in: PERSONAL_REASONS } },
+    { order: ['created_at desc', 'id desc'], fields: ['result', 'reason'] }
+  );
+
+  if (mine.length >= PERSONAL_CHECK_LIMIT) {
+    return { result: mine[0].result, reason: REASONS.CHECK_LIMIT, lastScanId: mine[0].id };
+  }
+  if (mine.some((s) => s.result === 'genuine')) {
+    return { result: 'genuine', reason: REASONS.OK_REPEAT_SAME_SOURCE, repeat: true };
+  }
+  if (mine.some((s) => s.reason === REASONS.DUPLICATE_SCAN)) {
+    return { result: 'flagged', reason: REASONS.DUPLICATE_SCAN, repeat: true };
+  }
+  if (row.verified_count > 0 && row.verified_count >= (await settings.get('alerts.duplicate_threshold'))) {
+    return { result: 'flagged', reason: REASONS.DUPLICATE_SCAN };
+  }
+  return { result: 'genuine', reason: REASONS.OK };
 }
 
 /**

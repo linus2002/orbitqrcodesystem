@@ -88,9 +88,13 @@ export async function startServer() {
   const cookies = new Map();
   let csrf = null;
 
-  function cookieHeader() {
-    return [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
+  function cookieHeader(jar = cookies) {
+    return [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
   }
+
+  // Each extra person registers from their own address, so the portal's
+  // per-address limit on giving details is never what a test runs into.
+  let people = 0;
 
   function storeCookies(res) {
     // Node exposes multiple Set-Cookie headers via getSetCookie().
@@ -113,13 +117,18 @@ export async function startServer() {
      * @param {object} [opts]
      * @param {string} [opts.fromIp] simulate a different device.
      *   The app trusts X-Forwarded-For only from loopback, which is exactly
-     *   where these tests run, so this is the supported way to make two
-     *   requests look like two different patients.
+     *   where these tests run. On its own it is the same person on another
+     *   network: someone who gave their details is known by them, not by
+     *   their address.
+     * @param {object} [opts.person] check as somebody else - a person from
+     *   newPerson() - with their details cookie in place of this browser's.
+     *   This is how two requests become two different patients.
      */
-    async request(path, { method = 'GET', body, headers = {}, fromIp } = {}) {
+    async request(path, { method = 'GET', body, headers = {}, fromIp, person } = {}) {
       const h = { ...headers };
       if (body !== undefined) h['Content-Type'] = 'application/json';
-      if (cookies.size) h.Cookie = cookieHeader();
+      const jar = person ? new Map([...cookies, ['qrs_checker', person.cookie]]) : cookies;
+      if (jar.size) h.Cookie = cookieHeader(jar);
       if (csrf && !['GET', 'HEAD', 'OPTIONS'].includes(method)) h['X-CSRF-Token'] = csrf;
       if (fromIp) h['X-Forwarded-For'] = fromIp;
 
@@ -149,6 +158,23 @@ export async function startServer() {
       const type = res.headers.get('content-type') ?? '';
       const payload = type.includes('application/json') ? await res.json() : await res.text();
       return { status: res.status, body: payload, headers: res.headers };
+    },
+
+    /**
+     * Somebody else on the portal: gives their details from a browser of
+     * their own and is returned, to pass as `{ person }` on a request. The
+     * test's own cookies (a signed-in admin, say) are left alone.
+     */
+    async newPerson(details = {}) {
+      people += 1;
+      const res = await fetch(`${base}/api/portal/details`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `192.0.2.${people}` },
+        body: JSON.stringify({ ...DETAILS, fullName: `Other Person ${people}`, ...details }),
+      });
+      if (res.status !== 201) throw new Error(`newPerson: ${res.status} ${await res.text()}`);
+      const line = (res.headers.getSetCookie?.() ?? []).find((l) => l.startsWith('qrs_checker='));
+      return { cookie: line.split(';')[0].slice('qrs_checker='.length), checker: (await res.json()).checker };
     },
 
     /** Sign in and keep the session for subsequent calls. */

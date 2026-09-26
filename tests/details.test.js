@@ -199,15 +199,17 @@ test('the setting takes only on or off', async () => {
 test('the security team sees the people and their checks; a regulator does not', async () => {
   await giveDetails(client);
   await client.post('/api/verify', { code: codes[0] }, { fromIp: '198.51.100.7' });
-  // The same pack from another device: flagged, and still this person's check.
-  await client.post('/api/verify', { code: codes[0] }, { fromIp: '203.0.113.20' });
+  // A pack somebody else verified first: flagged, and still this person's check.
+  const other = await client.newPerson({ fullName: 'Pedro Reyes', phone: '0918 765 4321', email: 'pedro@example.com' });
+  await client.post('/api/verify', { code: codes[1] }, { fromIp: '192.0.2.40', person: other });
+  await client.post('/api/verify', { code: codes[1] }, { fromIp: '203.0.113.20' });
 
   await client.login(SECURITY.email, SECURITY.password);
 
   const list = await client.get('/api/admin/customers');
   assert.equal(list.status, 200);
-  assert.equal(list.body.total, 1);
-  const [person] = list.body.items;
+  assert.equal(list.body.total, 2, 'Maria, and the person who verified the pack before her');
+  const person = list.body.items.find((p) => p.full_name === 'Maria Santos');
   assert.equal(person.full_name, 'Maria Santos');
   assert.equal(person.phone, '+639171234567');
   assert.equal(person.email, 'maria@gmail.com');

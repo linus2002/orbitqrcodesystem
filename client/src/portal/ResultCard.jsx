@@ -25,9 +25,18 @@ const PRESENTATION = {
   invalid: { cls: 'banner-invalid', icon: 'help', heading: 'Check the code' },
 };
 
+/*
+ * Someone who has checked this pack twice already: not checked again, just
+ * told their last answer, which the message spells out. Calm on purpose -
+ * this is not a new finding, and a fresh red warning on every re-check is
+ * exactly what would let someone make a genuine pack look alarming.
+ */
+const LIMIT = { cls: 'banner-info', icon: 'help', heading: 'Already checked twice' };
+
 export default function ResultCard({ result, onCheckAnother, supportPhone, checker }) {
   const [reporting, setReporting] = useState(false);
-  const presentation = PRESENTATION[result.result] ?? PRESENTATION.invalid;
+  const presentation =
+    result.reason === 'check_limit' ? LIMIT : PRESENTATION[result.result] ?? PRESENTATION.invalid;
   const genuine = result.result === 'genuine';
 
   return (
