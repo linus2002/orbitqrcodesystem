@@ -74,6 +74,24 @@ test('threshold 2 lets a second device through and flags the third', async () =>
   assert.deepEqual(await fromDevices(codes[2], 3), ['genuine', 'genuine', 'flagged']);
 });
 
+test('a later genuine check says it has been checked before, not "for the first time"', async () => {
+  await setThreshold(3);
+  const said = [];
+  for (const [i, ip] of ['198.51.100.60', '198.51.100.61', '198.51.100.62'].entries()) {
+    // Three different people, each giving their own details on their own phone.
+    client.clearCookies();
+    await giveDetails(client, { fullName: `Checker ${i + 1}` });
+    const res = await client.post('/api/verify', { code: codes[4] }, { fromIp: ip });
+    assert.equal(res.body.result, 'genuine');
+    said.push(res.body.message);
+  }
+  assert.deepEqual(said, [
+    'This pack is genuine. It has been verified for the first time.',
+    'This pack is genuine. It has been checked once before.',
+    'This pack is genuine. It has been checked 2 times before.',
+  ]);
+});
+
 test('the same device re-checking inside the grace window stays genuine at any threshold', async () => {
   await setThreshold(1);
   const first = await client.post('/api/verify', { code: codes[3] }, { fromIp: '198.51.100.50' });

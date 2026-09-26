@@ -530,10 +530,23 @@ function publicResult(payload) {
   return {
     result: payload.result,
     reason: payload.reason,
-    message: MESSAGES[payload.reason] ?? 'Unable to verify this code.',
+    message: messageFor(payload),
     verifiedAt: new Date().toISOString(),
     ...payload,
   };
+}
+
+/**
+ * The message for a result. A genuine check that is not the pack's first -
+ * possible when the duplicate threshold lets more than one device through -
+ * must not say "for the first time" beside "Check number 2".
+ */
+function messageFor({ reason, scanNumber }) {
+  if (reason === REASONS.OK && scanNumber > 1) {
+    const before = scanNumber - 1;
+    return `This pack is genuine. It has been checked ${before === 1 ? 'once' : `${before} times`} before.`;
+  }
+  return MESSAGES[reason] ?? 'Unable to verify this code.';
 }
 
 /**
