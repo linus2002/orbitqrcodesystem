@@ -46,11 +46,13 @@ async function storeRaw(key, value) {
 
 const setThreshold = (n) => storeRaw('alerts.duplicate_threshold', String(n));
 
-/** Verify one code from several distinct devices; return each result. */
+/** Verify one code by several distinct people on their own devices; return each result. */
 async function fromDevices(code, n) {
   const out = [];
   for (let i = 0; i < n; i++) {
-    const res = await client.post('/api/verify', { code }, { fromIp: `198.51.100.${10 + i}` });
+    // The first is this browser's own person; each after is somebody else.
+    const person = i === 0 ? undefined : await client.newPerson();
+    const res = await client.post('/api/verify', { code }, { fromIp: `198.51.100.${10 + i}`, person });
     out.push(res.body.result);
   }
   return out;

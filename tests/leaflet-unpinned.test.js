@@ -101,9 +101,12 @@ test('a medicine with no leaflet at all still verifies, with no leaflet', async 
 
 test('a flagged result still carries no leaflet, whichever version is newest', async () => {
   await publishV2();
-  // Verified once from one device, then again from another: a duplicate.
+  // Verified by one person, then by another: a duplicate.
   await client.post('/api/verify', { code: codes[5] }, { fromIp: '198.51.100.12' });
-  const res = await client.post('/api/verify', { code: codes[5] }, { fromIp: '203.0.113.5' });
+  const res = await client.post('/api/verify', { code: codes[5] }, {
+    fromIp: '203.0.113.5',
+    person: await client.newPerson(),
+  });
 
   assert.equal(res.body.result, 'flagged');
   assert.equal(res.body.leaflet, null, 'dosing text never sits beside a counterfeit warning');

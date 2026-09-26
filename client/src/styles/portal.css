@@ -121,6 +121,8 @@
 .banner-genuine { background: linear-gradient(135deg, #0f8f3f, #0ca30c); }
 .banner-flagged { background: linear-gradient(135deg, #b02a2a, #d03b3b); }
 .banner-invalid { background: linear-gradient(135deg, #8a5a08, #c08312); }
+/* Already checked twice: not a new finding, so the brand blue, not an alarm. */
+.banner-info { background: linear-gradient(135deg, #145a80, #1a74a8); }
 
 /* Detail rows */
 .detail-list { display: grid; }
