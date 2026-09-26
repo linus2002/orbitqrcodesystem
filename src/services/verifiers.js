@@ -19,8 +19,9 @@ import * as db from '../db/index.js';
 import { config } from '../config.js';
 import { validate } from '../lib/validate.js';
 import { hmac, randomToken, pseudonymize } from '../lib/crypto.js';
-import { AppError, validationFailed, notFound } from '../lib/errors.js';
+import { AppError, validationFailed, notFound, conflict, badRequest } from '../lib/errors.js';
 import * as settings from './settings.js';
+import * as audit from './audit.js';
 
 export const COOKIE = 'qrs_checker';
 const COOKIE_DAYS = 180;
@@ -249,7 +250,130 @@ export async function detail(id) {
   return { ...person, scans };
 }
 
+// ---------------------------------------------------------------------------
+// Removing and correcting a person's details
+//
+// What the privacy notice promises: a person may ask for their details to be
+// corrected or removed, or withdraw their agreement (which is a removal - no
+// way to contact them remains). Admin only (customers:write), a reason every
+// time, and the audit entry never repeats the personal details themselves.
+// ---------------------------------------------------------------------------
+
+/** What a removed person's name, mobile and email read as. */
+export const REMOVED = '(removed)';
+
+const isRemoved = (row) => row.full_name === REMOVED && row.phone === REMOVED;
+
+/**
+ * Remove a person's details.
+ *
+ * Anonymised in place rather than deleted: the record's id stays, so their
+ * past checks remain in the scan log as evidence - a check still happened,
+ * then and there - but nothing names or reaches the person any more. The
+ * fields the store requires hold REMOVED; the rest are cleared. Their
+ * browser's link is broken with a new random token digest that no cookie
+ * matches, so that phone is asked for details again. (The old digest's
+ * uniqueness record stays behind; it is random and never issued again.)
+ * The name and contact typed into reports about their own checks go too.
+ */
+export async function remove(id, { reason, actor, req } = {}) {
+  const person = await db.get('verifier', Number(id));
+  if (!person) throw notFound('No such person');
+  if (isRemoved(person)) throw conflict("This person's details have already been removed.");
+
+  const scanIds = (await db.findMany('scan', { verifier_id: person.id }, { fields: ['id'] })).map((s) => s.id);
+  const reports = scanIds.length
+    ? await db.findMany('consumerReport', { scan_id: { in: scanIds } }, { fields: ['id'] })
+    : [];
+
+  await db.tx(async () => {
+    await db.update('verifier', person, {
+      full_name: REMOVED,
+      phone: REMOVED,
+      email: REMOVED,
+      city: null,
+      purchase_location: null,
+      ip_hash: null,
+      user_agent: null,
+      token_hash: tokenHash(randomToken(32)),
+    });
+    for (const r of reports) {
+      await db.update('consumerReport', r.id, { reporter_name: null, reporter_contact: null });
+    }
+  });
+
+  await audit.record({
+    actor, req,
+    action: 'customer.remove',
+    entityType: 'customer',
+    entityId: person.id,
+    detail: { reason, reportsCleared: reports.length },
+  });
+  return detail(person.id);
+}
+
+/**
+ * Correct a person's details. Only the fields sent change; a city or a
+ * "where bought" sent empty is cleared, while a name, mobile or email cannot
+ * be. The same checks as the portal form, so a correction can never store
+ * what the form would refuse.
+ */
+export async function correct(id, body = {}, { actor, req } = {}) {
+  const person = await db.get('verifier', Number(id));
+  if (!person) throw notFound('No such person');
+  if (isRemoved(person)) throw conflict('These details have been removed and cannot be corrected.');
+
+  const raw = body ?? {};
+  let data = {};
+  let errors = [];
+  try {
+    data = validate(raw, {
+      fullName: { type: 'string', min: 2, max: 120 },
+      phone: { type: 'string', max: 32 },
+      email: { type: 'email' },
+      city: { type: 'string', max: 120 },
+      purchaseLocation: { type: 'string', max: 200 },
+      reason: { type: 'string', required: true, min: 5, max: 300 },
+    });
+  } catch (err) {
+    if (err.code !== 'validation_failed') throw err;
+    errors = [...err.details];
+  }
+
+  // Sent empty: allowed for the optional two (it clears them), not for the rest.
+  const blank = (field) => typeof raw[field] === 'string' && raw[field].trim() === '';
+  for (const field of ['fullName', 'phone', 'email']) {
+    if (blank(field)) errors.push({ field, message: 'cannot be empty' });
+  }
+  const phone = data.phone !== undefined ? normalizePhone(data.phone) : undefined;
+  if (data.phone !== undefined && !phone) {
+    errors.push({ field: 'phone', message: 'must be a mobile number, e.g. 0917 123 4567' });
+  }
+  if (errors.length) throw validationFailed(errors);
+
+  const changes = {};
+  if (data.fullName !== undefined) changes.full_name = data.fullName;
+  if (phone !== undefined) changes.phone = phone;
+  if (data.email !== undefined) changes.email = data.email;
+  if (data.city !== undefined || blank('city')) changes.city = data.city || null;
+  if (data.purchaseLocation !== undefined || blank('purchaseLocation')) {
+    changes.purchase_location = data.purchaseLocation || null;
+  }
+  if (!Object.keys(changes).length) throw badRequest('Nothing to change.');
+
+  await db.update('verifier', person, changes);
+  await audit.record({
+    actor, req,
+    action: 'customer.update',
+    entityType: 'customer',
+    entityId: person.id,
+    // Which fields and why - not the values, old or new.
+    detail: { fields: Object.keys(changes), reason: data.reason },
+  });
+  return detail(person.id);
+}
+
 export default {
-  COOKIE, ROLES, normalizePhone, cookieOptions, publicView,
-  register, fromRequest, requireDetails, touch, list, detail,
+  COOKIE, ROLES, REMOVED, normalizePhone, cookieOptions, publicView,
+  register, fromRequest, requireDetails, touch, list, detail, remove, correct,
 };

@@ -20,6 +20,7 @@ const ACTION_GROUPS = [
   { value: 'leaflet', label: 'Leaflets' },
   { value: 'alert', label: 'Alerts' },
   { value: 'user', label: 'User accounts' },
+  { value: 'customer', label: 'Customers' },
   { value: 'shipment', label: 'Shipments' },
   { value: 'compliance', label: 'Compliance exports' },
   { value: 'settings', label: 'Settings' },

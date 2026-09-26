@@ -45,7 +45,7 @@ import logger from '../lib/logger.js';
 export const PERMISSIONS = {
   admin: [
     'dashboard:view', 'products:read', 'products:write', 'batches:read', 'batches:write',
-    'codes:read', 'codes:export', 'scans:read', 'alerts:read', 'alerts:write',
+    'codes:read', 'codes:export', 'scans:read', 'customers:write', 'alerts:read', 'alerts:write',
     'reports:read', 'reports:write', 'users:read', 'users:write', 'audit:read', 'settings:write',
   ],
   security: [
