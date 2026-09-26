@@ -219,6 +219,15 @@ export async function list({ page, pageSize, search, role, from, to } = {}) {
     where.$raw = `(${alts.join(' || ')})`;
   }
 
+  // One row per person, not per browser: when the same mobile and email were
+  // given from several browsers, the newest record stands for them all (its
+  // counts are combined below). Mobile AND email, because a family often
+  // shares one phone. Removed records are never grouped - "(removed)" is not
+  // a person - and only a real number (+...) starts a group.
+  const newestOfPerson =
+    '(!string::startsWith(phone, "+") || count(*[_type == "verifier" && phone == ^.phone && email == ^.email && id > ^.id]) == 0)';
+  where.$raw = where.$raw ? `${where.$raw} && ${newestOfPerson}` : newestOfPerson;
+
   const total = await db.count('verifier', where, { params });
   const items = await db.findMany('verifier', where, {
     order: ['created_at desc', 'id desc'],
@@ -230,15 +239,49 @@ export async function list({ page, pageSize, search, role, from, to } = {}) {
       flagged_count: 'count(*[_type == "scan" && verifier_id == ^.id && result == "flagged"])',
     },
   });
-  return { items, total, ...meta };
+  return { items: await withBrowsers(items), total, ...meta };
 }
 
-/** One person and their recent checks. */
+/** Whether a record is part of a person who can be grouped (see list()). */
+const groupable = (row) => typeof row.phone === 'string' && row.phone.startsWith('+');
+const personKey = (row) => `${row.phone}\n${row.email}`;
+
+/**
+ * Every record of the person a record belongs to - one per browser they gave
+ * details from, matched on mobile and email - newest first.
+ */
+async function recordsOf(person) {
+  if (!groupable(person)) return [person];
+  return db.findMany('verifier', { phone: person.phone, email: person.email }, { order: 'id desc' });
+}
+
+/** Each listed person with how many browsers they used and their checks across all of them. */
+async function withBrowsers(items) {
+  const phones = [...new Set(items.filter(groupable).map((r) => r.phone))];
+  const totals = new Map();
+  if (phones.length) {
+    const all = await db.findMany('verifier', { phone: { in: phones } }, {
+      fields: ['phone', 'email', 'check_count'],
+      extra: { flagged_count: 'count(*[_type == "scan" && verifier_id == ^.id && result == "flagged"])' },
+    });
+    for (const r of all) {
+      const t = totals.get(personKey(r)) ?? { browsers: 0, check_count: 0, flagged_count: 0 };
+      t.browsers += 1;
+      t.check_count += r.check_count ?? 0;
+      t.flagged_count += r.flagged_count ?? 0;
+      totals.set(personKey(r), t);
+    }
+  }
+  return items.map((r) => ({ ...r, browsers: 1, ...(groupable(r) ? totals.get(personKey(r)) : {}) }));
+}
+
+/** One person and their recent checks, across every browser they used. */
 export async function detail(id) {
   const person = await db.findOne('verifier', { id: Number(id) }, { fields: STAFF_FIELDS });
   if (!person) throw notFound('No such person');
 
-  const scans = await db.findMany('scan', { verifier_id: person.id }, {
+  const records = await recordsOf(person);
+  const scans = await db.findMany('scan', { verifier_id: { in: records.map((r) => r.id) } }, {
     order: ['created_at desc', 'id desc'],
     limit: 25,
     fields: ['code_text', 'result', 'reason', 'channel', 'city', 'region', 'country', 'created_at'],
@@ -247,7 +290,12 @@ export async function detail(id) {
       product_name: '*[_type == "product" && id == ^.product_id][0].name',
     },
   });
-  return { ...person, scans };
+  return {
+    ...person,
+    browsers: records.length,
+    check_count: records.reduce((n, r) => n + (r.check_count ?? 0), 0),
+    scans,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,22 +329,29 @@ export async function remove(id, { reason, actor, req } = {}) {
   if (!person) throw notFound('No such person');
   if (isRemoved(person)) throw conflict("This person's details have already been removed.");
 
-  const scanIds = (await db.findMany('scan', { verifier_id: person.id }, { fields: ['id'] })).map((s) => s.id);
+  // Every browser they gave details from: a person asking to be removed is
+  // removed everywhere, not from one browser's record.
+  const records = await recordsOf(person);
+  const scanIds = (
+    await db.findMany('scan', { verifier_id: { in: records.map((r) => r.id) } }, { fields: ['id'] })
+  ).map((s) => s.id);
   const reports = scanIds.length
     ? await db.findMany('consumerReport', { scan_id: { in: scanIds } }, { fields: ['id'] })
     : [];
 
   await db.tx(async () => {
-    await db.update('verifier', person, {
-      full_name: REMOVED,
-      phone: REMOVED,
-      email: REMOVED,
-      city: null,
-      purchase_location: null,
-      ip_hash: null,
-      user_agent: null,
-      token_hash: tokenHash(randomToken(32)),
-    });
+    for (const record of records) {
+      await db.update('verifier', record, {
+        full_name: REMOVED,
+        phone: REMOVED,
+        email: REMOVED,
+        city: null,
+        purchase_location: null,
+        ip_hash: null,
+        user_agent: null,
+        token_hash: tokenHash(randomToken(32)),
+      });
+    }
     for (const r of reports) {
       await db.update('consumerReport', r.id, { reporter_name: null, reporter_contact: null });
     }
@@ -307,7 +362,7 @@ export async function remove(id, { reason, actor, req } = {}) {
     action: 'customer.remove',
     entityType: 'customer',
     entityId: person.id,
-    detail: { reason, reportsCleared: reports.length },
+    detail: { reason, records: records.length, reportsCleared: reports.length },
   });
   return detail(person.id);
 }
@@ -361,14 +416,18 @@ export async function correct(id, body = {}, { actor, req } = {}) {
   }
   if (!Object.keys(changes).length) throw badRequest('Nothing to change.');
 
-  await db.update('verifier', person, changes);
+  // Every browser's record of the person, so they stay one person.
+  const records = await recordsOf(person);
+  await db.tx(async () => {
+    for (const record of records) await db.update('verifier', record, changes);
+  });
   await audit.record({
     actor, req,
     action: 'customer.update',
     entityType: 'customer',
     entityId: person.id,
     // Which fields and why - not the values, old or new.
-    detail: { fields: Object.keys(changes), reason: data.reason },
+    detail: { fields: Object.keys(changes), reason: data.reason, records: records.length },
   });
   return detail(person.id);
 }

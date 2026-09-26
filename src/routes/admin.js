@@ -625,7 +625,7 @@ router.get('/customers.csv', requirePermission('scans:read'), async (req, res) =
     `customers-${new Date().toISOString().slice(0, 10)}.csv`,
     analytics.toCsv(items, [
       'id', 'full_name', 'phone', 'email', 'role', 'city', 'purchase_location',
-      'check_count', 'flagged_count', 'last_check_at', 'consent_at', 'created_at',
+      'check_count', 'flagged_count', 'last_check_at', 'consent_at', 'created_at', 'browsers',
     ])
   );
 });

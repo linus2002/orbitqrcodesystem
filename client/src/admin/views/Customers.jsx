@@ -111,6 +111,13 @@ export default function Customers() {
               render: (r) => (
                 <>
                   {r.full_name}
+                  {/* The same mobile and email from several browsers: one person. */}
+                  {r.browsers > 1 && (
+                    <>
+                      {' '}
+                      <span className="badge badge-neutral">{r.browsers} browsers</span>
+                    </>
+                  )}
                   <br />
                   <span className="text-muted text-sm">{roleLabel(r.role)}</span>
                 </>
@@ -164,6 +171,10 @@ function CustomerDetail({ id }) {
           ['Got the medicine from', data.purchase_location ?? 'not given'],
           ['Consent given', fmtDate(data.consent_at, { withTime: true })],
           ['Checks', fmtNumber(data.check_count)],
+          data.browsers > 1 && [
+            'Gave details from',
+            `${data.browsers} browsers - their checks are combined here`,
+          ],
           ['First seen', fmtDate(data.created_at, { withTime: true })],
         ]}
       />
@@ -333,9 +344,11 @@ function RemoveForm({ person, drawer, reload }) {
         <Icon name="alert" />
         <span>
           This cannot be undone. Their name, mobile number, email, city and where they got the
-          medicine are removed, as are the name and contact they typed into reports. Their
-          phone will be asked for details again. Their past checks stay in the scan log without
-          their name, so the record of what was checked, when and where is kept.
+          medicine are removed
+          {person.browsers > 1 ? `, from all ${person.browsers} browsers they used` : ''}, as are
+          the name and contact they typed into reports. Their phone will be asked for details
+          again. Their past checks stay in the scan log without their name, so the record of what
+          was checked, when and where is kept.
         </span>
       </div>
       <ReasonField
