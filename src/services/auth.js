@@ -124,7 +124,13 @@ export async function login(email, password, req) {
     );
   }
 
-  if (!user || user.status !== 'active' || !verifyPassword(password, user.password_hash)) {
+  // Exactly one password check on every attempt, including an unknown or a
+  // suspended account. Skipping it made those refusals ~100ms faster than a
+  // wrong password on a real account, which told a stranger which emails
+  // exist even though the message is the same.
+  const passwordOk = verifyPassword(password, user?.password_hash ?? decoyHash());
+
+  if (!user || user.status !== 'active' || !passwordOk) {
     if (user) await registerFailure(user);
     // Uniform message + uniform timing: never reveal whether the email exists.
     throw unauthorized('Email or password is incorrect.');
@@ -139,6 +145,15 @@ export async function login(email, password, req) {
 
   return { user: publicUser(await db.get('user', user.id)), ...session };
 }
+
+/*
+ * What a password is checked against when there is no account to check it
+ * against: the hash of a random password, so it matches nothing. Made on
+ * first use rather than at import, so starting the server does not pay for
+ * a hash it may never need.
+ */
+let decoy;
+const decoyHash = () => (decoy ??= hashPassword(randomToken(24)));
 
 /** Record a failed attempt and lock the account once the threshold is hit. */
 async function registerFailure(user) {
