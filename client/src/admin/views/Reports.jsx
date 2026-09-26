@@ -103,6 +103,16 @@ function ReportDetail({ report }) {
           ['Bought at', report.purchase_location ?? 'not stated'],
           ['Reporter', report.reporter_name ?? 'anonymous'],
           ['Contact', report.reporter_contact ?? 'none given'],
+          // From the details they gave before checking, not typed into the
+          // report - the part to trust if the two differ.
+          [
+            'Checked by',
+            report.checker
+              ? [report.checker.name, report.checker.phone, report.checker.email, report.checker.role]
+                  .filter(Boolean)
+                  .join(' · ')
+              : 'not linked to a registered check',
+          ],
         ]}
       />
       <div>

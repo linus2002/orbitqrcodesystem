@@ -198,6 +198,7 @@ test('the portal reads the notice, the support number and the shortcode, with sa
       role: 'patient',
       roleLabel: 'Patient',
       city: 'Quezon City',
+      purchaseLocation: null,
     },
   });
 

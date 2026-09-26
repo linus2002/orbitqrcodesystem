@@ -14,7 +14,7 @@ export default function ReportForm({ result, checker }) {
   // them again to report; they can still change them here.
   const [fields, setFields] = useState({
     description: '',
-    purchaseLocation: '',
+    purchaseLocation: checker?.purchaseLocation ?? '',
     reporterName: checker?.name ?? '',
     reporterContact: checker ? [checker.phone, checker.email].filter(Boolean).join(' / ') : '',
   });

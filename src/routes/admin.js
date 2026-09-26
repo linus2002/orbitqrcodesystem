@@ -815,6 +815,25 @@ router.get('/reports', requirePermission('reports:read'), async (req, res) => {
       },
     })).map((c) => [c.id, c])
   );
+  // Who made the check a report is about, when they gave their details: the
+  // report keeps that check (only ever the reporter's own - see /api/report).
+  // Behind scans:read, like the Customers screen, because it names a person.
+  const checkers = new Map();
+  if (authService.can(req.user.role, 'scans:read')) {
+    const scans = await db.findMany('scan', { id: { in: rows.map((r) => r.scan_id).filter(Boolean) } }, {
+      fields: ['verifier_id'],
+    });
+    const people = new Map(
+      (await db.findMany('verifier', { id: { in: scans.map((s) => s.verifier_id).filter(Boolean) } }, {
+        fields: ['full_name', 'phone', 'email', 'role'],
+      })).map((p) => [p.id, p])
+    );
+    for (const s of scans) {
+      const p = people.get(s.verifier_id);
+      if (p) checkers.set(s.id, { id: p.id, name: p.full_name, phone: p.phone, email: p.email, role: p.role });
+    }
+  }
+
   const items = rows.map((r) => {
     const c = codes.get(r.code_id);
     return {
@@ -822,6 +841,7 @@ router.get('/reports', requirePermission('reports:read'), async (req, res) => {
       registry_code: c?.code ?? null,
       batch_number: c?.batch_number ?? null,
       product_name: c?.product_name ?? null,
+      checker: checkers.get(r.scan_id) ?? null,
     };
   });
   res.json({ items, total, ...meta });

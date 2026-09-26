@@ -76,6 +76,8 @@ export function publicView(row) {
     role: row.role,
     roleLabel: ROLES[row.role] ?? row.role,
     city: row.city,
+    // So the report form can offer it back rather than ask again.
+    purchaseLocation: row.purchase_location ?? null,
   };
 }
 
