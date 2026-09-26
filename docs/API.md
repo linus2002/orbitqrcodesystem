@@ -292,9 +292,16 @@ All under `/api/admin`, all authenticated, each gated on a named permission.
 | `audit:read` | Y | Y | - |
 | `users:read` / `users:write` | Y | - | - |
 | `settings:write` | Y | - | - |
+| `shipments:read` / `shipments:write` | - | - | - |
 
 A regulator holding no `scans:read` is a deliberate compliance boundary: they
 get aggregate serialization figures, never individual patient scans.
+
+Shipments are switched off: no role holds their permissions, so the
+Shipments screen is hidden and its endpoints answer `403`. The stored
+shipments and the code are kept. Setting `SHIPMENTS_ENABLED` to `true` in
+`src/services/auth.js` gives back the access each role had before: read and
+write for admin and security, read for regulator.
 
 ### Dashboard
 
@@ -319,7 +326,7 @@ get aggregate serialization figures, never individual patient scans.
 |---|---|---|
 | `GET /batches` | `batches:read` | `?status=`, `?search=`, `?includeTest=true` |
 | `POST /batches` | `batches:write` | Creates in `planned` |
-| `GET /batches/:id` | `batches:read` | Plus code stats, shipments, open alert count |
+| `GET /batches/:id` | `batches:read` | Plus code stats and open alert count. `shipments` is an empty list while shipments are switched off |
 | `POST /batches/:id/issue-codes` | `batches:write` | Runs serialization. **409 if already issued** |
 | `POST /batches/:id/transition` | `batches:write` | `{ "to": "released" }`; recall requires `reason` |
 | `GET /batches/:id/codes` | `codes:read` | Paged |
@@ -371,7 +378,7 @@ Alert types: `duplicate_scan`, `unknown_code`, `recalled_scan`, `expired_scan`,
 | Endpoint | Permission |
 |---|---|
 | `GET /reports`, `PATCH /reports/:id` | `reports:read` / `reports:write` |
-| `GET /shipments`, `POST /shipments`, `PATCH /shipments/:id/receive` | `batches:read` / `batches:write` |
+| `GET /shipments`, `POST /shipments`, `PATCH /shipments/:id/receive` | `shipments:read` / `shipments:write` (switched off: no role holds them) |
 | `GET /users`, `POST /users`, `PATCH /users/:id`, `POST /users/:id/reset-password` | `users:read` / `users:write` |
 | `GET /audit` | `audit:read` |
 

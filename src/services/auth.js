@@ -33,6 +33,18 @@ import {
 import * as audit from './audit.js';
 import logger from '../lib/logger.js';
 
+/*
+ * Shipments are switched off. While this is false no role holds their
+ * permissions, so the Shipments menu entry, the screen and its API are all
+ * closed, and a batch's detail lists no shipments. Nothing is deleted: the
+ * stored shipments, the screen and the routes all stay, and
+ * tests/shipments-off.test.js keeps the routes working while they are
+ * unused. Setting this to true gives each role back exactly the access it
+ * had before (then it came with batches:read and batches:write).
+ */
+const SHIPMENTS_ENABLED = false;
+const shipments = (...perms) => (SHIPMENTS_ENABLED ? perms : []);
+
 /**
  * Role capabilities.
  *
@@ -47,13 +59,18 @@ export const PERMISSIONS = {
     'dashboard:view', 'products:read', 'products:write', 'batches:read', 'batches:write',
     'codes:read', 'codes:export', 'scans:read', 'alerts:read', 'alerts:write',
     'reports:read', 'reports:write', 'users:read', 'users:write', 'audit:read', 'settings:write',
+    ...shipments('shipments:read', 'shipments:write'),
   ],
   security: [
     'dashboard:view', 'products:read', 'products:write', 'batches:read', 'batches:write',
     'codes:read', 'codes:export', 'scans:read', 'alerts:read', 'alerts:write',
     'reports:read', 'reports:write', 'audit:read',
+    ...shipments('shipments:read', 'shipments:write'),
   ],
-  regulator: ['dashboard:view', 'products:read', 'batches:read', 'compliance:read'],
+  regulator: [
+    'dashboard:view', 'products:read', 'batches:read', 'compliance:read',
+    ...shipments('shipments:read'),
+  ],
 };
 
 export const can = (role, permission) => (PERMISSIONS[role] ?? []).includes(permission);
