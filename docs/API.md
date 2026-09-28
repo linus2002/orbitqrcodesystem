@@ -501,6 +501,13 @@ dropped after a day.
 | `GET /batches/:id/codes.csv` | `codes:export` | The packaging-line hand-off file |
 | `GET /batches/:id/labels?limit=12&offset=0` | `codes:read` | Codes plus rendered QR SVG, at most 60 per request; `total` is the batch's code count, for paging through a whole batch |
 
+**Issuing codes.** Two batches of one product made on the same day share a
+serial space; issuance passes over any code another batch already holds, so
+each gets its full quantity. Any `409` other than "already issued", or a
+failure part-way, leaves the batch `planned` with the codes stored so far
+kept. The message says whether to run it again - which carries on where it
+stopped - or to contact an administrator.
+
 Legal transitions:
 
 ```

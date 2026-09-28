@@ -379,10 +379,13 @@ async function resolveDocId(type, ref) {
  * atomically on the server - the counters on a code are incremented this way
  * so two concurrent scans can never lose one. `setIfMissing` is COALESCE.
  * A type with an updated_at field has it stamped, as every UPDATE did.
+ * `ifRevision` applies the change only if the document is still at that
+ * revision (its `_rev`); otherwise nothing changes and it throws with
+ * statusCode 409 - a compare-and-set, for a change that must happen once.
  *
  * @param {number|string|object} ref id, or a row. The row must exist.
  */
-export async function update(type, ref, set = {}, { inc, setIfMissing, touch = true } = {}) {
+export async function update(type, ref, set = {}, { inc, setIfMissing, touch = true, ifRevision } = {}) {
   const s = spec(type);
   assertKnown(type, { ...set, ...inc, ...setIfMissing });
   const patchSet = {};
@@ -408,6 +411,7 @@ export async function update(type, ref, set = {}, { inc, setIfMissing, touch = t
   if (inc && Object.keys(inc).length) patch.inc = inc;
   if (setIfMissing && Object.keys(setIfMissing).length) patch.setIfMissing = setIfMissing;
   if (Object.keys(patch).length === 1) return true;
+  if (ifRevision) patch.ifRevisionID = ifRevision;
 
   // The row must exist: a patch to a missing document fails the whole
   // transaction in Sanity. Every caller has already read the row it updates.
