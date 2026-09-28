@@ -519,7 +519,19 @@ function NewBatchForm({ products, drawer, reload }) {
           isTest: form.isTest,
         },
       });
-      toast('Batch created. Open it to issue codes.', 'success');
+      // A pilot batch is left out of this list by default, so without this it
+      // looks as though the batch was never created.
+      if (form.isTest) {
+        toast(
+          'Pilot batch created. Pilot batches are hidden from this list and from the Overview ' +
+            'figures - tick "Include pilot batches" above the list to see it, then open it to ' +
+            'issue codes. Its scans are under Scan log, with "Include pilot scans" ticked.',
+          'success',
+          { ms: 12000 }
+        );
+      } else {
+        toast('Batch created. Open it to issue codes.', 'success');
+      }
       drawer.close();
       reload();
     } catch (err) {
@@ -564,6 +576,12 @@ function NewBatchForm({ products, drawer, reload }) {
         <input type="checkbox" checked={form.isTest} onChange={set('isTest')} /> Pilot / sandbox batch
         (excluded from live dashboards)
       </label>
+      {form.isTest && (
+        <p className="hint">
+          Once created, it is found under Batches &amp; codes with &quot;Include pilot batches&quot;
+          ticked - it will not show in this list otherwise.
+        </p>
+      )}
 
       {error && <p className="field-error" role="alert">{error}</p>}
 
