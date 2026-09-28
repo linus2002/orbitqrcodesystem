@@ -4,7 +4,7 @@
  * The SKU is immutable once created: it is embedded in every code already
  * printed on packs, so changing it would orphan them.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { api, upload } from '../../lib/api.js';
 import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
@@ -482,15 +482,17 @@ function PublishLeafletForm({ product, drawer, reload }) {
 
   /*
    * The other products this document covers. One leaflet usually spans every
-   * strength of a medicine, and the product list with each one's current
-   * version is what lets the form pre-tick the siblings: whichever products
-   * share this product's current version were published together last time.
+   * strength of a medicine, so the list shows each product's current version
+   * to help the person choose.
    *
-   * `null` until that list arrives, so the pre-selection is applied exactly
-   * once and a later refetch (the language changed) never overwrites what
-   * the person has since ticked or unticked.
+   * Nothing is ticked for them. The form used to pre-tick every product
+   * sharing this one's current version, but a version number is all that
+   * guess had to go on - unrelated medicines that each happen to be on "1.0"
+   * came pre-ticked too, and a publish that goes out with a box nobody
+   * noticed puts one medicine's leaflet on another. Every product a publish
+   * covers is now one the person chose.
    */
-  const [extra, setExtra] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
   const lang = useDebounced(language.trim() || 'en');
   const { data: list, error: listError, loading: listLoading } = useApi(
     '/api/admin/leaflet-codes',
@@ -498,19 +500,9 @@ function PublishLeafletForm({ product, drawer, reload }) {
     [lang]
   );
 
-  useEffect(() => {
-    if (extra !== null || !list) return;
-    const mine = list.items.find((p) => p.id === product.id)?.leaflet_version ?? null;
-    const siblings = mine
-      ? list.items.filter((p) => p.id !== product.id && p.leaflet_version === mine).map((p) => p.id)
-      : [];
-    setExtra(new Set(siblings));
-  }, [list, extra, product.id]);
-
-  const selected = extra ?? new Set();
   const toggle = (id, on) =>
-    setExtra((s) => {
-      const next = new Set(s ?? []);
+    setSelected((s) => {
+      const next = new Set(s);
       if (on) next.add(id);
       else next.delete(id);
       return next;
@@ -693,8 +685,7 @@ function PublishLeafletForm({ product, drawer, reload }) {
         <p className="hint mb-8">
           One leaflet usually covers every strength of a medicine. Tick the other products this
           document covers and they all receive this version together, so no two strengths can end
-          up saying different things. Products already sharing the current version are ticked for
-          you.
+          up saying different things. Nothing is ticked for you - check each one yourself.
         </p>
         {listLoading && !list && <p className="text-sm text-muted">Loading products...</p>}
         {listError && (
@@ -719,6 +710,16 @@ function PublishLeafletForm({ product, drawer, reload }) {
                 </span>
               </label>
             ))}
+        {/* The whole reach of this publish in one line, read back before
+            the button - what the ticks add up to, not what they might be. */}
+        <p className="text-sm mt-8">
+          <strong>Publishes to:</strong> {product.sku}
+          {list?.items
+            .filter((p) => selected.has(p.id))
+            .map((p) => `, ${p.sku}`)
+            .join('')}
+          {selected.size === 0 && <span className="text-muted"> only</span>}
+        </p>
       </div>
 
       <div className="field">
@@ -744,9 +745,8 @@ function PublishLeafletForm({ product, drawer, reload }) {
 
       {error && <p className="field-error" role="alert">{error}</p>}
 
-      {/* Held until the product list has loaded (or failed), so a quick
-          submit cannot skip the pre-ticked siblings and split a medicine's
-          strengths onto different versions. */}
+      {/* Held until the product list has loaded (or failed), so nobody
+          publishes before they could see which other products to tick. */}
       <button
         className="btn btn-primary btn-block"
         type="submit"

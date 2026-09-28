@@ -187,9 +187,10 @@ router.patch('/products/:id', requirePermission('products:write'), async (req, r
  * version or none does, so two strengths of one medicine can never end up
  * telling patients different things.
  *
- * The grouping is not stored: the shared version string IS the grouping.
- * That keeps the schema unchanged, and the form reconstructs the set on the
- * next revision from whichever products share the current version.
+ * The grouping is not stored: the shared version string IS the grouping,
+ * which keeps the schema unchanged. The form does not guess the set from it
+ * on the next revision - unrelated products can share a version number - so
+ * the person ticks every product the publish covers.
  *
  * A reason is required and goes into the audit trail. Whoever operates this
  * after handover will be asked by an inspector who changed a leaflet and why,
