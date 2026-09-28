@@ -302,6 +302,96 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
   });
 });
 
+/**
+ * Give a product the leaflet another product already has - its current
+ * version, as it stands, without publishing a new one.
+ *
+ * The case is a new strength of a medicine: ELT25 has its leaflet, ELT50 is
+ * added later and is covered by the same document. The publish above can
+ * only bring ELT50 in by publishing a NEW version to both, which puts a
+ * revision on ELT25's record that changed nothing. This writes ELT50 a row
+ * with the same version, language, sections and PDF instead. Sharing the
+ * version string is exactly what the publish form reads as "published
+ * together", so from here on a revision of either pre-ticks the other.
+ *
+ * `version` is the source version the person was shown, and must still be
+ * the current one: if the source was revised in the meantime, what would be
+ * copied is not what they checked, and they are asked to look again.
+ */
+router.post('/products/:id/leaflets/adopt', requirePermission('products:write'), async (req, res) => {
+  const product = await db.get('product', req.params.id);
+  if (!product) throw notFound('Product not found');
+
+  const data = validate(req.body, {
+    fromProductId: { type: 'int', required: true, min: 1 },
+    language: { type: 'string', max: 8, default: 'en' },
+    version: { type: 'string', required: true, max: 20 },
+    reason: { type: 'string', required: true, min: 5, max: 300 },
+  });
+  if (data.fromProductId === product.id) {
+    throw badRequest('Choose a different product to take the leaflet from.');
+  }
+  const source = await db.get('product', data.fromProductId);
+  if (!source) throw badRequest('The product to take the leaflet from does not exist.');
+
+  const fromId = await leaflets.currentLeafletId(source.id, { lang: data.language });
+  if (!fromId) throw conflict(`${source.sku} has no published leaflet in "${data.language}" to use.`);
+  const from = await db.get('leaflet', fromId);
+  if (from.version !== data.version) {
+    throw conflict(
+      `${source.sku}'s current leaflet is now v${from.version}, not v${data.version}: it changed ` +
+        'since you opened this. Check it again before using it.'
+    );
+  }
+
+  // Named rather than left to the unique key, as in the publish above.
+  const clash = await db.findOne(
+    'leaflet',
+    { product_id: product.id, version: from.version, language: data.language },
+    { fields: ['id'] }
+  );
+  if (clash) {
+    const mine = await leaflets.currentLeafletId(product.id, { lang: data.language });
+    throw conflict(
+      clash.id === mine
+        ? `${product.sku} already shows leaflet v${from.version} (${data.language}); nothing to change.`
+        : `${product.sku} already had a leaflet v${from.version} (${data.language}) of its own, so ` +
+            `the two cannot share that version number. Publish a new version from ${source.sku} ` +
+            `and tick ${product.sku} under "Also applies to" instead.`
+    );
+  }
+
+  const leaflet = await db.insert('leaflet', {
+    product_id: product.id,
+    version: from.version,
+    language: data.language,
+    sections: (from.sections ?? []).map((s) => ({ heading: String(s.heading), body: String(s.body) })),
+    file_id: from.file_id ?? null,
+  });
+  const pdf = from.file_id ? await leaflets.pdfFile(from.file_id) : null;
+
+  // A publish, from this product's side - its trail reads as one like any
+  // other - that says where the content came from.
+  await audit.record({
+    actor: req.user,
+    req,
+    action: 'leaflet.publish',
+    entityType: 'leaflet',
+    entityId: leaflet.id,
+    detail: {
+      sku: product.sku, version: from.version, language: data.language, reason: data.reason,
+      copiedFrom: { sku: source.sku, leafletId: from.id },
+      pdf: pdf ? { filename: pdf.filename, size: pdf.size, sha256: pdf.sha256 } : null,
+    },
+  });
+
+  res.status(201).json({
+    ...leaflet,
+    copiedFrom: { productId: source.id, sku: source.sku, leafletId: from.id },
+    pdf: pdf ? { filename: pdf.filename, size: pdf.size } : null,
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Leaflet PDF upload, in pieces
 //
