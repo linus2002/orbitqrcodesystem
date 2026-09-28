@@ -4,20 +4,29 @@
  * Available whatever the scan said, including on a genuine result - the pack
  * may verify correctly while the packaging is obviously wrong, and that is
  * exactly the signal the security team wants.
+ *
+ * Where it was bought is the same picked town and shop as on the result,
+ * starting from whatever the person already gave there, and a report may
+ * carry the phone's location - offered, never asked for unprompted.
  */
 import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { Icon } from '../components/Icons.jsx';
+import PlacePicker from './PlacePicker.jsx';
+import ShareLocation from './ShareLocation.jsx';
 
-export default function ReportForm({ result, checker }) {
+export default function ReportForm({ result, checker, initial }) {
   // Someone who gave their details before checking should not have to type
   // them again to report; they can still change them here.
   const [fields, setFields] = useState({
     description: '',
-    purchaseLocation: checker?.purchaseLocation ?? '',
+    purchaseLocation: initial?.outlet ?? '',
     reporterName: checker?.name ?? '',
     reporterContact: checker ? [checker.phone, checker.email].filter(Boolean).join(' / ') : '',
   });
+  const [place, setPlace] = useState(initial?.place ?? null);
+  const [location, setLocation] = useState(initial?.location ?? null);
+  const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(null);
@@ -32,6 +41,10 @@ export default function ReportForm({ result, checker }) {
       setError('Please describe the problem in a little more detail (at least 10 characters).');
       return;
     }
+    if (pending) {
+      setError('Tap the town where you bought it in the list, or clear that box.');
+      return;
+    }
 
     setBusy(true);
     try {
@@ -42,6 +55,8 @@ export default function ReportForm({ result, checker }) {
           scanId: result.scanId ?? null,
           description: fields.description.trim(),
           purchaseLocation: fields.purchaseLocation.trim() || null,
+          placeCode: place?.code ?? undefined,
+          location: location ?? undefined,
           reporterName: fields.reporterName.trim() || null,
           reporterContact: fields.reporterContact.trim() || null,
         },
@@ -94,8 +109,23 @@ export default function ReportForm({ result, checker }) {
             />
           </div>
           <div className="field">
+            <label className="label" htmlFor="rPlace">
+              City or town where you bought it
+            </label>
+            <PlacePicker
+              id="rPlace"
+              value={place}
+              onChange={(p) => {
+                setPlace(p);
+                setError(null);
+              }}
+              note={initial?.note}
+              onPending={setPending}
+            />
+          </div>
+          <div className="field">
             <label className="label" htmlFor="rWhere">
-              Where did you buy it?
+              Pharmacy or shop <span className="text-muted">(optional)</span>
             </label>
             <input
               className="input"
@@ -103,9 +133,10 @@ export default function ReportForm({ result, checker }) {
               value={fields.purchaseLocation}
               onChange={set('purchaseLocation')}
               maxLength={200}
-              placeholder="Pharmacy or shop name and town"
+              placeholder="e.g. Mercury Drug, Molino"
             />
           </div>
+          <ShareLocation value={location} onChange={setLocation} />
           <div className="field">
             <label className="label" htmlFor="rName">
               Your name <span className="text-muted">(optional)</span>

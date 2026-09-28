@@ -163,6 +163,38 @@
 
 .report-form { display: grid; gap: 14px; }
 
+/* --- Where it was bought -------------------------------------------------
+   On the result card. Quiet on a genuine result; on a suspicious one it is
+   the next thing to do, so it carries the warning colour down the card.
+   -------------------------------------------------------------------------- */
+
+.where-bought { display: grid; gap: 12px; border-top: 1px solid var(--line); }
+.where-bought h3 { font-size: 1rem; }
+.where-bought.is-asked { border-left: 4px solid var(--danger, #e0402f); }
+
+/* Inline, not flex: a long town name wraps as a sentence would, with the
+   tick and "Change" staying beside the words rather than on lines of their own. */
+.place-chosen svg,
+.location-shared svg { width: 16px; height: 16px; color: var(--good); vertical-align: -3px; margin-right: 6px; }
+.place-search { display: grid; gap: 6px; }
+/* The matches, as a list of plain buttons: easy to hit with a thumb, and
+   read as buttons by a screen reader without any widget machinery. */
+.place-hits { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.place-hits li + li { border-top: 1px solid var(--line); }
+.place-hits button {
+  width: 100%; text-align: left; padding: 11px 14px;
+  background: none; border: 0; font: inherit; color: var(--ink); cursor: pointer;
+}
+.place-hits button:hover, .place-hits button:focus-visible { background: var(--surface-2); }
+
+/* A second action that must still look like one on a phone, where there is
+   no hover to reveal a ghost button: outlined, not filled, so "Send" stays
+   the obvious one. */
+.btn-outline {
+  background: transparent; color: var(--brand);
+  border-color: currentColor; box-shadow: none; text-shadow: none;
+}
+
 /* --- SMS / offline help -------------------------------------------------- */
 
 /* --- Body ----------------------------------------------------------------
