@@ -634,9 +634,9 @@ function PublishLeafletForm({ product, drawer, reload }) {
           </p>
         )}
         <p className="hint">
-          Up to 25 MB; it uploads as soon as you choose it. With a PDF attached, the leaflet QR on
-          the carton opens it straight away and the sections below become optional - but they are
-          what a screen reader can read, so keep them where you can.
+          Up to 25 MB; it uploads as soon as you choose it. With a PDF attached, the leaflet page
+          the carton&apos;s QR opens offers it as a button and the sections below become optional -
+          but they are what a screen reader can read, so keep them where you can.
         </p>
       </div>
 
