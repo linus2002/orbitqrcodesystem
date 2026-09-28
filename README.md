@@ -473,6 +473,13 @@ GeoLite2 or IP2Location lookup into that one function for real resolution. It
 is deliberately coarse - the dashboard needs "where are flags clustering", not
 a patient's address.
 
+Where a pack was **bought** is a separate question, asked per check on the
+result and compared with where it was checked by `src/services/places.js`
+against `src/data/ph-places.json` (every Philippine city and municipality, from
+Wikidata; rebuild with `node scripts/fetch-ph-places.js`). On a suspicious
+result or a report the portal offers to use the phone's GPS; it is reduced to
+a city before anything is stored.
+
 ---
 
 ## Deployment
