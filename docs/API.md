@@ -489,9 +489,9 @@ entry per product, each with the reason and the full list of SKUs covered.
 For a product covered by a leaflet another product already has - a new
 strength of a medicine. Writes this product a leaflet row with the source's
 current version, language, sections and PDF (the same file, not a copy). The
-source is untouched and no new version is published. Because the two now
-share a version, the next publish from either pre-ticks the other under
-"Also applies to".
+source is untouched and no new version is published. The two then share a
+version exactly as if they had been published together; a later publish
+covers both when it lists the other in `alsoApplyTo`.
 
 `version` is the source version the person was shown. `409` if the source's
 current version is no longer that one, if the source has no leaflet in that

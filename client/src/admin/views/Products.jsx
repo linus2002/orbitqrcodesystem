@@ -984,8 +984,8 @@ function UseLeafletForm({ product, drawer, reload }) {
                       results show this one.
                     </>
                   )}{' '}
-                  The two are then grouped: a new version published from either ticks the other
-                  under &quot;Also applies to&quot;, so they keep saying the same thing.
+                  When either is revised later, tick the other under &quot;Also applies to&quot; so
+                  they keep saying the same thing.
                 </span>
               </div>
             </div>

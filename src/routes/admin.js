@@ -310,9 +310,9 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
  * added later and is covered by the same document. The publish above can
  * only bring ELT50 in by publishing a NEW version to both, which puts a
  * revision on ELT25's record that changed nothing. This writes ELT50 a row
- * with the same version, language, sections and PDF instead. Sharing the
- * version string is exactly what the publish form reads as "published
- * together", so from here on a revision of either pre-ticks the other.
+ * with the same version, language, sections and PDF instead - the same
+ * shared version a joint publish would have given them. A later revision
+ * covers both when the person ticks the other under "Also applies to".
  *
  * `version` is the source version the person was shown, and must still be
  * the current one: if the source was revised in the meantime, what would be

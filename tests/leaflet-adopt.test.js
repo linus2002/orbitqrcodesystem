@@ -6,8 +6,8 @@
  * to publish a new version to both - a revision on the first product's
  * record that changed nothing. These pin the alternative: the new product
  * gets the source's CURRENT version as it stands (same text, same PDF), the
- * source is untouched, and the two are grouped for the next revision the
- * same way a joint publish groups them.
+ * source is untouched, and the two end up on one shared version exactly as a
+ * joint publish would have left them.
  */
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -102,12 +102,12 @@ test('the PDF is shared, not copied, and serves the same document', async () => 
   assert.deepEqual(Buffer.from(await served.arrayBuffer()), pdfBytes);
 });
 
-test('the two are grouped for the next revision, and a joint publish then works', async () => {
+test('the two share one version afterwards, and a joint publish then works', async () => {
   await client.login(ADMIN.email, ADMIN.password);
   await publishElt25();
   await adopt(elt50);
 
-  // What the publish form reads to pre-tick the siblings.
+  // What the Leaflet QR screen and the publish form list for each product.
   const list = await client.get('/api/admin/leaflet-codes');
   const version = (sku) => list.body.items.find((p) => p.sku === sku).leaflet_version;
   assert.equal(version('ELT50'), version('ELT25'));
