@@ -261,8 +261,9 @@ request, plus who this browser said it was (`null` if it has not).
 ```
 
 `lastPurchase` is where this person last said they bought a pack (or `null`),
-and `here` the town their internet connection points to (or `null`): what the
-"where did you buy it" box offers first.
+and `here` the town their internet connection points to (or `null`): the towns
+the "where did you buy it" box offers as buttons to tap. Neither is filled in
+for the person.
 
 ---
 

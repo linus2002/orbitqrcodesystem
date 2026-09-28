@@ -2,11 +2,14 @@
  * Picking a city or town from the list.
  *
  * A picked place, not free text: "Bacoor", "bacoor city" and "Bacoor Cavite"
- * are one place to the security team only if they arrive as one. A place
- * already chosen - the last one this person gave, or the one their
- * connection points to - shows as itself with a "Change" link, so the usual
- * answer is no typing at all. `note` says where that suggestion came from,
- * and goes as soon as the person picks something else.
+ * are one place to the security team only if they arrive as one.
+ *
+ * Nothing is chosen for the person. The towns the page can guess - the one
+ * they gave last time, the one their connection points to - are `offers`:
+ * buttons under the search box, each saying where it came from, so the usual
+ * answer is still one tap but always a deliberate one. A guess that was
+ * simply left standing would be saved unread, and a connection guess saved
+ * that way would then be "checked" against itself.
  *
  * "Change" empties the answer rather than leaving the old one standing
  * behind the search box: someone who types a new town and sends without
@@ -17,13 +20,12 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icons.jsx';
 import { loadPlaces, searchPlaces } from './where.js';
 
-export default function PlacePicker({ id, value, onChange, note, onPending }) {
+export default function PlacePicker({ id, value, onChange, offers = [], onPending }) {
   const [term, setTerm] = useState('');
   const [places, setPlaces] = useState(null);
   const [error, setError] = useState(null);
   // What "Change" took away, so it can be kept after all.
   const [previous, setPrevious] = useState(null);
-  const [changed, setChanged] = useState(false);
   const editing = !value;
 
   // Typed but not picked: the form holds its send until a town is tapped.
@@ -43,6 +45,12 @@ export default function PlacePicker({ id, value, onChange, note, onPending }) {
     };
   }, [editing, places]);
 
+  const pick = (place, offer = null) => {
+    onChange(place, offer);
+    setPrevious(null);
+    setTerm('');
+  };
+
   if (!editing) {
     return (
       <div className="place-chosen">
@@ -60,13 +68,15 @@ export default function PlacePicker({ id, value, onChange, note, onPending }) {
             Change
           </button>
         </p>
-        {note && !changed && <p className="hint">{note}</p>}
       </div>
     );
   }
 
   const typed = term.trim().length >= 2;
   const hits = places && typed ? searchPlaces(places, term) : [];
+  // While typing, the matches are the list; the offers would only compete.
+  const showOffers = offers.length > 0 && !term.trim();
+  const keep = previous && !(showOffers && offers.some((o) => o.place.code === previous.code));
 
   return (
     <div className="place-search">
@@ -83,15 +93,7 @@ export default function PlacePicker({ id, value, onChange, note, onPending }) {
         <ul className="place-hits">
           {hits.map(([code, label]) => (
             <li key={code}>
-              <button
-                type="button"
-                onClick={() => {
-                  onChange({ code, label });
-                  setChanged(true);
-                  setPrevious(null);
-                  setTerm('');
-                }}
-              >
+              <button type="button" onClick={() => pick({ code, label })}>
                 {label}
               </button>
             </li>
@@ -104,16 +106,23 @@ export default function PlacePicker({ id, value, onChange, note, onPending }) {
       {!places && !error && typed && <p className="hint">Loading the list...</p>}
       {error && <p className="field-error">{error}</p>}
       {typed && places && hits.length > 0 && <p className="hint">Tap your town in the list.</p>}
-      {previous && (
-        <button
-          className="link-btn text-sm"
-          type="button"
-          onClick={() => {
-            onChange(previous);
-            setPrevious(null);
-            setTerm('');
-          }}
-        >
+      {showOffers && (
+        <>
+          <p className="hint">Or tap one of these if it is right:</p>
+          <ul className="place-hits place-offers">
+            {offers.map((offer) => (
+              <li key={offer.place.code}>
+                <button type="button" onClick={() => pick(offer.place, offer)}>
+                  <strong>{offer.place.label}</strong>
+                  <span>{offer.why}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {keep && (
+        <button className="link-btn text-sm" type="button" onClick={() => pick(previous)}>
           Keep {previous.label}
         </button>
       )}

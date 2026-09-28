@@ -6,16 +6,18 @@
  * exactly the signal the security team wants.
  *
  * Where it was bought is the same picked town and shop as on the result,
- * starting from whatever the person already gave there, and a report may
- * carry the phone's location - offered, never asked for unprompted.
+ * starting from whatever the person already gave there for this pack - or
+ * empty, with the same towns offered to tap - and a report may carry the
+ * phone's location - offered, never asked for unprompted.
  */
 import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { Icon } from '../components/Icons.jsx';
 import PlacePicker from './PlacePicker.jsx';
 import ShareLocation from './ShareLocation.jsx';
+import { shopAfterPick } from './where.js';
 
-export default function ReportForm({ result, checker, initial }) {
+export default function ReportForm({ result, checker, initial, offers }) {
   // Someone who gave their details before checking should not have to type
   // them again to report; they can still change them here.
   const [fields, setFields] = useState({
@@ -25,6 +27,8 @@ export default function ReportForm({ result, checker, initial }) {
     reporterContact: checker ? [checker.phone, checker.email].filter(Boolean).join(' / ') : '',
   });
   const [place, setPlace] = useState(initial?.place ?? null);
+  // The shop an offer put in the box, if it is still as it was put.
+  const [filled, setFilled] = useState(null);
   const [location, setLocation] = useState(initial?.location ?? null);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -115,11 +119,16 @@ export default function ReportForm({ result, checker, initial }) {
             <PlacePicker
               id="rPlace"
               value={place}
-              onChange={(p) => {
+              onChange={(p, offer) => {
                 setPlace(p);
+                if (p) {
+                  const shop = shopAfterPick({ outlet: fields.purchaseLocation, filled }, offer);
+                  setFields((f) => ({ ...f, purchaseLocation: shop.outlet }));
+                  setFilled(shop.filled);
+                }
                 setError(null);
               }}
-              note={initial?.note}
+              offers={offers}
               onPending={setPending}
             />
           </div>

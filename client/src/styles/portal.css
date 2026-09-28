@@ -186,6 +186,9 @@
   background: none; border: 0; font: inherit; color: var(--ink); cursor: pointer;
 }
 .place-hits button:hover, .place-hits button:focus-visible { background: var(--surface-2); }
+/* An offered town says where the guess came from, under its name. */
+.place-offers button { display: grid; gap: 2px; }
+.place-offers span { font-size: 0.8rem; color: var(--ink-muted); }
 
 /* A second action that must still look like one on a phone, where there is
    no hover to reveal a ghost button: outlined, not filled, so "Send" stays

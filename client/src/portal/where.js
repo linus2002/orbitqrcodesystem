@@ -1,7 +1,7 @@
 /**
  * What "where did you buy it" needs from outside the page: the list of
- * cities and towns, and - only when the person taps for it - the phone's
- * location.
+ * cities and towns, the phone's location (only when the person taps for it),
+ * and the rules for which towns it offers to tap.
  */
 import { api } from '../lib/api.js';
 
@@ -69,4 +69,43 @@ export function askLocation() {
       { enableHighAccuracy: false, timeout: 15_000, maximumAge: 600_000 }
     );
   });
+}
+
+/**
+ * The shop box after a town is picked. An offer's shop (last time's) fills
+ * the box if it is empty; a shop filled that way goes again when a different
+ * town is picked, so last time's shop never rides along with another town.
+ * Anything the person typed is theirs and is left alone.
+ */
+export function shopAfterPick({ outlet, filled }, offer) {
+  const untouched = !outlet.trim() || (filled !== null && outlet === filled);
+  if (offer?.outlet && untouched) return { outlet: offer.outlet, filled: offer.outlet };
+  if (filled !== null && outlet === filled) return { outlet: '', filled: null };
+  return { outlet, filled };
+}
+
+/**
+ * The towns worth offering: where this person bought their last pack (with
+ * its shop), and where their connection says they are now - each saying where
+ * it came from. Offered, never filled in.
+ */
+export function placeOffers(portal) {
+  const offers = [];
+  const last = portal?.checker?.lastPurchase;
+  if (last?.code) {
+    offers.push({
+      place: { code: last.code, label: last.label },
+      outlet: last.outlet ?? '',
+      why: last.outlet ? `Where you bought your last pack (${last.outlet})` : 'Where you bought your last pack',
+    });
+  }
+  const here = portal?.here;
+  if (here?.code && here.code !== last?.code) {
+    offers.push({
+      place: { code: here.code, label: here.label },
+      outlet: '',
+      why: 'Near where you are now, going by your internet connection - it can be a town or two out',
+    });
+  }
+  return offers;
 }

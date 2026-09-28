@@ -18,7 +18,8 @@ import { Link } from 'react-router-dom';
 import { fmtDate } from '../lib/format.js';
 import { Icon } from '../components/Icons.jsx';
 import ReportForm from './ReportForm.jsx';
-import WhereBought, { suggestion } from './WhereBought.jsx';
+import WhereBought from './WhereBought.jsx';
+import { placeOffers } from './where.js';
 
 const PRESENTATION = {
   genuine: { cls: 'banner-genuine', icon: 'check', heading: 'Genuine' },
@@ -44,7 +45,7 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
   // A real check of a real-looking code: not a typo, and not a repeat past
   // the personal limit (that answer is an earlier check, already asked about).
   const asksWhere = Boolean(result.scanId) && result.result !== 'invalid' && result.reason !== 'check_limit';
-  const suggested = suggestion(portal);
+  const offers = placeOffers(portal);
 
   return (
     <article className="card result-card">
@@ -65,7 +66,7 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
           key={result.scanId}
           result={result}
           suspicious
-          suggested={suggested}
+          offers={offers}
           onSaved={(g) => {
             setGiven(g);
             onPlaceSaved?.(g);
@@ -80,7 +81,7 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
           key={result.scanId}
           result={result}
           suspicious={false}
-          suggested={suggested}
+          offers={offers}
           onSaved={(g) => {
             setGiven(g);
             onPlaceSaved?.(g);
@@ -147,11 +148,10 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
           key={result.scanId ?? 'no-check'}
           result={result}
           checker={checker}
-          initial={
-            given
-              ? { place: given.place, outlet: given.outlet, location: given.location, note: null }
-              : suggested
-          }
+          // Their own answer for this pack, given moments ago, is not a guess:
+          // the report starts from it. Otherwise it starts empty, with offers.
+          initial={given}
+          offers={offers}
         />
       )}
     </article>

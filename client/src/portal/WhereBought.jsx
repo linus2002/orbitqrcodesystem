@@ -7,19 +7,22 @@
  * is the only place, besides a report, that offers to share the phone's
  * location. Either way nothing stops the person moving on without it.
  *
- * The town is filled in when the page can guess it: the one they gave last
- * time, or else the one their connection points to, each labelled as such so
- * they can see it is a suggestion and change it.
+ * The box starts empty. The towns the page can guess - the one they gave
+ * last time, the one their connection points to - are offered as buttons to
+ * tap, never filled in (see PlacePicker).
  */
 import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { Icon } from '../components/Icons.jsx';
 import PlacePicker from './PlacePicker.jsx';
 import ShareLocation from './ShareLocation.jsx';
+import { shopAfterPick } from './where.js';
 
-export default function WhereBought({ result, suspicious, suggested, onSaved }) {
-  const [place, setPlace] = useState(suggested.place);
-  const [outlet, setOutlet] = useState(suggested.outlet ?? '');
+export default function WhereBought({ result, suspicious, offers, onSaved }) {
+  const [place, setPlace] = useState(null);
+  const [outlet, setOutlet] = useState('');
+  // The shop an offer put in the box, if it is still as it was put.
+  const [filled, setFilled] = useState(null);
   const [location, setLocation] = useState(null);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,11 +90,16 @@ export default function WhereBought({ result, suspicious, suggested, onSaved }) 
         <PlacePicker
           id="wbPlace"
           value={place}
-          onChange={(p) => {
+          onChange={(p, offer) => {
             setPlace(p);
+            if (p) {
+              const shop = shopAfterPick({ outlet, filled }, offer);
+              setOutlet(shop.outlet);
+              setFilled(shop.filled);
+            }
             setError(null);
           }}
-          note={suggested.note}
+          offers={offers}
           onPending={setPending}
         />
       </div>
@@ -129,28 +137,4 @@ export default function WhereBought({ result, suspicious, suggested, onSaved }) 
       </button>
     </form>
   );
-}
-
-/**
- * What the box starts with: the town and shop from this person's last
- * answer, or else the town their connection points to - each with a note
- * saying where it came from. Shared with the report form.
- */
-export function suggestion(portal) {
-  const last = portal?.checker?.lastPurchase;
-  if (last?.code) {
-    return {
-      place: { code: last.code, label: last.label },
-      outlet: last.outlet ?? '',
-      note: 'Where you bought your last pack - change it if this one came from elsewhere.',
-    };
-  }
-  if (portal?.here) {
-    return {
-      place: { code: portal.here.code, label: portal.here.label },
-      outlet: last?.outlet ?? '',
-      note: 'Suggested from your internet connection, which can be a town or two out - change it if needed.',
-    };
-  }
-  return { place: null, outlet: last?.outlet ?? '', note: null };
 }
