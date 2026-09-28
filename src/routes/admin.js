@@ -441,6 +441,72 @@ router.post('/batches/:id/issue-codes', requirePermission('batches:write'), asyn
   res.status(201).json(await serialization.issueCodes(Number(req.params.id), { actor: req.user, req }));
 });
 
+/**
+ * Remove a batch that never got past planning - a typo in the batch number,
+ * the wrong product, a run that was cancelled.
+ *
+ * Only while no code exists for it. From the first code on, the codes may be
+ * with the packaging line and the batch is part of the record for good; it
+ * is recalled or closed, never removed. "planned" alone is not enough:
+ * issuance writes codes in chunks and marks the batch only after the last,
+ * so an interrupted run leaves a planned batch that already has codes. Scans,
+ * alerts and shipments naming it are checked too - none should exist without
+ * codes, and if one does, removing the batch would orphan it.
+ *
+ * The delete is conditional on the batch still being planned. An issuance
+ * that starts in the instant between the checks and the delete would fail at
+ * its final step (the batch it marks is gone), so the person issuing sees an
+ * error and no label is ever printed from it.
+ *
+ * The batch number is free again afterwards. A new batch under it gets a new
+ * id, and codes are keyed on the id, so its codes cannot collide with any this
+ * one might have had. The audit entry keeps what the batch was.
+ */
+router.delete('/batches/:id', requirePermission('batches:write'), async (req, res) => {
+  const batch = await batchWithProduct(req.params.id);
+  if (!batch) throw notFound('Batch not found');
+
+  const cannot = `Batch ${batch.batch_number} cannot be removed:`;
+  if (batch.status !== 'planned') {
+    throw conflict(`${cannot} its codes have been issued, so it is part of the record. Recall or close it instead.`);
+  }
+  const [codes, scans, alerts, shipments] = await Promise.all([
+    db.count('code', { batch_id: batch.id }),
+    db.count('scan', { batch_id: batch.id }),
+    db.count('alert', { batch_id: batch.id }),
+    db.count('shipment', { batch_id: batch.id }),
+  ]);
+  if (codes) {
+    throw conflict(
+      `${cannot} ${codes} of its codes already exist, from an issuance that did not finish. ` +
+        'Issue its codes again to complete it.'
+    );
+  }
+  if (scans || alerts || shipments) {
+    throw conflict(`${cannot} scans, alerts or shipments already refer to it.`);
+  }
+
+  const removed = await db.removeWhere('batch', { id: batch.id, status: 'planned' });
+  if (!removed) throw conflict(`${cannot} it changed while it was being removed. Reload and look again.`);
+
+  await audit.record({
+    actor: req.user,
+    req,
+    action: 'batch.delete',
+    entityType: 'batch',
+    entityId: batch.id,
+    detail: {
+      batchNumber: batch.batch_number,
+      sku: batch.sku,
+      quantity: batch.quantity,
+      mfgDate: batch.mfg_date,
+      expiryDate: batch.expiry_date,
+      isTest: batch.is_test === 1,
+    },
+  });
+  res.status(204).end();
+});
+
 /** Move a batch through its lifecycle. */
 router.post('/batches/:id/transition', requirePermission('batches:write'), async (req, res) => {
   const { to, reason } = validate(req.body, {

@@ -195,6 +195,27 @@ function BatchDetail({ batch, drawer, reload, canWrite }) {
   const s = batch.stats;
 
   async function issueCodes() {
+    // The last moment a wrong detail can be fixed by removing the batch, so
+    // the details are put in front of the person rather than assumed checked.
+    const details = [
+      `Product:  ${batch.product_name} ${batch.strength ?? ''} (${batch.sku})`,
+      `Batch number:  ${batch.batch_number}`,
+      `Units:  ${fmtNumber(batch.quantity)}`,
+      `Manufactured:  ${fmtDate(batch.mfg_date)}`,
+      `Expires:  ${fmtDate(batch.expiry_date)}`,
+      `Pilot batch:  ${batch.is_test === 1 ? 'Yes' : 'No'}`,
+    ].join('\n');
+    if (
+      !window.confirm(
+        `Issue codes for batch ${batch.batch_number}?\n\n` +
+          'Check these details now. Once codes are issued, the batch is part of the permanent ' +
+          'record: it can no longer be removed, and its codes are what the packaging line prints.\n\n' +
+          `${details}\n\n` +
+          'OK issues the codes. Cancel goes back so you can check.'
+      )
+    ) {
+      return;
+    }
     setIssuing(true);
     try {
       const res = await api(`/api/admin/batches/${batch.id}/issue-codes`, { method: 'POST' });
@@ -254,6 +275,10 @@ function BatchDetail({ batch, drawer, reload, canWrite }) {
               No codes exist yet. Issuing generates one unique, non-sequential code per unit. This
               runs once and cannot be repeated - the codes may already be printed on packs.
             </p>
+            <p className="text-sm text-muted mb-8">
+              Until codes are issued, a batch with a wrong detail can be removed (below) and created
+              again. After that it stays in the record for good.
+            </p>
             {canWrite && (
               <button className="btn btn-primary btn-block" onClick={issueCodes} disabled={issuing}>
                 {issuing ? (
@@ -290,8 +315,33 @@ function BatchActions({ batch, drawer, reload }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const actions = NEXT[batch.status] ?? [];
+  // Only until the first code exists; the server holds the same line.
+  const removable = batch.status === 'planned' && !batch.stats?.totalCodes;
 
-  if (!actions.length) return null;
+  if (!actions.length && !removable) return null;
+
+  async function remove() {
+    if (
+      !window.confirm(
+        `Remove batch ${batch.batch_number}?\n\n` +
+          'No codes have been issued for it, so nothing has been printed. The batch is deleted and ' +
+          'its number can be used again. This cannot be undone; the audit log keeps a record of ' +
+          'the removal.'
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/admin/batches/${batch.id}`, { method: 'DELETE' });
+      toast(`Batch ${batch.batch_number} removed.`, 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      toast(err.message, 'error');
+      setBusy(false);
+    }
+  }
 
   async function transition(to) {
     let reason = null;
@@ -327,6 +377,11 @@ function BatchActions({ batch, drawer, reload }) {
           {a.label}
         </button>
       ))}
+      {removable && (
+        <button className="btn btn-sm btn-danger" disabled={busy} onClick={remove}>
+          Remove batch
+        </button>
+      )}
     </div>
   );
 }
