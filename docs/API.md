@@ -499,6 +499,7 @@ write for admin and security, read for regulator.
 | `GET /products/:id` | `products:read` | Plus leaflets and batches |
 | `PATCH /products/:id` | `products:write` | SKU is immutable - it is in every printed code |
 | `POST /products/:id/leaflets` | `products:write` | Publishes a new leaflet version; see below |
+| `POST /products/:id/leaflets/adopt` | `products:write` | Gives the product another product's current leaflet, without a new version; see below |
 | `POST /leaflet-files` | `products:write` | Starts a PDF upload: `{ "name", "size" }`, at most 25 MB |
 | `PUT /leaflet-files/:id/chunks/:seq` | `products:write` | One piece of it; see below |
 
@@ -530,6 +531,28 @@ Responds `201` with the named product's new leaflet, plus
 `coverage: [{ "leafletId", "productId", "sku" }]` and
 `pdf: { "filename", "size" } | null`. The audit log gets one `leaflet.publish`
 entry per product, each with the reason and the full list of SKUs covered.
+
+**Using another product's leaflet**
+
+```json
+{ "fromProductId": 12, "language": "en", "version": "3.2", "reason": "ELT50 is covered by the ELT25 leaflet" }
+```
+
+For a product covered by a leaflet another product already has - a new
+strength of a medicine. Writes this product a leaflet row with the source's
+current version, language, sections and PDF (the same file, not a copy). The
+source is untouched and no new version is published. The two then share a
+version exactly as if they had been published together; a later publish
+covers both when it lists the other in `alsoApplyTo`.
+
+`version` is the source version the person was shown. `409` if the source's
+current version is no longer that one, if the source has no leaflet in that
+language, or if this product already has that version in that language
+(either as what it shows, or as an older version of its own - then publish a
+new version to both instead). `400` if `fromProductId` is the product itself.
+Responds `201` with the new leaflet plus `copiedFrom: { "productId", "sku",
+"leafletId" }` and `pdf`. The audit log gets a `leaflet.publish` entry for
+this product whose detail carries `copiedFrom`.
 
 **Uploading the PDF.** A request cannot carry 25 MB, so the file goes up in
 pieces before the publish. `POST /leaflet-files` answers
