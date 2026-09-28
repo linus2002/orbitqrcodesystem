@@ -495,11 +495,18 @@ dropped after a day.
 | `GET /batches` | `batches:read` | `?status=`, `?search=`, `?includeTest=true` |
 | `POST /batches` | `batches:write` | Creates in `planned` |
 | `GET /batches/:id` | `batches:read` | Plus code stats and open alert count. `shipments` is an empty list while shipments are switched off |
-| `POST /batches/:id/issue-codes` | `batches:write` | Runs serialization. **409 if already issued**. Any other 409, or a failure part-way, leaves the batch planned with the codes stored so far kept; the message says whether to run it again (which carries on where it stopped) or to contact an administrator |
+| `POST /batches/:id/issue-codes` | `batches:write` | Runs serialization. **409 if already issued** |
 | `POST /batches/:id/transition` | `batches:write` | `{ "to": "released" }`; recall requires `reason` |
 | `GET /batches/:id/codes` | `codes:read` | Paged |
 | `GET /batches/:id/codes.csv` | `codes:export` | The packaging-line hand-off file |
 | `GET /batches/:id/labels?limit=12&offset=0` | `codes:read` | Codes plus rendered QR SVG, at most 60 per request; `total` is the batch's code count, for paging through a whole batch |
+
+**Issuing codes.** Two batches of one product made on the same day share a
+serial space; issuance passes over any code another batch already holds, so
+each gets its full quantity. Any `409` other than "already issued", or a
+failure part-way, leaves the batch `planned` with the codes stored so far
+kept. The message says whether to run it again - which carries on where it
+stopped - or to contact an administrator.
 
 Legal transitions:
 
