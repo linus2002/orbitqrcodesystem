@@ -158,6 +158,8 @@
   font-size: 0.93rem;
   line-height: 1.62;
 }
+/* The leaflet page's buttons: side by side, stacked on a narrow phone. */
+.leaflet-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* --- Report form --------------------------------------------------------- */
 

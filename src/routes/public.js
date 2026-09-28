@@ -415,8 +415,8 @@ router.get('/product/:sku/leaflet', async (req, res) => {
       // Said explicitly rather than left for the page to work out from the
       // history: it drives a warning the reader must see before the content.
       superseded: !current,
-      // The current version's PDF address names no version, so it is the
-      // address the QR-opened page redirects to and it never goes stale.
+      // The current version's PDF address names no version, so the page's
+      // "Open the leaflet (PDF)" button never goes stale.
       pdf: leafletService.pdfInfo(product.sku, wanted, {
         lang,
         version: current ? undefined : wanted.version,

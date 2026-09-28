@@ -15,8 +15,13 @@
  * holding the medicine, including packs printed before it. Older versions
  * are reachable by ?version= and are marked as superseded ABOVE the content,
  * so nobody reads outdated dosing without being told first.
+ *
+ * A leaflet published as a PDF opens here too, not as the PDF. It used to
+ * redirect straight to the document, which skipped the one thing this page
+ * exists to say - that the leaflet QR proves nothing about the pack - along
+ * with the way to the check that does. The PDF is a button on the page.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../lib/hooks.jsx';
@@ -30,11 +35,10 @@ import BrandLoader from '../components/BrandLoader.jsx';
  * version is given. The current version's address carries no version, so it
  * is the same address the QR encodes and never goes stale.
  */
-function leafletHref(sku, { lang, version, view } = {}) {
+function leafletHref(sku, { lang, version } = {}) {
   const q = new URLSearchParams();
   if (lang && lang !== 'en') q.set('lang', lang);
   if (version) q.set('version', version);
-  if (view) q.set('view', view);
   const s = q.toString();
   return `/leaflet/${encodeURIComponent(sku)}${s ? `?${s}` : ''}`;
 }
@@ -50,19 +54,6 @@ export default function LeafletPage() {
     { query: { lang, version } },
     [sku, lang, version]
   );
-
-  /*
-   * A leaflet published as a PDF opens as the PDF, at once: that is what the
-   * QR on the carton promises. Only the current version does so - an older
-   * one is reached deliberately, through the history, and keeps its
-   * superseded warning in front of it - and ?view=text asks for the page
-   * instead, which is the only form a screen reader can read.
-   */
-  const pdf = data?.leaflet?.pdf ?? null;
-  const opensPdf = Boolean(pdf && !data.leaflet.superseded && params.get('view') !== 'text');
-  useEffect(() => {
-    if (opensPdf) window.location.replace(pdf.url);
-  }, [opensPdf, pdf]);
 
   return (
     <>
@@ -104,21 +95,7 @@ export default function LeafletPage() {
         {/* Keyed on the version so the open-section state resets when the
             reader switches versions - section 4 of one version is not
             section 4 of another. */}
-        {data && opensPdf && (
-          <div className="card card-pad">
-            <BrandLoader message="Opening the leaflet (PDF)..." />
-            <p className="text-sm text-muted mt-16">
-              If it does not open, <a href={pdf.url}>open the PDF here</a>
-              {data.leaflet.sections.length > 0 && (
-                <>
-                  , or <Link to={leafletHref(sku, { lang, view: 'text' })}>read it as text</Link>
-                </>
-              )}
-              .
-            </p>
-          </div>
-        )}
-        {data && !opensPdf && <LeafletBody key={data.leaflet.version} data={data} lang={lang} />}
+        {data && <LeafletBody key={data.leaflet.version} data={data} lang={lang} />}
       </main>
     </>
   );
@@ -194,18 +171,26 @@ function LeafletBody({ data, lang }) {
           </span>
         </div>
 
-        {/* The document itself, when this version has one. Opened in a new
-            tab so a superseded version's warning stays behind it. */}
-        {leaflet.pdf && (
-          <div className="card-body">
-            <a className="btn btn-primary" href={leaflet.pdf.url} target="_blank" rel="noopener">
-              <Icon name="download" /> Open the leaflet (PDF)
-            </a>
-            {!leaflet.sections.length && (
-              <p className="text-sm text-muted mt-8">This version is provided as a PDF document.</p>
+        {/* The document itself, when this version has one - opened in a new
+            tab so a superseded version's warning stays behind it - and,
+            beside it, the check this page cannot do. The notice above links
+            to it too; a button is what someone who came here to act looks
+            for. */}
+        <div className="card-body">
+          <div className="leaflet-actions">
+            {leaflet.pdf && (
+              <a className="btn btn-primary" href={leaflet.pdf.url} target="_blank" rel="noopener">
+                <Icon name="download" /> Open the leaflet (PDF)
+              </a>
             )}
+            <Link className="btn btn-primary" to="/">
+              <Icon name="shield" /> Check if your pack is genuine
+            </Link>
           </div>
-        )}
+          {leaflet.pdf && !leaflet.sections.length && (
+            <p className="text-sm text-muted mt-8">This version is provided as a PDF document.</p>
+          )}
+        </div>
 
         {leaflet.sections.map((section, i) => (
           <div className="leaflet-section" key={`${section.heading}-${i}`}>
