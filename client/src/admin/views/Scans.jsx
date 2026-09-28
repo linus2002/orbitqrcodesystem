@@ -15,7 +15,7 @@ import { fmtDate, fmtNumber, humanise } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { Icon } from '../../components/Icons.jsx';
 import {
-  TableCard, Table, Pager, Toolbar, Spacer, Select, ResultBadge, ErrorNote,
+  TableCard, Table, Pager, Toolbar, Spacer, Select, ResultBadge, ErrorNote, PlaceCheck,
 } from '../components/ui.jsx';
 
 export default function Scans() {
@@ -122,7 +122,28 @@ export default function Scans() {
             },
             {
               label: 'Where',
-              render: (r) => [r.city, r.region, r.country].filter(Boolean).join(', ') || '-',
+              render: (r) => (
+                <>
+                  {[r.city, r.region, r.country].filter(Boolean).join(', ') || '-'}
+                  {/* Where they said the pack was bought, when they did. */}
+                  {r.bought_place && (
+                    <>
+                      <br />
+                      <span className="text-sm">
+                        Bought in {r.bought_place}
+                        {r.bought_outlet ? ` - ${r.bought_outlet}` : ''}
+                      </span>
+                      <br />
+                      <PlaceCheck
+                        consistency={r.place_check}
+                        source={r.place_source}
+                        from={r.checked_from}
+                        km={r.place_km}
+                      />
+                    </>
+                  )}
+                </>
+              ),
             },
           ]}
         />

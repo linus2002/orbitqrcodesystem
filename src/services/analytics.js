@@ -272,11 +272,28 @@ export async function listScans({ page, pageSize, result, reason, channel, batch
       // The person who checked, when the portal asked for their details.
       checker_name: '*[_type == "verifier" && id == ^.verifier_id][0].full_name',
       checker_phone: '*[_type == "verifier" && id == ^.verifier_id][0].phone',
+      ...PLACE_EXTRA,
     },
   });
 
   return { items, total, ...meta };
 }
+
+/**
+ * Where the pack behind a scan was bought, when the person said (a
+ * checkPlace), and how that sits against where they checked from. Flat
+ * fields, not one object, because the scan export writes every field of a
+ * row as a column.
+ */
+const placeOf = (field) => `*[_type == "checkPlace" && scan_id == ^.id][0].${field}`;
+export const PLACE_EXTRA = {
+  bought_place: placeOf('purchase_place'),
+  bought_outlet: placeOf('purchase_outlet'),
+  place_check: placeOf('place_consistency'),
+  place_source: placeOf('location_source'),
+  checked_from: placeOf('located_place'),
+  place_km: placeOf('place_distance_km'),
+};
 
 /**
  * Regulator-facing compliance report.

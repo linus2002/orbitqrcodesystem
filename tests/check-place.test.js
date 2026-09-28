@@ -10,7 +10,7 @@
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { freshDb, seedBasics, startServer, resetRateLimits, giveDetails } from './helpers.js';
+import { freshDb, seedBasics, seedUser, startServer, resetRateLimits, giveDetails } from './helpers.js';
 import * as db from '../src/db/index.js';
 import * as places from '../src/services/places.js';
 import * as serialization from '../src/services/serialization.js';
@@ -181,4 +181,25 @@ test('a report written the old way keeps what was typed', async () => {
   const report = await db.findOne('consumerReport', {});
   assert.equal(report.purchase_location, 'Watsons SM Bacoor');
   assert.equal(report.place_consistency, 'unknown');
+});
+
+test('staff see it in the scan log and its export', async () => {
+  await serialization.transition(1, 'recalled', { reason: 'Test recall' });
+  const { body: result } = await check(codes[0]);
+  await place(result.scanId, { placeCode: ZAMBOANGA, outlet: 'Sidewalk stall', location: IN_BACOOR });
+
+  await seedUser({ email: 'sec@test.local', password: 'SecurityPass!2026', role: 'security' });
+  await client.login('sec@test.local', 'SecurityPass!2026');
+  const scans = await client.get('/api/admin/scans');
+  const row = scans.body.items.find((r) => r.id === result.scanId);
+  assert.equal(row.bought_place, 'Zamboanga, Zamboanga Peninsula');
+  assert.equal(row.bought_outlet, 'Sidewalk stall');
+  assert.equal(row.place_check, 'inconsistent');
+  assert.equal(row.place_source, 'gps');
+  assert.equal(row.checked_from, 'Bacoor, Cavite');
+
+  const csv = await client.get('/api/admin/scans.csv');
+  const [header] = csv.body.split('\n');
+  for (const col of ['bought_place', 'place_check', 'checked_from']) assert.ok(header.includes(col), col);
+  assert.ok(!csv.body.includes('[object Object]'));
 });
