@@ -38,10 +38,13 @@ rest, keyed with `CODE_SECRET`. Two consequences:
   API for every guess, where rate limiting and alerting apply.
 
 Serials come from a keyed format-preserving permutation (an alternating Feistel
-network) over the serial space, so they are unpredictable but collision-free by
-construction. The space is auto-sized to at least 100x the batch quantity, so a
-well-formed blind guess has at most a ~1% chance of naming a real unit -
-before the checksum's additional ~1/1024 filter.
+network) over the serial space, so they are unpredictable and never repeat
+within a batch. Batches of one product made on the same day share a serial
+space: issuance passes over any code another batch already holds, and the
+store refuses a second document with the same code, so no two packs share one.
+The space is auto-sized to at least 100x the batch quantity, so a well-formed
+blind guess has about a 1% chance of naming a real unit for each batch made
+that day - before the checksum's additional ~1/1024 filter.
 
 > `CODE_SECRET` is effectively permanent. Rotating it invalidates the checksum
 > of every code already printed on a physical pack. Back it up; never rotate it

@@ -229,24 +229,44 @@ export function qrPayload(code, secret, baseUrl) {
 }
 
 /**
- * Generate every code for a batch.
+ * A batch's candidate codes, in the batch's own shuffled order.
+ *
+ * Position p carries serial permute(p). The permutation never repeats a
+ * serial, so a batch's candidates never collide with each other - but two
+ * batches of one SKU with one manufacturing date draw from the same serial
+ * space, and can land on the same code. Issuance therefore takes candidates
+ * in order and passes over any code another batch already holds, which is
+ * why this runs past the batch size, up to the whole serial space. Lazy, so
+ * a large batch is never materialised in memory.
+ *
+ * @param {number} width serial digits - serialWidthFor(quantity), always
+ */
+export function* batchCandidates({ sku, mfgDate, width, batchKey, secret }) {
+  const permute = serialPermutation(`${batchKey}:${secret}`, width);
+  const dateSeg = dateSegment(mfgDate);
+  const domain = 10 ** width;
+
+  for (let position = 0; position < domain; position++) {
+    const serial = permute(position);
+    yield {
+      position,
+      serial: String(serial).padStart(width, '0'),
+      code: buildCode({ sku, mfgDate: dateSeg, serial, width, secret }),
+    };
+  }
+}
+
+/**
+ * The first `quantity` candidates of a batch - its codes when no other batch
+ * of the same SKU and date holds any of them.
  *
  * Yields `{ unitIndex, serial, code, signature }` lazily so a 100k-unit batch
  * never has to be materialised in memory all at once.
  */
 export function* generateBatchCodes({ sku, mfgDate, quantity, batchKey, secret }) {
   const width = serialWidthFor(quantity);
-  const permute = serialPermutation(`${batchKey}:${secret}`, width);
-  const dateSeg = dateSegment(mfgDate);
-
-  for (let unitIndex = 0; unitIndex < quantity; unitIndex++) {
-    const serial = permute(unitIndex);
-    const code = buildCode({ sku, mfgDate: dateSeg, serial, width, secret });
-    yield {
-      unitIndex,
-      serial: String(serial).padStart(width, '0'),
-      code,
-      signature: computeSignature(code, secret),
-    };
+  for (const { position, serial, code } of batchCandidates({ sku, mfgDate, width, batchKey, secret })) {
+    if (position >= quantity) return;
+    yield { unitIndex: position, serial, code, signature: computeSignature(code, secret) };
   }
 }

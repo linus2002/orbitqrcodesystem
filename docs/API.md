@@ -495,7 +495,7 @@ dropped after a day.
 | `GET /batches` | `batches:read` | `?status=`, `?search=`, `?includeTest=true` |
 | `POST /batches` | `batches:write` | Creates in `planned` |
 | `GET /batches/:id` | `batches:read` | Plus code stats and open alert count. `shipments` is an empty list while shipments are switched off |
-| `POST /batches/:id/issue-codes` | `batches:write` | Runs serialization. **409 if already issued** |
+| `POST /batches/:id/issue-codes` | `batches:write` | Runs serialization. **409 if already issued**. Any other 409, or a failure part-way, leaves the batch planned with the codes stored so far kept; the message says whether to run it again (which carries on where it stopped) or to contact an administrator |
 | `POST /batches/:id/transition` | `batches:write` | `{ "to": "released" }`; recall requires `reason` |
 | `GET /batches/:id/codes` | `codes:read` | Paged |
 | `GET /batches/:id/codes.csv` | `codes:export` | The packaging-line hand-off file |
