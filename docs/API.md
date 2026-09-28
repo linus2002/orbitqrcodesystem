@@ -496,6 +496,7 @@ dropped after a day.
 | `POST /batches` | `batches:write` | Creates in `planned` |
 | `GET /batches/:id` | `batches:read` | Plus code stats and open alert count. `shipments` is an empty list while shipments are switched off |
 | `POST /batches/:id/issue-codes` | `batches:write` | Runs serialization. **409 if already issued** |
+| `DELETE /batches/:id` | `batches:write` | Removes a batch **only while no code exists for it**; see below |
 | `POST /batches/:id/transition` | `batches:write` | `{ "to": "released" }`; recall requires `reason` |
 | `GET /batches/:id/codes` | `codes:read` | Paged |
 | `GET /batches/:id/codes.csv` | `codes:export` | The packaging-line hand-off file |
@@ -510,6 +511,14 @@ planned -> codes_issued -> printed -> released -> distributed -> closed
 ```
 
 Anything else returns `409` listing what is allowed.
+
+**Removing a batch.** For a batch created with a wrong detail, before its
+codes exist. `204` on success, and the batch number is free to use again.
+`409` when the batch is past `planned`, when codes exist for it anyway (an
+issuance that did not finish - issue again to complete it), or when a scan,
+alert or shipment refers to it. From its first code on, a batch is part of
+the record and is recalled or closed instead. The audit log gets a
+`batch.delete` entry with the batch number, SKU, quantity and dates.
 
 ### Codes
 

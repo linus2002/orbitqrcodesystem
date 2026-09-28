@@ -254,6 +254,10 @@ function BatchDetail({ batch, drawer, reload, canWrite }) {
               No codes exist yet. Issuing generates one unique, non-sequential code per unit. This
               runs once and cannot be repeated - the codes may already be printed on packs.
             </p>
+            <p className="text-sm text-muted mb-8">
+              Until codes are issued, a batch with a wrong detail can be removed (below) and created
+              again. After that it stays in the record for good.
+            </p>
             {canWrite && (
               <button className="btn btn-primary btn-block" onClick={issueCodes} disabled={issuing}>
                 {issuing ? (
@@ -290,8 +294,33 @@ function BatchActions({ batch, drawer, reload }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const actions = NEXT[batch.status] ?? [];
+  // Only until the first code exists; the server holds the same line.
+  const removable = batch.status === 'planned' && !batch.stats?.totalCodes;
 
-  if (!actions.length) return null;
+  if (!actions.length && !removable) return null;
+
+  async function remove() {
+    if (
+      !window.confirm(
+        `Remove batch ${batch.batch_number}?\n\n` +
+          'No codes have been issued for it, so nothing has been printed. The batch is deleted and ' +
+          'its number can be used again. This cannot be undone; the audit log keeps a record of ' +
+          'the removal.'
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/admin/batches/${batch.id}`, { method: 'DELETE' });
+      toast(`Batch ${batch.batch_number} removed.`, 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      toast(err.message, 'error');
+      setBusy(false);
+    }
+  }
 
   async function transition(to) {
     let reason = null;
@@ -327,6 +356,11 @@ function BatchActions({ batch, drawer, reload }) {
           {a.label}
         </button>
       ))}
+      {removable && (
+        <button className="btn btn-sm btn-danger" disabled={busy} onClick={remove}>
+          Remove batch
+        </button>
+      )}
     </div>
   );
 }
