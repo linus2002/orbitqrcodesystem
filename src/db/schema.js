@@ -33,6 +33,26 @@ export const now = () => new Date().toISOString();
 const NOW = { default: now };
 
 /**
+ * Where a pack was bought and where it was checked from - on a check place
+ * and on a report alike (services/places.js fills both). Places only, by
+ * design: a GPS reading is reduced to its city before anything is written,
+ * so no coordinates are ever stored.
+ */
+const ISLANDS = ['luzon', 'visayas', 'mindanao'];
+const PLACE_FIELDS = {
+  purchase_place_code: { kind: 'string' }, // PSGC code, from src/data/ph-places.json
+  purchase_place: { kind: 'string' }, // "Bacoor, Cavite" - kept as read, should the list change
+  purchase_island: { kind: 'string', enum: ISLANDS },
+  purchase_outlet: { kind: 'string' }, // the pharmacy or shop, as typed
+  located_place_code: { kind: 'string' },
+  located_place: { kind: 'string' },
+  located_island: { kind: 'string', enum: ISLANDS },
+  location_source: { kind: 'string', enum: ['gps', 'network', 'none'] },
+  place_distance_km: { kind: 'int' }, // between the two places; GPS only
+  place_consistency: { kind: 'string', enum: ['nearby', 'plausible', 'inconsistent', 'unknown'] },
+};
+
+/**
  * Field kinds:
  *   string | text | int | bool01 | date | datetime | json | array
  *
@@ -246,8 +266,33 @@ export const TYPES = {
       purchase_location: { kind: 'string' },
       description: { kind: 'text', required: true },
       status: { kind: 'string', required: true, enum: ['new', 'reviewing', 'closed'], default: 'new' },
+      // The picked place and its check against where the report was sent
+      // from. Absent on reports made before they were asked for.
+      ...PLACE_FIELDS,
       created_at: { kind: 'datetime', required: true, ...NOW },
     },
+  },
+
+  /*
+   * Where the pack behind one check was bought, and where the check was made.
+   *
+   * Asked after the result is shown, so it cannot be written onto the scan:
+   * scans are append-only and never edited. One per check (the unique key),
+   * and never edited itself. Given only for the browser's own checks.
+   */
+  checkPlace: {
+    table: 'check_places',
+    title: 'Where bought',
+    appendOnly: true,
+    fields: {
+      scan_id: { kind: 'int', required: true },
+      verifier_id: { kind: 'int' },
+      ...PLACE_FIELDS,
+      location_source: { ...PLACE_FIELDS.location_source, required: true, default: 'none' },
+      place_consistency: { ...PLACE_FIELDS.place_consistency, required: true, default: 'unknown' },
+      created_at: { kind: 'datetime', required: true, ...NOW },
+    },
+    unique: [['scan_id']],
   },
 
   shipment: {

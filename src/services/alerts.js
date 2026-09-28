@@ -12,6 +12,7 @@
  */
 import * as db from '../db/index.js';
 import logger from '../lib/logger.js';
+import { PLACE_EXTRA } from './analytics.js';
 
 /** How an alert type maps to a starting severity and a human title. */
 const ALERT_SPEC = {
@@ -234,6 +235,8 @@ export async function getById(id) {
         order: 'created_at desc',
         limit: 50,
         fields: ['id', 'result', 'reason', 'channel', 'country', 'region', 'city', 'created_at'],
+        // Where each checker said they bought it - the thread to pull on an alert.
+        extra: PLACE_EXTRA,
       })
     : [];
 

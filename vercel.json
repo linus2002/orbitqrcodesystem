@@ -35,7 +35,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(self), geolocation=(), microphone=(), payment=()"
+          "value": "camera=(self), geolocation=(self), microphone=(), payment=()"
         },
         {
           "key": "Cross-Origin-Opener-Policy",

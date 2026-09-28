@@ -142,6 +142,25 @@ export async function register(body, { req } = {}) {
   return { verifier: row, token };
 }
 
+/**
+ * The place this person last said they bought a pack, so the next check can
+ * offer it back as a single tap. Their newest check place that names one;
+ * failing that, the "where did you get it" they typed on the form before it
+ * was asked per check, offered as the shop name. Null when there is neither.
+ */
+export async function lastPurchase(row) {
+  if (!row) return null;
+  const last = await db.findOne(
+    'checkPlace',
+    { verifier_id: row.id, $raw: 'defined(purchase_place_code)' },
+    { order: 'id desc', fields: ['purchase_place_code', 'purchase_place', 'purchase_outlet'] }
+  );
+  if (last) {
+    return { code: last.purchase_place_code, label: last.purchase_place, outlet: last.purchase_outlet ?? null };
+  }
+  return row.purchase_location ? { code: null, label: null, outlet: row.purchase_location } : null;
+}
+
 /** The person behind this request, from their cookie, or null. */
 export async function fromRequest(req) {
   const token = req.cookies?.[COOKIE];
@@ -435,6 +454,6 @@ export async function correct(id, body = {}, { actor, req } = {}) {
 }
 
 export default {
-  COOKIE, ROLES, REMOVED, normalizePhone, cookieOptions, publicView,
+  COOKIE, ROLES, REMOVED, normalizePhone, cookieOptions, publicView, lastPurchase,
   register, fromRequest, requireDetails, touch, list, detail, remove, correct,
 };

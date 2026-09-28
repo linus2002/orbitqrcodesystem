@@ -216,12 +216,19 @@ Report a suspect pack. Works whatever the scan said. Rate limit:
   "code": "AMX25-260812-088159-BM",
   "scanId": 4127,
   "purchaseLocation": "Roadside stall near Oshodi market",
+  "placeCode": "097332000",
+  "location": { "lat": 14.46, "lng": 120.96, "accuracy": 30 },
   "reporterName": "Chidinma A.",
   "reporterContact": "chidinma.a@example.com"
 }
 ```
 
-Only `description` is required (10-2000 characters). Responds `201`:
+Only `description` is required (10-2000 characters). `purchaseLocation` is the
+shop as typed; `placeCode` the town, picked from `GET /api/places`; `location`
+the phone's GPS reading, sent only if the person allowed it. The report stores
+the same place facts as a check place (below), and `purchase_location` holds
+the shop followed by the town. `400` for a `placeCode` not on the list.
+Responds `201`:
 
 ```json
 {
@@ -246,10 +253,55 @@ request, plus who this browser said it was (`null` if it has not).
   "detailsRequired": true,
   "checker": {
     "name": "Maria Santos", "phone": "+639171234567", "email": "maria@example.com",
-    "role": "patient", "roleLabel": "Patient", "city": "Quezon City"
-  }
+    "role": "patient", "roleLabel": "Patient", "city": "Quezon City",
+    "lastPurchase": { "code": "042103000", "label": "Bacoor, Cavite", "outlet": "Mercury Drug, Molino" }
+  },
+  "here": { "code": "1380200000", "label": "Las Piñas, Metro Manila" }
 }
 ```
+
+`lastPurchase` is where this person last said they bought a pack (or `null`),
+and `here` the town their internet connection points to (or `null`): the towns
+the "where did you buy it" box offers as buttons to tap. Neither is filled in
+for the person.
+
+---
+
+### `POST /api/checks/:scanId/place`
+
+Where the pack behind a check was bought, asked on the result after the
+check. Rate limited (40 an hour).
+
+```json
+{ "placeCode": "097332000", "outlet": "Sidewalk stall", "location": { "lat": 14.46, "lng": 120.96, "accuracy": 30 } }
+```
+
+At least one field is needed (`400` otherwise). `placeCode` is picked from
+`GET /api/places` (`400` if not on the list); `outlet` is the shop, at most
+120 characters; `location` is the phone's GPS reading, which the portal asks
+for only on a suspicious result. A reading vaguer than 20 km, or outside the
+Philippines, is ignored and the connection's location used instead.
+
+Only for this browser's own check - for a check made without details, one
+from the same connection - and only within a day of it; otherwise `404`. One
+per check: `409` for a second. Responds `201` with
+`{ "ok": true, "purchasePlace", "outlet" }`.
+
+Only places are stored, never coordinates: the reading is reduced to the
+nearest town, and the purchase place is compared with it -
+`nearby` (up to 50 km), `plausible` (50-300 km in the same island group, or
+the same island group when only the connection's location is known),
+`inconsistent` (farther, or another island group) or `unknown`. See
+`src/services/places.js`.
+
+---
+
+### `GET /api/places`
+
+Every city and municipality of the Philippines, for the picker:
+`{ "places": [["042103000", "Bacoor, Cavite"], ...] }` - PSGC code and
+label, no coordinates. Cached for a day. Built from Wikidata by
+`scripts/fetch-ph-places.js` into `src/data/ph-places.json`.
 
 ---
 
@@ -264,14 +316,14 @@ Who is checking. Asked once per browser. Rate limit: 10/hour.
   "email": "maria@example.com",
   "role": "patient",
   "city": "Quezon City",
-  "purchaseLocation": "Mercury Drug, Cubao",
   "consent": true,
-  "policyVersion": "2026-09-25"
+  "policyVersion": "2026-09-28"
 }
 ```
 
 `fullName` (2-120 characters), `phone`, `email`, `role` and `consent` are
-required. `phone` is a mobile number: Philippine forms (`0917...`, `63917...`,
+required. `purchaseLocation` is still accepted but no longer asked: where a
+pack was bought is asked per check (`POST /api/checks/:scanId/place`). `phone` is a mobile number: Philippine forms (`0917...`, `63917...`,
 `+63917...`) are stored as `+63...`; anything else must be a full
 international number. `role` is one of `patient`, `caregiver`, `pharmacist`,
 `health_worker`, `retailer`, `other`. `consent` must be true. A `422` lists

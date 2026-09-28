@@ -368,12 +368,31 @@ export default function PortalPage() {
               {/* The answer belongs with the form that produced it, so it
                   stays in the left column rather than below both. */}
               <section className="result" ref={resultRef} aria-live="polite" aria-atomic="true">
+                {/* Keyed on the check, so a new result starts with a fresh
+                    card - no half-written report or answer from the last one. */}
                 {result && (
                   <ResultCard
+                    key={result.scanId ?? `${result.code}-${result.reason}`}
                     result={result}
                     onCheckAnother={reset}
                     supportPhone={portal?.supportPhone}
                     checker={checker}
+                    portal={portal}
+                    onPlaceSaved={({ place, outlet }) => {
+                      // The next check offers this back, as the server would on reload.
+                      if (!place) return;
+                      setPortal((p) =>
+                        p?.checker
+                          ? {
+                              ...p,
+                              checker: {
+                                ...p.checker,
+                                lastPurchase: { code: place.code, label: place.label, outlet: outlet || null },
+                              },
+                            }
+                          : p
+                      );
+                    }}
                   />
                 )}
               </section>

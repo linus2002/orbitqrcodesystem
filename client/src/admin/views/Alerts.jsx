@@ -14,6 +14,7 @@ import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
 import {
   TableCard, Table, Pager, Toolbar, Spacer, Select, KV, Timeline, TimelineItem, SeverityBadge, StatusBadge, ErrorNote,
+  PlaceCheck,
 } from '../components/ui.jsx';
 
 const TYPES = [
@@ -160,6 +161,19 @@ function AlertDetail({ alert }) {
                     {fmtDate(s.created_at, { withTime: true })}
                     {[s.city, s.region, s.country].filter(Boolean).length > 0 &&
                       ` · ${[s.city, s.region, s.country].filter(Boolean).join(', ')}`}
+                    {s.bought_place && (
+                      <>
+                        <br />
+                        Bought in {s.bought_place}
+                        {s.bought_outlet ? ` - ${s.bought_outlet}` : ''} ·{' '}
+                        <PlaceCheck
+                          consistency={s.place_check}
+                          source={s.place_source}
+                          from={s.checked_from}
+                          km={s.place_km}
+                        />
+                      </>
+                    )}
                   </>
                 }
               />

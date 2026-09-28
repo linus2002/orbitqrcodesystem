@@ -18,7 +18,7 @@ does not defend against.
 | 7 | Attacker brute-forces a staff password | scrypt, per-IP+email rate limit, account lockout | - |
 | 8 | Cross-site request forgery | `SameSite=Strict` plus double-submit CSRF token | - |
 | 9 | Regulator or auditor over-reaches into patient data | Role matrix enforced server-side; the compliance report is built from aggregates only | - |
-| 10 | Patient data leaks from the scan log | IPs and phone numbers stored only as keyed digests; location kept to city granularity | - |
+| 10 | Patient data leaks from the scan log | IPs and phone numbers stored only as keyed digests; location kept to city granularity - a GPS reading is reduced to its city before it is stored, and only this site may ask for it (`Permissions-Policy: geolocation=(self)`) | - |
 | 11 | Insider tampers with records | Append-only scans, audit log and SMS log; every admin action audited; the Studio is read-only | A member of the Sanity project, or anyone holding the API token, can still edit documents through the Sanity API |
 | 12 | The database is read directly, bypassing the app | Sanity credentials are server-side only and never sent to the browser; the dataset is private; no CORS origin for the web app; the build fails on a public dataset | The token grants full read/write - store it as a secret, give it to nothing else |
 

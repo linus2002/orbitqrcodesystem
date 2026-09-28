@@ -1,6 +1,6 @@
 # Data model
 
-Thirteen document types in one Sanity dataset. They are defined in
+The document types, in one Sanity dataset. They are defined in
 [`src/db/schema.js`](../src/db/schema.js) - required fields, enumerations,
 defaults and unique keys - and that file is the only definition: the store
 layer validates every write against it, and the Studio schema is generated
@@ -35,6 +35,7 @@ from it. This document explains *why* the model is shaped the way it is.
 | `scan` | **verification attempts** | Append-only log of every check |
 | `alert` | suspicious events | The security team's work queue |
 | `consumerReport` | patient reports | Direct reports from the portal |
+| `checkPlace` | checks answered | Where the pack behind one check was bought, and how that sits against where it was checked |
 | `shipment` | distribution events | Where each batch was sent |
 | `user` | staff | Staff accounts only |
 | `session` | logins | Server-side session records, for revocation |
@@ -126,7 +127,14 @@ keyed HMAC digest, never the address or phone number. That still supports "how
 many attempts came from one source", which is what guessing detection and the
 same-device grace window need, without holding data that identifies a patient.
 
-Location is stored only to city granularity, and only when a CDN supplies it.
+Location is stored only to city granularity. A scan's comes from the CDN's
+headers. A `checkPlace` - where the person says the pack behind one check was
+bought - may also carry where they checked from: the phone's GPS, asked for
+only on a suspicious result or a report and only with their permission, is
+reduced to the nearest city or municipality before anything is written
+(`src/services/places.js`), so no coordinates are ever stored. A check place
+sits beside its scan rather than on it because scans are never edited; it is
+one per check and never edited itself.
 
 ### Timestamps are ISO-8601 text
 
