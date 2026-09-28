@@ -170,7 +170,8 @@ export function facts({ placeCode, outlet, location, req }) {
     purchase_place_code: purchase?.code ?? null,
     purchase_place: purchase?.label ?? null,
     purchase_island: purchase?.island ?? null,
-    purchase_outlet: outlet ? String(outlet).trim().slice(0, 120) || null : null,
+    // 200, the limit the report's "where did you buy it" always had.
+    purchase_outlet: outlet ? String(outlet).trim().slice(0, 200) || null : null,
     located_place_code: located?.code ?? null,
     located_place: located?.label ?? null,
     located_island: located?.island ?? null,

@@ -219,7 +219,9 @@ test('the portal reads the notice, the support number and the shortcode, with sa
       roleLabel: 'Patient',
       city: 'Quezon City',
       purchaseLocation: null,
+      lastPurchase: null, // no pack bought anywhere yet
     },
+    here: null, // the test request carries no connection location
   });
 
   await client.login(ADMIN.email, ADMIN.password);
@@ -235,5 +237,6 @@ test('the portal reads the notice, the support number and the shortcode, with sa
     smsShortcode: '32123',
     detailsRequired: true,
     checker: null,
+    here: null,
   });
 });

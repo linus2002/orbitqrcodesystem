@@ -1007,6 +1007,95 @@ export default [
         }
       },
       {
+        "name": "purchase_place_code",
+        "title": "Purchase place code",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "purchase_place",
+        "title": "Purchase place",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "purchase_island",
+        "title": "Purchase island",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "luzon",
+            "visayas",
+            "mindanao"
+          ]
+        }
+      },
+      {
+        "name": "purchase_outlet",
+        "title": "Purchase outlet",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "located_place_code",
+        "title": "Located place code",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "located_place",
+        "title": "Located place",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "located_island",
+        "title": "Located island",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "luzon",
+            "visayas",
+            "mindanao"
+          ]
+        }
+      },
+      {
+        "name": "location_source",
+        "title": "Location source",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "gps",
+            "network",
+            "none"
+          ]
+        }
+      },
+      {
+        "name": "place_distance_km",
+        "title": "Place distance km",
+        "readOnly": true,
+        "type": "number"
+      },
+      {
+        "name": "place_consistency",
+        "title": "Place consistency",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "nearby",
+            "plausible",
+            "inconsistent",
+            "unknown"
+          ]
+        }
+      },
+      {
         "name": "created_at",
         "title": "Created at",
         "readOnly": true,
@@ -1017,6 +1106,133 @@ export default [
       "select": {
         "title": "description",
         "subtitle": "status"
+      }
+    }
+  },
+  {
+    "name": "checkPlace",
+    "title": "Where bought",
+    "type": "document",
+    "fields": [
+      {
+        "name": "id",
+        "title": "ID",
+        "type": "number",
+        "readOnly": true,
+        "hidden": false
+      },
+      {
+        "name": "scan_id",
+        "title": "Scan ID",
+        "readOnly": true,
+        "type": "number"
+      },
+      {
+        "name": "verifier_id",
+        "title": "Verifier ID",
+        "readOnly": true,
+        "type": "number"
+      },
+      {
+        "name": "purchase_place_code",
+        "title": "Purchase place code",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "purchase_place",
+        "title": "Purchase place",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "purchase_island",
+        "title": "Purchase island",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "luzon",
+            "visayas",
+            "mindanao"
+          ]
+        }
+      },
+      {
+        "name": "purchase_outlet",
+        "title": "Purchase outlet",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "located_place_code",
+        "title": "Located place code",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "located_place",
+        "title": "Located place",
+        "readOnly": true,
+        "type": "string"
+      },
+      {
+        "name": "located_island",
+        "title": "Located island",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "luzon",
+            "visayas",
+            "mindanao"
+          ]
+        }
+      },
+      {
+        "name": "location_source",
+        "title": "Location source",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "gps",
+            "network",
+            "none"
+          ]
+        }
+      },
+      {
+        "name": "place_distance_km",
+        "title": "Place distance km",
+        "readOnly": true,
+        "type": "number"
+      },
+      {
+        "name": "place_consistency",
+        "title": "Place consistency",
+        "readOnly": true,
+        "type": "string",
+        "options": {
+          "list": [
+            "nearby",
+            "plausible",
+            "inconsistent",
+            "unknown"
+          ]
+        }
+      },
+      {
+        "name": "created_at",
+        "title": "Created at",
+        "readOnly": true,
+        "type": "datetime"
+      }
+    ],
+    "preview": {
+      "select": {
+        "title": "purchase_place",
+        "subtitle": "place_consistency"
       }
     }
   },

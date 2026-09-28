@@ -40,6 +40,7 @@ const PREVIEW = {
   setting: ['key', 'value'],
   verifier: ['full_name', 'phone'],
   leafletFile: ['filename', 'status'],
+  checkPlace: ['purchase_place', 'place_consistency'],
 };
 
 const title = (name) =>
