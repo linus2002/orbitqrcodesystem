@@ -195,6 +195,27 @@ function BatchDetail({ batch, drawer, reload, canWrite }) {
   const s = batch.stats;
 
   async function issueCodes() {
+    // The last moment a wrong detail can be fixed by removing the batch, so
+    // the details are put in front of the person rather than assumed checked.
+    const details = [
+      `Product:  ${batch.product_name} ${batch.strength ?? ''} (${batch.sku})`,
+      `Batch number:  ${batch.batch_number}`,
+      `Units:  ${fmtNumber(batch.quantity)}`,
+      `Manufactured:  ${fmtDate(batch.mfg_date)}`,
+      `Expires:  ${fmtDate(batch.expiry_date)}`,
+      `Pilot batch:  ${batch.is_test === 1 ? 'Yes' : 'No'}`,
+    ].join('\n');
+    if (
+      !window.confirm(
+        `Issue codes for batch ${batch.batch_number}?\n\n` +
+          'Check these details now. Once codes are issued, the batch is part of the permanent ' +
+          'record: it can no longer be removed, and its codes are what the packaging line prints.\n\n' +
+          `${details}\n\n` +
+          'OK issues the codes. Cancel goes back so you can check.'
+      )
+    ) {
+      return;
+    }
     setIssuing(true);
     try {
       const res = await api(`/api/admin/batches/${batch.id}/issue-codes`, { method: 'POST' });
