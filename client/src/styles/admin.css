@@ -172,7 +172,10 @@
 .topbar .sub { font-size: 0.82rem; color: var(--ink-muted); margin-top: 2px; }
 .menu-btn { display: none; }
 
-.view { padding: 22px 24px 60px; display: grid; gap: 18px; align-content: start; }
+/* One column that never grows past the screen: left to size itself, the column
+   took the widest child's natural width, so on a phone the Overview tiles sat
+   side by side at 825px and pushed the whole page, and any modal, off-screen. */
+.view { padding: 22px 24px 60px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; }
 
 /* --- Stat tiles ---------------------------------------------------------- */
 
