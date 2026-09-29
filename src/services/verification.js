@@ -67,7 +67,10 @@ export const REASONS = {
 /** Patient-facing copy. Deliberately plain, non-technical, and actionable. */
 const MESSAGES = {
   [REASONS.OK]: 'This pack is genuine. It has been verified for the first time.',
-  [REASONS.OK_REPEAT_SAME_SOURCE]: 'This pack is genuine. You have checked it before.',
+  // A pack shown as genuine on a seller's phone proves nothing to the buyer:
+  // the second check a seller can show is this one, so it says so.
+  [REASONS.OK_REPEAT_SAME_SOURCE]:
+    "This pack is genuine. You have checked it before. Buying it? Check it on your own phone - a result shown on the seller's phone is not proof for you.",
   [REASONS.EMPTY]: 'Please enter the code printed on the pack.',
   [REASONS.MALFORMED]:
     'That code is not in the expected format. It should look like AMX25-260921-00483-K7.',
@@ -92,7 +95,7 @@ const MESSAGES = {
 /** What someone who has checked a pack PERSONAL_CHECK_LIMIT times is told, by their last answer. */
 const LIMIT_MESSAGES = {
   genuine:
-    'You have already checked this pack twice, so it is not checked again. It was genuine when you checked it. If something about it worries you, report it below.',
+    "You have already checked this pack twice, so it is not checked again. It was genuine when you checked it. Buying it? Check it on your own phone, not the seller's. If something about it worries you, report it below.",
   flagged:
     'You have already checked this pack twice, so it is not checked again. It had already been verified elsewhere - do not use it until you have checked with your pharmacist.',
 };

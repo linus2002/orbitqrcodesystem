@@ -52,7 +52,10 @@ test('a person re-checking their own pack the next day is told it is genuine', a
   const again = await check(codes[0]);
   assert.equal(again.body.result, 'genuine');
   assert.equal(again.body.reason, 'ok_repeat_same_source');
-  assert.equal(again.body.message, 'This pack is genuine. You have checked it before.');
+  assert.equal(
+    again.body.message,
+    "This pack is genuine. You have checked it before. Buying it? Check it on your own phone - a result shown on the seller's phone is not proof for you."
+  );
   assert.equal((await codeRow(codes[0])).verified_count, 1, 'still one person');
   assert.equal((await alertsFor(codes[0])).length, 0);
 });
@@ -75,6 +78,7 @@ test('after two checks the pack is not checked again for that person, and nothin
   assert.equal(third.body.reason, 'check_limit');
   assert.equal(third.body.result, 'genuine', 'their last answer');
   assert.match(third.body.message, /already checked this pack twice/);
+  assert.match(third.body.message, /own phone/, "a result on a seller's phone proves nothing to the buyer");
   assert.equal(third.body.scanNumber, undefined, 'not a check, so no number');
   assert.equal(third.body.scanId, second.body.scanId, 'a report links to their last check');
   assert.ok(third.body.leaflet, 'they can still read the leaflet');
