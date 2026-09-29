@@ -323,9 +323,12 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
  */
 /*
  * `auto 1fr` so the card, not the heading, absorbs any extra height: side by
- * side with a plain card in a `.two-up`, the two boxes still line up.
+ * side with a plain card in a `.two-up`, the two boxes still line up. One
+ * column no wider than the container, so a wide table scrolls inside its card
+ * (.table-wrap) instead of stretching the section - and the page - past a
+ * phone screen.
  */
-.table-section { display: grid; grid-template-rows: auto 1fr; gap: 10px; }
+.table-section { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .section-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;

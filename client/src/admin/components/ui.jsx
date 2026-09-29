@@ -311,6 +311,12 @@ const PLACE_CHECK = {
   inconsistent: ['badge-warn', 'Inconsistent'],
 };
 
+/** The badge alone: Nearby, Plausible or Inconsistent. */
+export function PlaceCheckBadge({ consistency }) {
+  const [cls, label] = PLACE_CHECK[consistency] ?? ['badge-neutral', consistency];
+  return <span className={`badge ${cls}`}>{label}</span>;
+}
+
 /**
  * The check on a purchase place, as staff read it: the label, where the
  * check was made from, and always the source. Rules in services/places.js:
@@ -331,7 +337,7 @@ export function PlaceCheck({ consistency, source, from, km }) {
   }
   return (
     <span className="text-sm">
-      <span className={`badge ${known[0]}`}>{known[1]}</span>{' '}
+      <PlaceCheckBadge consistency={consistency} />{' '}
       {from ? `checked from ${from}` : ''} ({how}
       {km !== null && km !== undefined ? `, ${km} km apart` : ''})
     </span>
