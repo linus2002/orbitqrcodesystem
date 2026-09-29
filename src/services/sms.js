@@ -17,6 +17,7 @@ import { config } from '../config.js';
 import * as db from '../db/index.js';
 import { pseudonymize } from '../lib/crypto.js';
 import * as verification from './verification.js';
+import { normalizePhone } from './verifiers.js';
 import logger from '../lib/logger.js';
 
 /** SMS bodies must stay short: one segment is 160 GSM-7 characters. */
@@ -69,7 +70,10 @@ export function composeReply(result) {
  * @param {object} [req]
  */
 export async function handleInbound(from, body, req = null) {
-  const msisdnHash = pseudonymize(from, config.secrets.session);
+  // One form of the number, so a sender is the same source however the
+  // gateway writes it - the checks key "the same person" on it.
+  const number = normalizePhone(from) ?? String(from);
+  const msisdnHash = pseudonymize(number, config.secrets.session);
 
   // Tolerate "CHECK <code>" / "VERIFY <code>" prefixes and stray punctuation.
   const cleaned = String(body ?? '')
@@ -83,7 +87,7 @@ export async function handleInbound(from, body, req = null) {
     provider: config.sms.provider,
   });
 
-  const result = await verification.verify(cleaned, { channel: 'sms', msisdn: from, req });
+  const result = await verification.verify(cleaned, { channel: 'sms', msisdn: number, req });
   const reply = composeReply(result);
 
   await db.insert('smsLog', {

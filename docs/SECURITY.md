@@ -151,7 +151,7 @@ chunk, so it can be built and served independently.
 | `POST /api/verify/bulk` | 20/hour per IP |
 | `POST /api/report` | 5/hour per IP |
 | `POST /api/auth/login` | 5 per 15 min per IP+email |
-| `POST /api/sms/inbound` | 60/min |
+| `POST /api/sms/inbound` | 60/min for the gateway, plus `RL_VERIFY_PER_MIN` / `RL_VERIFY_PER_HOUR` per sender number (every text arrives from the gateway's one address, so the number is the only fair key) |
 
 Paired with a detective control: `GUESS_ALERT_THRESHOLD` consecutive failed
 lookups from one source in an hour raises a `guess_attack` alert, fired once

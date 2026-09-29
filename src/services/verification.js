@@ -182,15 +182,30 @@ async function loadLeaflet(batch) {
 }
 
 /**
+ * Where a check came from, for "the same source" and for guessing detection.
+ *
+ * The connection, except for a text: every text reaches us from the SMS
+ * gateway's one address, so keyed on that, everyone texting would be one
+ * source - a second phone checking a copied code inside the grace window
+ * would be "the same person re-checking", and one person's typos would count
+ * toward everyone's guessing alert. A text is keyed on the sender's number.
+ */
+function sourceOf({ channel, ipHash, msisdnHash }) {
+  return channel === 'sms' && msisdnHash
+    ? { field: 'msisdn_hash', value: msisdnHash }
+    : { field: 'ip_hash', value: ipHash };
+}
+
+/**
  * Count recent failed lookups from one source and raise a guessing alert once
  * the threshold is crossed. This is the detective control that pairs with the
- * preventive rate limiter.
+ * preventive rate limiter. The alert's ip_hash field holds the source's digest.
  */
-async function detectGuessing(ipHash, scanId) {
-  if (!ipHash) return;
+async function detectGuessing(source, scanId) {
+  if (!source.value) return;
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const attempts = await db.count('scan', {
-    ip_hash: ipHash,
+    [source.field]: source.value,
     created_at: { gte: since },
     reason: { in: ['unknown_code', 'checksum_failed', 'malformed'] },
   });
@@ -200,14 +215,14 @@ async function detectGuessing(ipHash, scanId) {
     const recent = await db.findOne('alert', {
       type: 'guess_attack',
       status: { in: ['open', 'investigating'] },
-      ip_hash: ipHash,
+      ip_hash: source.value,
       created_at: { gte: since },
     }, { fields: ['id'] });
     if (!recent) {
       await alerts.raise({
         type: 'guess_attack',
         scanId,
-        context: { ipHash, attempts, windowHours: 1 },
+        context: { ipHash: source.value, attempts, windowHours: 1 },
       });
     }
   }
@@ -316,7 +331,7 @@ export async function verify(rawCode, ctx = {}) {
         geo,
         signatureState: checkSignature(parsed.code ?? '', signature, config.secrets.code),
       });
-      await detectGuessing(ipHash, scanId);
+      await detectGuessing(sourceOf({ channel, ipHash, msisdnHash }), scanId);
     }
 
     return publicResult({
@@ -352,7 +367,7 @@ export async function verify(rawCode, ctx = {}) {
       scanId,
       context: { code, channel, country: geo.country, signatureState },
     });
-    await detectGuessing(ipHash, scanId);
+    await detectGuessing(sourceOf({ channel, ipHash, msisdnHash }), scanId);
 
     return publicResult({
       result: 'flagged',
@@ -418,10 +433,11 @@ export async function verify(rawCode, ctx = {}) {
     row.verified_count >= (await settings.get('alerts.duplicate_threshold'))
   ) {
     // Grace window: the same source re-checking the same pack is one event.
-    const lastSameSource = ipHash
+    const source = sourceOf({ channel, ipHash, msisdnHash });
+    const lastSameSource = source.value
       ? await db.findOne(
           'scan',
-          { code_id: row.id, result: 'genuine', ip_hash: ipHash },
+          { code_id: row.id, result: 'genuine', [source.field]: source.value },
           { order: 'created_at desc', fields: ['created_at'] }
         )
       : null;

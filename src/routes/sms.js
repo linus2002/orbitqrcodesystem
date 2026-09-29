@@ -15,10 +15,21 @@ import * as sms from '../services/sms.js';
 import { timingSafeEqual } from '../lib/crypto.js';
 import { createLimiter, rateLimit } from '../lib/ratelimit.js';
 import { forbidden, badRequest } from '../lib/errors.js';
+import { normalizePhone } from '../services/verifiers.js';
 
 const router = Router();
 
 const smsLimiter = createLimiter({ name: 'sms-inbound', windowMs: 60_000, max: 60 });
+
+// Each sender is limited as a web visitor is. Every text arrives from the
+// gateway's one address, so an address-keyed limit is a single bucket shared
+// by the whole country; the sender's number is the fair key.
+const perNumberMinute = createLimiter({ name: 'sms-number-min', windowMs: 60_000, max: config.rateLimit.verifyPerMin });
+const perNumberHour = createLimiter({ name: 'sms-number-hour', windowMs: 3_600_000, max: config.rateLimit.verifyPerHour });
+const sender = (req) => {
+  const from = req.body?.from ?? req.body?.From;
+  return from ? normalizePhone(from) ?? String(from) : null;
+};
 
 /**
  * Shared-secret check, accepted from a header or a query parameter because
@@ -40,26 +51,32 @@ function requireWebhookSecret(req, res, next) {
  * `From` / `Body`, and answers with TwiML when the caller is Twilio so the
  * reply is delivered in the same HTTP round trip.
  */
-router.post('/inbound', requireWebhookSecret, rateLimit({ limiters: [smsLimiter] }), async (req, res) => {
-  const from = req.body?.from ?? req.body?.From;
-  const body = req.body?.body ?? req.body?.Body;
+router.post(
+  '/inbound',
+  requireWebhookSecret,
+  rateLimit({ limiters: [smsLimiter] }),
+  rateLimit({ limiters: [perNumberMinute, perNumberHour], keyFn: sender }),
+  async (req, res) => {
+    const from = req.body?.from ?? req.body?.From;
+    const body = req.body?.body ?? req.body?.Body;
 
-  if (!from || !body) {
-    throw badRequest('Both a sender number and a message body are required.');
+    if (!from || !body) {
+      throw badRequest('Both a sender number and a message body are required.');
+    }
+
+    const { reply, result } = await sms.handleInbound(String(from), String(body), req);
+
+    // Twilio-style synchronous reply.
+    if (String(req.query.format) === 'twiml' || req.body?.MessageSid) {
+      res.type('text/xml').send(
+        `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`
+      );
+      return;
+    }
+
+    res.json({ ok: true, reply, result: result.result, reason: result.reason });
   }
-
-  const { reply, result } = await sms.handleInbound(String(from), String(body), req);
-
-  // Twilio-style synchronous reply.
-  if (String(req.query.format) === 'twiml' || req.body?.MessageSid) {
-    res.type('text/xml').send(
-      `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`
-    );
-    return;
-  }
-
-  res.json({ ok: true, reply, result: result.result, reason: result.reason });
-});
+);
 
 /** Escape the five XML entities so a reply can never break the TwiML document. */
 function escapeXml(s) {

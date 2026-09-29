@@ -775,7 +775,13 @@ imports are recorded in the audit log.
 ### `POST /api/sms/inbound`
 
 Public but protected by a shared secret, sent either as `?key=` or the
-`X-Webhook-Secret` header, compared in constant time. Rate limit: 60/minute.
+`X-Webhook-Secret` header, compared in constant time. Rate limit: 60/minute for
+the gateway, and `RL_VERIFY_PER_MIN` / `RL_VERIFY_PER_HOUR` per sender number.
+
+Every text arrives from the gateway's one address, so a text's "same source"
+- for the 15-minute re-check window and for code-guessing detection - is the
+sender's number, not the address. Numbers are normalised first (`0917...`
+and `+63917...` are one sender) and stored only as a keyed digest.
 
 Accepts JSON `{ "from", "body" }` or Twilio's form encoding (`From` / `Body`).
 
