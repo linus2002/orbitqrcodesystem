@@ -775,7 +775,10 @@ imports are recorded in the audit log.
 ### `POST /api/sms/inbound`
 
 Public but protected by a shared secret, sent either as `?key=` or the
-`X-Webhook-Secret` header, compared in constant time. Rate limit: 60/minute for
+`X-Webhook-Secret` header, compared in constant time. In production the secret
+has no default: without `SMS_WEBHOOK_SECRET` the webhook answers
+`503 sms_not_configured` to everything, and the rest of the server runs as
+normal. Rate limit: 60/minute for
 the gateway, and `RL_VERIFY_PER_MIN` / `RL_VERIFY_PER_HOUR` per sender number.
 
 Every text arrives from the gateway's one address, so a text's "same source"

@@ -14,7 +14,7 @@ import { config } from '../config.js';
 import * as sms from '../services/sms.js';
 import { timingSafeEqual } from '../lib/crypto.js';
 import { createLimiter, rateLimit } from '../lib/ratelimit.js';
-import { forbidden, badRequest } from '../lib/errors.js';
+import { AppError, forbidden, badRequest } from '../lib/errors.js';
 import { normalizePhone } from '../services/verifiers.js';
 
 const router = Router();
@@ -34,8 +34,15 @@ const sender = (req) => {
 /**
  * Shared-secret check, accepted from a header or a query parameter because
  * gateways differ in what they can send. Compared in constant time.
+ *
+ * With no secret configured - production without SMS_WEBHOOK_SECRET - the
+ * webhook is off: every request is refused with 503, and the rest of the
+ * server runs as normal.
  */
 function requireWebhookSecret(req, res, next) {
+  if (!config.secrets.smsWebhook) {
+    return next(new AppError(503, 'sms_not_configured', 'SMS checking is not set up on this server.'));
+  }
   const presented = req.get('x-webhook-secret') ?? req.query.key ?? '';
   if (!presented || !timingSafeEqual(String(presented), config.secrets.smsWebhook)) {
     return next(forbidden('Invalid webhook credentials.'));

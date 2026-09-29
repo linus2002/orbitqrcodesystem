@@ -129,7 +129,10 @@ export const config = {
   secrets: {
     session: secret('SESSION_SECRET', 'dev-only-session-secret-do-not-use-in-production'),
     code: secret('CODE_SECRET', 'dev-only-code-secret-do-not-use-in-production'),
-    smsWebhook: str('SMS_WEBHOOK_SECRET', 'dev-sms-webhook-secret'),
+    // No public default in production: the repository is public, so a default
+    // is a known secret. Unset there, the SMS webhook answers 503 rather than
+    // stopping the whole server from starting - see routes/sms.js.
+    smsWebhook: str('SMS_WEBHOOK_SECRET', isProd ? '' : 'dev-sms-webhook-secret'),
   },
 
   session: {
