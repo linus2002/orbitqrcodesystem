@@ -15,7 +15,7 @@ import { TableCard, Table, Pager, Toolbar, Spacer, Select, ErrorNote } from '../
 const ACTION_GROUPS = [
   { value: 'auth', label: 'Sign in and out' },
   { value: 'batch', label: 'Batches' },
-  { value: 'codes', label: 'Code exports' },
+  { value: 'codes', label: 'Code exports and labels' },
   { value: 'product', label: 'Products' },
   { value: 'leaflet', label: 'Leaflets' },
   { value: 'alert', label: 'Alerts' },

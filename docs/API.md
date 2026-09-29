@@ -586,7 +586,7 @@ dropped after a day.
 | `POST /batches/:id/transition` | `batches:write` | `{ "to": "released" }`; recall requires `reason` |
 | `GET /batches/:id/codes` | `codes:read` | Paged |
 | `GET /batches/:id/codes.csv` | `codes:export` | The packaging-line hand-off file |
-| `GET /batches/:id/labels?limit=12&offset=0` | `codes:read` | Codes plus rendered QR SVG, at most 60 per request; `total` is the batch's code count, for paging through a whole batch |
+| `GET /batches/:id/labels?limit=12&offset=0` | `codes:read` | Codes plus rendered QR SVG, at most 60 per request; `total` is the batch's code count, for paging through a whole batch. Each page handed out is audited as `codes.labels` |
 
 **Issuing codes.** Two batches of one product made on the same day share a
 serial space; issuance passes over any code another batch already holds, so

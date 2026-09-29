@@ -137,3 +137,17 @@ test('a regulator cannot read the label sheet', async () => {
 
   assert.equal(res.status, 403, 'codes:read is not in the regulator role');
 });
+
+test('every page of printable labels is written to the audit log, as the CSV export is', async () => {
+  await client.login(ADMIN.email, ADMIN.password);
+
+  await labels({ limit: PAGE, offset: 0 });
+  await labels({ limit: PAGE, offset: PAGE });
+  await labels({ limit: PAGE, offset: QUANTITY }); // past the end: nothing handed out, nothing recorded
+
+  const entries = await db.findMany('auditLog', { action: 'codes.labels' }, { order: 'id asc' });
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].actor_email, ADMIN.email);
+  assert.deepEqual(JSON.parse(entries[0].detail_json), { batchNumber: 'AMX25-T1', from: 0, count: PAGE });
+  assert.deepEqual(JSON.parse(entries[1].detail_json), { batchNumber: 'AMX25-T1', from: PAGE, count: QUANTITY - PAGE });
+});

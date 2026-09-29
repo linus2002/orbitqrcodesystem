@@ -648,6 +648,20 @@ router.get('/batches/:id/labels', requirePermission('codes:read'), async (req, r
     codes.map(async (c) => ({ ...c, svg: await serialization.qrSvg(c.code) }))
   );
 
+  // Printable QRs - signature and all - are what a counterfeiter needs to copy
+  // a pack exactly, so every page of them handed out is recorded, as the CSV
+  // export is. Which page, so paging through a whole batch shows as such.
+  if (items.length) {
+    await audit.record({
+      actor: req.user,
+      req,
+      action: 'codes.labels',
+      entityType: 'batch',
+      entityId: batch.id,
+      detail: { batchNumber: batch.batch_number, from: offset, count: items.length },
+    });
+  }
+
   res.json({
     batch: {
       batchNumber: batch.batch_number,
