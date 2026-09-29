@@ -57,6 +57,22 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
         </div>
       </div>
 
+      {/* A real code from a cheaper medicine, printed on a counterfeit of a
+          dearer one, checks as genuine - with the other medicine's name. The
+          green banner is what gets read, so ask for the comparison here. */}
+      {genuine && result.product && (
+        <div className="card-body match-box">
+          <div className="alert alert-info">
+            <Icon name="help" />
+            <span>
+              <strong>Compare the details below with your box.</strong> If the medicine, strength,
+              batch or expiry is different, this code was copied from another pack - do not use it,
+              and report it below.
+            </span>
+          </div>
+        </div>
+      )}
+
       {result.product && <Details result={result} />}
 
       {/* Before the leaflet on a suspicious result - it is the thing to do

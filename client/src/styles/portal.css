@@ -314,3 +314,7 @@
   .details-card { padding: 28px; }
   .details-form .two-up { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
+
+/* The "compare with your box" note on a genuine result: close under the
+   banner, so it is read with the verdict rather than after the details. */
+.match-box { padding-bottom: 0; }
