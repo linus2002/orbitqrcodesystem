@@ -162,6 +162,9 @@ export const config = {
         : 'memory'
     ),
     guessAlertThreshold: int('GUESS_ALERT_THRESHOLD', 8),
+    // First checks of different packs by one person, phone or connection in an
+    // hour before an unusual_checking alert. A patient checks one or two.
+    massCheckThreshold: int('MASS_CHECK_ALERT_THRESHOLD', 20),
   },
 
   sms: {

@@ -49,6 +49,11 @@ const ALERT_SPEC = {
     severity: 'high',
     title: (ctx) => `QR code not printed by the manufacturer: ${ctx.code}`,
   },
+  // One source making the first check of many different packs.
+  unusual_checking: {
+    severity: 'medium',
+    title: (ctx) => `One ${ctx.who ?? 'source'} checked ${ctx.checks} different packs for the first time in an hour`,
+  },
 };
 
 /** Escalate severity as duplicates accumulate on the same incident. */

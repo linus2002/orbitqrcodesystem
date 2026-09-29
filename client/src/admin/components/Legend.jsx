@@ -240,6 +240,11 @@ function sections(nav) {
           symbol: reason('bad_signature'),
           text: 'A real code was checked from a QR the manufacturer did not print - it has been copied. Starts high.',
         },
+        {
+          term: 'unusual checking',
+          symbol: reason('unusual_checking'),
+          text: 'One person, phone or connection checked 20 or more different packs for the first time within an hour. A patient checks one or two; this can be someone spoiling genuine stock with codes read off a shelf. Starts medium.',
+        },
       ],
     },
     {

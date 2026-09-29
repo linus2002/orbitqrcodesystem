@@ -818,7 +818,8 @@ export default [
             "guess_attack",
             "consumer_report",
             "batch_anomaly",
-            "bad_signature"
+            "bad_signature",
+            "unusual_checking"
           ]
         }
       },

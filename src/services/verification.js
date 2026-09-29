@@ -211,6 +211,50 @@ async function detectGuessing(ipHash, scanId) {
 }
 
 /**
+ * Raise an unusual_checking alert when one source has made the first
+ * verification of many different packs in the last hour.
+ *
+ * A patient checks the pack or two in their hand. Someone checking dozens of
+ * codes they did not buy - read off a shelf, a carton or a photo - makes
+ * every one of them look "already verified elsewhere" to its real buyer. The
+ * source is the person when they gave details, the phone number for a text,
+ * and otherwise the connection. Fired once per source per hour; the alert's
+ * ip_hash field holds the source's digest so that can be checked.
+ */
+async function detectMassChecking({ verifierId, ipHash, msisdnHash, channel, scanId }) {
+  const [field, value, who] = verifierId
+    ? ['verifier_id', verifierId, 'person']
+    : channel === 'sms' && msisdnHash
+      ? ['msisdn_hash', msisdnHash, 'phone number']
+      : ['ip_hash', ipHash, 'connection'];
+  if (!value) return;
+
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const firsts = await db.count('scan', {
+    [field]: value,
+    reason: REASONS.OK,
+    channel: { in: ['web', 'sms'] },
+    is_test: 0,
+    created_at: { gte: since },
+  });
+  if (firsts < config.rateLimit.massCheckThreshold) return;
+
+  const sourceHash = pseudonymize(`${field}:${value}`, config.secrets.session);
+  const recent = await db.findOne(
+    'alert',
+    { type: 'unusual_checking', ip_hash: sourceHash, status: { in: ['open', 'investigating'] }, created_at: { gte: since } },
+    { fields: ['id'] }
+  );
+  if (recent) return;
+
+  await alerts.raise({
+    type: 'unusual_checking',
+    scanId,
+    context: { ipHash: sourceHash, checks: firsts, who, verifierId: verifierId ?? null, windowHours: 1 },
+  });
+}
+
+/**
  * Verify a code.
  *
  * @param {string} rawCode        what the patient submitted or the QR carried
@@ -476,6 +520,12 @@ export async function verify(rawCode, ctx = {}) {
         signatureState,
       },
     });
+  }
+
+  // A first verification is also what spoiling genuine stock looks like, one
+  // code read off a shelf at a time: watch for one source doing many.
+  if (reason === REASONS.OK && !supplyCheck && !isTest) {
+    await detectMassChecking({ verifierId, ipHash, msisdnHash, channel, scanId });
   }
 
   logger.info('verification', { code, result, reason, scanNumber, channel, isTest });

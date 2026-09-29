@@ -11,7 +11,7 @@ does not defend against.
 |---|---|---|---|
 | 1 | Counterfeiter invents codes | Keyed HMAC checksum: ~99.9% of guesses fail before the DB is touched | Someone with the `CODE_SECRET` can mint valid codes |
 | 2 | Counterfeiter enumerates codes via the API | Two-window rate limiting, plus a detective `guess_attack` alert | Distributed attacks from many IPs are slower to spot |
-| 3 | Counterfeiter clones one genuine pack | Duplicate detection; repeats fold into one escalating alert | **The first scan of a cloned pack reads genuine** |
+| 3 | Counterfeiter clones one genuine pack | Duplicate detection; repeats fold into one escalating alert. A copied code in a QR of the counterfeiter's own has a wrong or missing signature and is flagged `bad_signature` | **The first scan of a cloned pack reads genuine** when the whole QR is copied, or the code is typed |
 | 4 | Codes leak off the packaging line before release | Batch lifecycle: pre-release scans flag as `not_released` | Depends on operators moving batch state honestly |
 | 5 | Recalled or expired stock stays in circulation | Recall and expiry checked on every scan, ahead of duplicate logic | Only catches packs that are actually scanned |
 | 6 | Attacker steals a staff session | httpOnly + `SameSite=Strict` cookies, server-side revocable sessions, 8h expiry | An XSS-free frontend is assumed - hence the strict CSP |
@@ -21,6 +21,7 @@ does not defend against.
 | 10 | Patient data leaks from the scan log | IPs and phone numbers stored only as keyed digests; location kept to city granularity - a GPS reading is reduced to its city before it is stored, and only this site may ask for it (`Permissions-Policy: geolocation=(self)`) | - |
 | 11 | Insider tampers with records | Append-only scans, audit log and SMS log; every admin action audited; the Studio is read-only | A member of the Sanity project, or anyone holding the API token, can still edit documents through the Sanity API |
 | 12 | The database is read directly, bypassing the app | Sanity credentials are server-side only and never sent to the browser; the dataset is private; no CORS origin for the web app; the build fails on a public dataset | The token grants full read/write - store it as a secret, give it to nothing else |
+| 13 | Someone spoils genuine stock by checking codes read off packs they did not buy, so each real buyer is told "already verified elsewhere" | The bulk (delivery) check does not count as a verification; one person, phone or connection making many first checks in an hour raises `unusual_checking` | One check per code still spoils it; codes printed on the outside of the pack can be read by anyone who handles it |
 
 ---
 
