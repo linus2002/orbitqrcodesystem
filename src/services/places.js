@@ -41,9 +41,13 @@ export const MAX_GPS_ACCURACY_M = 20_000;
 /** A reading this far from every listed place is not in the Philippines. */
 const MAX_NEAREST_KM = 60;
 
-// require(), not a file read: Vercel's bundler follows a require to the file
-// and ships it with the function; a path built at run time it may not see.
-const DATA = createRequire(import.meta.url)('../data/ph-places.json');
+// Vercel ships a serverless function with only the files its tracer (@vercel/nft)
+// can see the code load. It follows a call to a function NAMED `require` with a
+// literal path - so the name matters: `createRequire(...)('../data/...')`,
+// called without one, is not followed, the list is left out of the function,
+// and the whole API fails to start. tests/vercel-bundle.test.js holds this.
+const require = createRequire(import.meta.url);
+const DATA = require('../data/ph-places.json');
 
 /**
  * Every place, as { code, name, province, region, island, lat, lng, label }.
