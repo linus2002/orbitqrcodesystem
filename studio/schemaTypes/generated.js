@@ -817,7 +817,8 @@ export default [
             "expired_scan",
             "guess_attack",
             "consumer_report",
-            "batch_anomaly"
+            "batch_anomaly",
+            "bad_signature"
           ]
         }
       },

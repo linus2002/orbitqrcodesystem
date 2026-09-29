@@ -44,6 +44,11 @@ const ALERT_SPEC = {
     severity: 'medium',
     title: (ctx) => `Unusual scan pattern on batch ${ctx.batchNumber}`,
   },
+  // A real code in a QR we did not print: the code has been copied.
+  bad_signature: {
+    severity: 'high',
+    title: (ctx) => `QR code not printed by the manufacturer: ${ctx.code}`,
+  },
 };
 
 /** Escalate severity as duplicates accumulate on the same incident. */

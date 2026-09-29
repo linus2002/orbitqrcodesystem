@@ -147,6 +147,11 @@ function sections(nav) {
           text: 'Flagged - the code exists, but its batch was never released for sale.',
         },
         { term: 'expired', symbol: reason('expired'), text: "Flagged - the pack is past its batch's expiry date." },
+        {
+          term: 'bad signature',
+          symbol: reason('bad_signature'),
+          text: 'Flagged - a real code, but in a QR the manufacturer did not print. The code has been copied onto another pack.',
+        },
       ],
     },
     {
@@ -166,12 +171,12 @@ function sections(nav) {
         {
           term: 'QR signature invalid',
           symbol: word('QR signature invalid'),
-          text: "The QR carried a signature that doesn't match. The QR itself may be fake.",
+          text: "The QR carried a signature that doesn't match, so the manufacturer didn't print it. Flagged as bad signature.",
         },
         {
           term: 'QR signature absent',
           symbol: word('QR signature absent'),
-          text: 'Typed in by hand, so there was no QR to check.',
+          text: 'No signature: typed in by hand - or, if it came from a QR, a QR the manufacturer did not print (flagged).',
         },
       ],
     },
@@ -229,6 +234,11 @@ function sections(nav) {
           term: 'batch anomaly',
           symbol: reason('batch_anomaly'),
           text: 'A withdrawn code, or one from a batch never released, was checked. Starts medium.',
+        },
+        {
+          term: 'bad signature',
+          symbol: reason('bad_signature'),
+          text: 'A real code was checked from a QR the manufacturer did not print - it has been copied. Starts high.',
         },
       ],
     },

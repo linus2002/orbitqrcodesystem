@@ -12,15 +12,16 @@
  *   4. Code's batch never released    -> 'flagged'  (not_released - leaked from the line)
  *   5. Code voided by the team        -> 'flagged'  (void)
  *   6. Batch past its expiry date     -> 'flagged'  (expired - real product, unsafe)
- *   7. Already verified elsewhere     -> 'flagged'  (duplicate_scan)
- *   8. Otherwise                      -> 'genuine'
+ *   7. QR not printed by us           -> 'flagged'  (bad_signature - a copied code)
+ *   8. Already verified elsewhere     -> 'flagged'  (duplicate_scan)
+ *   9. Otherwise                      -> 'genuine'
  *
  * Rule 1 is separated from the rest on purpose. A mistyped code is
  * overwhelmingly the common case, and telling a patient "COUNTERFEIT" because
  * they typed O instead of 0 destroys trust in the whole system. Structural
  * failures get their own result value and a "check your typing" message.
  *
- * Rule 7 has a deliberate exception: see SAME_SOURCE_GRACE_MS.
+ * Rule 8 has a deliberate exception: see SAME_SOURCE_GRACE_MS.
  */
 import * as db from '../db/index.js';
 import { config } from '../config.js';
@@ -60,6 +61,7 @@ export const REASONS = {
   EXPIRED: 'expired',
   NOT_RELEASED: 'not_released',
   VOID: 'void',
+  BAD_SIGNATURE: 'bad_signature',
 };
 
 /** Patient-facing copy. Deliberately plain, non-technical, and actionable. */
@@ -83,6 +85,8 @@ const MESSAGES = {
     'This code exists but the batch was never released for sale. Do not use this product and please report it.',
   [REASONS.VOID]:
     'This code has been withdrawn by the manufacturer. Do not use this product.',
+  [REASONS.BAD_SIGNATURE]:
+    'This QR code was not printed by the manufacturer, so this pack may be counterfeit. Do not use it - keep the pack and report it below.',
 };
 
 /** What someone who has checked a pack PERSONAL_CHECK_LIMIT times is told, by their last answer. */
@@ -218,6 +222,9 @@ async function detectGuessing(ipHash, scanId) {
  * @param {number} [ctx.verifierId] who is checking, when the portal asked (see verifiers)
  * @param {boolean} [ctx.supplyCheck] a delivery being received (the bulk check):
  *   decided by the same rules, but it is not a patient's verification - see below
+ * @param {'qr'|'typed'} [ctx.via] how the code reached the portal. Every QR the
+ *   system prints carries a signature, so a code read from a QR without one
+ *   was not printed by the manufacturer. Unknown for other callers.
  * @returns {object} public-safe result
  */
 export async function verify(rawCode, ctx = {}) {
@@ -228,6 +235,7 @@ export async function verify(rawCode, ctx = {}) {
     msisdn = null,
     verifierId = null,
     supplyCheck = false,
+    via = null,
   } = ctx;
 
   const ipHash = pseudonymize(req?.clientIp, config.secrets.session);
@@ -333,6 +341,14 @@ export async function verify(rawCode, ctx = {}) {
   } else if (daysUntil(row.expiry_date) < 0) {
     result = 'flagged';
     reason = REASONS.EXPIRED;
+  } else if (signatureState === 'invalid' || (via === 'qr' && signatureState === 'absent')) {
+    // The code is real, but its QR was not made by us: the signature needs
+    // the code secret, so a copied code printed into a QR of the
+    // counterfeiter's own either carries a wrong one or none at all. A typed
+    // code has none by nature and is not affected. Not a verification, so
+    // the genuine pack's own buyer is not made a "second device".
+    result = 'flagged';
+    reason = REASONS.BAD_SIGNATURE;
   } else if (supplyCheck) {
     // A delivery being received: no pack in it should have been verified by a
     // patient yet, so any earlier verification - whatever the threshold - is
@@ -436,6 +452,7 @@ export async function verify(rawCode, ctx = {}) {
     [REASONS.EXPIRED]: 'expired_scan',
     [REASONS.NOT_RELEASED]: 'batch_anomaly',
     [REASONS.VOID]: 'batch_anomaly',
+    [REASONS.BAD_SIGNATURE]: 'bad_signature',
   }[reason];
 
   // A person re-checking a pack they were already warned about is the same

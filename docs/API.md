@@ -84,7 +84,10 @@ Rate limit: `RL_VERIFY_PER_MIN` per minute and `RL_VERIFY_PER_HOUR` per hour.
 ```
 
 `signature` is optional - it is the `s` parameter from a scanned QR URL. A
-typed code has none, which is not a failure.
+typed code has none, which is not a failure. `via` (`qr` or `typed`, optional)
+says how the code reached the client: every QR the system prints carries a
+signature, so a code sent with `via: "qr"` and no signature - or with any
+wrong signature - is flagged `bad_signature`.
 
 While the `portal.require_details` setting is `on` (the default), every
 verify endpoint - this one, `GET /api/verify/:code` and `POST /api/verify/bulk` -
@@ -169,6 +172,7 @@ is never rendered beside a counterfeit warning.
 | `flagged` | `expired` | Real product, past expiry |
 | `flagged` | `not_released` | Code exists but the batch never left QA |
 | `flagged` | `void` | Withdrawn by the manufacturer |
+| `flagged` | `bad_signature` | A real code in a QR the manufacturer did not print: the code has been copied |
 | `invalid` | `checksum_failed` | Almost certainly a typo |
 | `invalid` | `malformed` | Not in the expected shape |
 | `invalid` | `empty` | Nothing submitted |
@@ -672,7 +676,8 @@ the alert has no code (an `unknown_code` alert). Neither changes the scan
 counts or the scan history.
 
 Alert types: `duplicate_scan`, `unknown_code`, `recalled_scan`, `expired_scan`,
-`guess_attack`, `consumer_report`, `batch_anomaly`.
+`guess_attack`, `consumer_report`, `batch_anomaly`, `bad_signature` (a real code in a
+QR the manufacturer did not print; starts high).
 
 ### Reports, shipments, users, audit
 

@@ -232,7 +232,7 @@ export const TYPES = {
         kind: 'string',
         required: true,
         enum: ['duplicate_scan', 'unknown_code', 'recalled_scan', 'expired_scan',
-          'guess_attack', 'consumer_report', 'batch_anomaly'],
+          'guess_attack', 'consumer_report', 'batch_anomaly', 'bad_signature'],
       },
       severity: { kind: 'string', required: true, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
       status: { kind: 'string', required: true, enum: ['open', 'investigating', 'resolved', 'dismissed'], default: 'open' },

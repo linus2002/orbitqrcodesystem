@@ -65,8 +65,12 @@ export default function PortalPage() {
   const resultRef = useRef(null);
   const inputRef = useRef(null);
 
-  /** Run a verification and render the outcome. */
-  const runVerify = useCallback(async (raw, signature = null) => {
+  /**
+   * Run a verification and render the outcome. `via` says whether the code
+   * came from a QR (the deep link or the camera) or was typed: every QR we
+   * print carries a signature, so the server flags a QR without one.
+   */
+  const runVerify = useCallback(async (raw, signature = null, via = 'typed') => {
     if (!raw?.trim()) {
       setFieldError('Please enter the code printed on the pack.');
       inputRef.current?.focus();
@@ -80,13 +84,13 @@ export default function PortalPage() {
     try {
       const payload = await api('/api/verify', {
         method: 'POST',
-        body: { code: raw.trim(), signature },
+        body: { code: raw.trim(), signature, via },
       });
       setResult(payload);
     } catch (err) {
       if (err instanceof ApiError && err.code === 'details_required') {
         // The server asks first. Keep the check; it runs once the form is done.
-        setPending({ code: raw.trim(), signature });
+        setPending({ code: raw.trim(), signature, via });
         setPortal((p) => ({ ...(p ?? {}), detailsRequired: true, checker: null }));
       } else if (err instanceof ApiError && err.status === 429) {
         setNotice({
@@ -115,7 +119,7 @@ export default function PortalPage() {
     const decoded = decodeURIComponent(deepLinkCode);
     const signature = new URLSearchParams(window.location.search).get('s');
     setCode(decoded);
-    setPending({ code: decoded, signature });
+    setPending({ code: decoded, signature, via: 'qr' });
     // Tidy the address bar so a shared link does not leak the code.
     navigate('/', { replace: true });
   }, [deepLinkCode, navigate]);
@@ -126,7 +130,7 @@ export default function PortalPage() {
     if (!pending || !portal || needDetails) return;
     const next = pending;
     setPending(null);
-    runVerify(next.code, next.signature);
+    runVerify(next.code, next.signature, next.via);
   }, [pending, portal, needDetails, runVerify]);
 
   /** "Not you?": forget this browser's details and ask again. */
@@ -168,7 +172,7 @@ export default function PortalPage() {
       }
 
       setCode(scanned.code);
-      runVerify(scanned.code, scanned.signature);
+      runVerify(scanned.code, scanned.signature, 'qr');
     },
     [runVerify]
   );

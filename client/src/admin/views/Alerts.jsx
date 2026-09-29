@@ -19,7 +19,7 @@ import {
 
 const TYPES = [
   'duplicate_scan', 'unknown_code', 'recalled_scan', 'expired_scan',
-  'guess_attack', 'consumer_report', 'batch_anomaly',
+  'guess_attack', 'consumer_report', 'batch_anomaly', 'bad_signature',
 ];
 
 export default function Alerts() {

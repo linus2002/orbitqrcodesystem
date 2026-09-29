@@ -84,7 +84,11 @@ router.get('/health', async (req, res) => {
 // POST /api/verify - THE core endpoint
 // ---------------------------------------------------------------------------
 /**
- * Body: { code: string, signature?: string }
+ * Body: { code: string, signature?: string, via?: 'qr' | 'typed' }
+ *
+ * `via` is how the code reached the portal. Every QR the system prints
+ * carries a signature, so a code read from a QR without one is flagged as
+ * not printed by the manufacturer; a typed code needs none.
  *
  * Always responds 200 with a result body, even for a counterfeit. "Flagged" is
  * a successful verification that returned bad news, not an HTTP error - using
@@ -95,14 +99,16 @@ router.post(
   rateLimit({ limiters: [verifyBurst, verifyHourly], onLimit: onVerifyLimit }),
   verifiers.requireDetails,
   async (req, res) => {
-    const { code, signature } = validate(req.body, {
+    const { code, signature, via } = validate(req.body, {
       code: { type: 'string', required: true, max: 64 },
       signature: { type: 'string', max: 32 },
+      via: { type: 'enum', values: ['qr', 'typed'] },
     });
 
     const result = await verification.verify(code, {
       channel: 'web',
       signature: signature ?? null,
+      via: via ?? null,
       req,
       verifierId: req.verifier?.id ?? null,
     });

@@ -237,7 +237,10 @@ guesses are rejected before the database is touched.
 
 The QR additionally carries a 10-character HMAC signature
 (`https://host/v/CODE?s=...`), which lets the system distinguish a genuine
-scanned QR from a hand-typed or fabricated code. It is recorded on every scan.
+scanned QR from a hand-typed or fabricated code. It is recorded on every scan,
+and a code read from a QR whose signature is wrong or missing is flagged
+`bad_signature`: the code is real, but the QR was not printed by the
+manufacturer, so it has been copied. A typed code needs no signature.
 
 ### The verification decision
 
@@ -251,14 +254,15 @@ Rules are applied in this order, and the first match wins:
 | 4 | code voided | `flagged` | `void` |
 | 5 | batch never released | `flagged` | `not_released` |
 | 6 | past expiry | `flagged` | `expired` |
-| 7 | already verified elsewhere | `flagged` | `duplicate_scan` |
-| 8 | otherwise | `genuine` | `ok` |
+| 7 | QR not printed by the manufacturer | `flagged` | `bad_signature` |
+| 8 | already verified elsewhere | `flagged` | `duplicate_scan` |
+| 9 | otherwise | `genuine` | `ok` |
 
 Rule 1 is separated from the rest deliberately: a mistyped code is the common
 case, and telling a patient "COUNTERFEIT" because they typed `O` instead of `0`
 destroys trust in the whole system.
 
-Rule 7 keys off a separate `verified_count` column rather than total scan
+Rule 8 keys off a separate `verified_count` column rather than total scan
 attempts. This matters: if failed scans counted, a single pre-release scan
 would make the first genuine patient scan look like a duplicate. There is a
 regression test for exactly that.
