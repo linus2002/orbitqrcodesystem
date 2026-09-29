@@ -229,7 +229,11 @@ function sections(nav) {
           symbol: reason('guess_attack'),
           text: 'Many failed look-ups from one source - someone may be guessing codes. Starts high.',
         },
-        { term: 'consumer report', symbol: reason('consumer_report'), text: 'A patient reported a problem with a pack. Starts high.' },
+        {
+          term: 'consumer report',
+          symbol: reason('consumer_report'),
+          text: 'A patient reported a problem with a pack. Starts high when it follows their own check of the pack, medium when there was no check - those can be filed by anyone about any code.',
+        },
         {
           term: 'batch anomaly',
           symbol: reason('batch_anomaly'),

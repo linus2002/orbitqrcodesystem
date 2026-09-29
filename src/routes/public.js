@@ -170,9 +170,10 @@ router.post(
 // ---------------------------------------------------------------------------
 /**
  * A patient can report a suspect pack whatever the scan said - including when
- * the code looked genuine but the packaging seems wrong. Every report creates
- * a HIGH severity alert, because a human bothering to fill in this form is a
- * stronger signal than most automated ones.
+ * the code looked genuine but the packaging seems wrong. A report after the
+ * reporter's own check of the pack creates a HIGH severity alert, because a
+ * human bothering to fill in this form is a stronger signal than most
+ * automated ones. A report with no check behind it starts at MEDIUM.
  */
 /**
  * The check a report is about, kept only when it is this browser's own.
@@ -240,12 +241,18 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
       ...place,
     });
 
+    // A report that follows the reporter's own check of the pack is the
+    // strong signal - high. One with no check behind it can be filed about
+    // any code by anyone, so it starts at medium and says so in its title:
+    // otherwise a stream of them could bury the real alerts.
     const alert = await alerts.raise({
       type: 'consumer_report',
       codeId: codeRow?.id ?? null,
       batchId: codeRow?.batch_id ?? null,
       scanId,
+      severity: scanId ? 'high' : 'medium',
       context: {
+        withCheck: Boolean(scanId),
         summary: data.description.slice(0, 120),
         code: normalized,
         purchaseLocation: boughtAt,

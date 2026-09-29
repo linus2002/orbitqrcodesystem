@@ -36,9 +36,11 @@ const ALERT_SPEC = {
     severity: 'high',
     title: (ctx) => `Possible code-guessing: ${ctx.attempts} failed lookups from one source`,
   },
+  // High when the report follows the reporter's own check of the pack;
+  // one with no check behind it is raised at medium - see routes/public.js.
   consumer_report: {
     severity: 'high',
-    title: (ctx) => `Patient report: ${ctx.summary}`,
+    title: (ctx) => `Patient report${ctx.withCheck === false ? ' (no check made)' : ''}: ${ctx.summary}`,
   },
   batch_anomaly: {
     severity: 'medium',
@@ -75,9 +77,18 @@ function escalate(current, repeatCount) {
  * @param {number} [params.batchId]
  * @param {number} [params.scanId]
  * @param {boolean} [params.isTest] scans of sandbox batches never raise alerts
+ * @param {string} [params.severity] start at this instead of the type's own level
  * @returns {object|null} the alert row, or null when suppressed
  */
-export async function raise({ type, context = {}, codeId = null, batchId = null, scanId = null, isTest = false }) {
+export async function raise({
+  type,
+  context = {},
+  codeId = null,
+  batchId = null,
+  scanId = null,
+  isTest = false,
+  severity: startAt = null,
+}) {
   const spec = ALERT_SPEC[type];
   if (!spec) throw new Error(`alerts.raise: unknown type "${type}"`);
 
@@ -119,7 +130,7 @@ export async function raise({ type, context = {}, codeId = null, batchId = null,
   const detail = { ...context, occurrences: 1, firstSeenAt: new Date().toISOString() };
   const alert = await db.insert('alert', {
     type,
-    severity: spec.severity,
+    severity: startAt ?? spec.severity,
     status: 'open',
     title: spec.title(context),
     detail_json: JSON.stringify(detail),
@@ -130,8 +141,8 @@ export async function raise({ type, context = {}, codeId = null, batchId = null,
     scan_id: scanId,
   });
 
-  logger.warn('alert raised', { id: alert.id, type, severity: spec.severity });
-  notify(type, spec.severity, spec.title(context));
+  logger.warn('alert raised', { id: alert.id, type, severity: startAt ?? spec.severity });
+  notify(type, startAt ?? spec.severity, spec.title(context));
   return alert;
 }
 

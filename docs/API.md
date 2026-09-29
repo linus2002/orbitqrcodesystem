@@ -676,7 +676,8 @@ the alert has no code (an `unknown_code` alert). Neither changes the scan
 counts or the scan history.
 
 Alert types: `duplicate_scan`, `unknown_code`, `recalled_scan`, `expired_scan`,
-`guess_attack`, `consumer_report`, `batch_anomaly`, `bad_signature` (a real code in a
+`guess_attack`, `consumer_report` (high after the reporter's own check, medium
+without one), `batch_anomaly`, `bad_signature` (a real code in a
 QR the manufacturer did not print; starts high), `unusual_checking` (one person, phone or
 connection making the first check of `MASS_CHECK_ALERT_THRESHOLD` - default 20 -
 different packs within an hour; starts medium).
