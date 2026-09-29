@@ -13,8 +13,9 @@ import { fmtNumber, fmtRelative, humanise } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { TrendChart, BarList } from '../components/Charts.jsx';
 import {
-  Card, TableCard, Table, Tiles, Loading, ErrorNote, ResultBadge, StatusBadge,
+  Card, TableCard, Table, Tiles, Toolbar, Spacer, Loading, ErrorNote, ResultBadge, StatusBadge,
 } from '../components/ui.jsx';
+import { LegendButton } from '../components/Legend.jsx';
 
 const DAYS = 30;
 
@@ -45,6 +46,13 @@ export default function Dashboard() {
 
   return (
     <>
+      {/* What the badges, colours and icons across the dashboard mean. Here,
+          on the first screen, because this is where a new user starts. */}
+      <Toolbar>
+        <Spacer />
+        <LegendButton />
+      </Toolbar>
+
       {/* The flag rate is the number the team actually watches: raw counts
           rise with traffic, so the rate is what says whether things are
           getting worse. Tiles leading to a section the viewer cannot open are
