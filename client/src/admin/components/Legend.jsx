@@ -157,7 +157,11 @@ function sections(nav) {
       rows: [
         { term: 'web', symbol: word('web'), text: 'On the website, typed in or scanned with the camera.' },
         { term: 'sms', symbol: word('sms'), text: 'By text message.' },
-        { term: 'api', symbol: word('api'), text: 'By another system, through the API.' },
+        {
+          term: 'api',
+          symbol: word('api'),
+          text: "A delivery checked in bulk. It doesn't count as a patient's check, so the buyer's own check is still the first.",
+        },
         { term: 'QR signature valid', symbol: word('QR signature valid'), text: 'Scanned from a genuine printed QR code.' },
         {
           term: 'QR signature invalid',

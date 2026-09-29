@@ -216,10 +216,19 @@ async function detectGuessing(ipHash, scanId) {
  * @param {object} [ctx.req]       express request (ip, user-agent, geo)
  * @param {string} [ctx.msisdn]    phone number, SMS channel only
  * @param {number} [ctx.verifierId] who is checking, when the portal asked (see verifiers)
+ * @param {boolean} [ctx.supplyCheck] a delivery being received (the bulk check):
+ *   decided by the same rules, but it is not a patient's verification - see below
  * @returns {object} public-safe result
  */
 export async function verify(rawCode, ctx = {}) {
-  const { channel = 'web', signature = null, req = null, msisdn = null, verifierId = null } = ctx;
+  const {
+    channel = 'web',
+    signature = null,
+    req = null,
+    msisdn = null,
+    verifierId = null,
+    supplyCheck = false,
+  } = ctx;
 
   const ipHash = pseudonymize(req?.clientIp, config.secrets.session);
   const msisdnHash = pseudonymize(msisdn, config.secrets.session);
@@ -324,6 +333,14 @@ export async function verify(rawCode, ctx = {}) {
   } else if (daysUntil(row.expiry_date) < 0) {
     result = 'flagged';
     reason = REASONS.EXPIRED;
+  } else if (supplyCheck) {
+    // A delivery being received: no pack in it should have been verified by a
+    // patient yet, so any earlier verification - whatever the threshold - is
+    // a pack that has been out in the world and come back into the supply.
+    if (row.verified_count > 0) {
+      result = 'flagged';
+      reason = REASONS.DUPLICATE_SCAN;
+    }
   } else if (verifierId) {
     // Someone who gave their details: their checks are theirs, whatever
     // network or device they come from.
@@ -383,17 +400,28 @@ export async function verify(rawCode, ctx = {}) {
     });
 
     const at = db.now();
+    // A delivery check is not a patient's verification. Counted as one, it
+    // would make the patient who later buys the pack the "second device",
+    // told their genuine medicine was already verified elsewhere - and would
+    // let anyone spoil a hundred genuine packs a request by "checking" codes
+    // read off a shelf.
+    const verifies = result === 'genuine' && !supplyCheck;
     // A grace re-scan must not inflate the counter that defines "duplicate".
     if (reason !== REASONS.OK_REPEAT_SAME_SOURCE) {
       let status = row.status;
-      if (result === 'genuine' && ['issued', 'printed', 'released'].includes(status)) status = 'verified';
+      if (verifies && ['issued', 'printed', 'released'].includes(status)) status = 'verified';
       else if (result === 'flagged' && status !== 'recalled') status = 'flagged';
 
       // The counters are incremented on the server, so two scans landing at
       // the same moment can never lose one.
       await db.update('code', row, { status, last_scan_at: at }, {
-        inc: { scan_count: 1, verified_count: result === 'genuine' ? 1 : 0 },
-        setIfMissing: result === 'flagged' ? { first_scan_at: at, flagged_at: at } : { first_scan_at: at },
+        inc: { scan_count: 1, verified_count: verifies ? 1 : 0 },
+        setIfMissing:
+          result === 'flagged'
+            ? { first_scan_at: at, flagged_at: at }
+            : verifies
+              ? { first_scan_at: at }
+              : undefined,
       });
     } else {
       await db.update('code', row, { last_scan_at: at });
@@ -628,7 +656,8 @@ function messageFor({ reason, scanNumber }) {
  * Bulk check, for a pharmacist verifying a shipment on arrival.
  *
  * Same decision logic per code, but the response is a compact summary rather
- * than a full patient-facing payload.
+ * than a full patient-facing payload - and each check is a supply check, not
+ * a patient's verification (see `supplyCheck` in verify()).
  */
 export async function verifyBulk(codes, ctx = {}) {
   const unique = [...new Set(codes.map((c) => String(c).trim()).filter(Boolean))];
@@ -641,7 +670,7 @@ export async function verifyBulk(codes, ctx = {}) {
    */
   const results = [];
   for (const raw of unique) {
-    const r = await verify(raw, { ...ctx, channel: 'api' });
+    const r = await verify(raw, { ...ctx, channel: 'api', supplyCheck: true });
     results.push({
       code: r.code ?? raw,
       result: r.result,

@@ -186,6 +186,13 @@ response to `POST /api/verify`.
 
 A pharmacist checking a delivery. Max 100 codes. Rate limit: 20/hour.
 
+The same rules decide each code, but a delivery check is not a patient's
+verification: it does not count toward the duplicate rule, mark a code
+verified or set its first-check time, so the patient who later buys the pack
+still gets its first check. A pack a patient has already verified is flagged
+`duplicate_scan` here whatever the duplicate threshold - it has no business in
+a delivery. Recorded with channel `api`.
+
 ```json
 { "codes": ["AMX25-260812-088159-BM", "AMX25-260812-704910-GV"] }
 ```
