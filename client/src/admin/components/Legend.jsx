@@ -315,7 +315,11 @@ function sections(nav) {
           symbol: <PlaceCheckBadge consistency="inconsistent" />,
           text: 'More than 300 km apart, or in different island groups (Luzon, Visayas, Mindanao).',
         },
-        { term: 'GPS', symbol: word('GPS'), text: "The person shared their phone's location. Accurate to the city." },
+        {
+          term: 'GPS',
+          symbol: word('GPS'),
+          text: "Reported by the person's phone when they chose to share it. Usually right to the city, but anyone with the right tools can make a phone report anywhere - so treat it as a lead, like the rest.",
+        },
         {
           term: 'connection-based, approximate',
           symbol: word('connection-based, approximate'),

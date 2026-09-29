@@ -488,7 +488,8 @@ result and compared with where it was checked by `src/services/places.js`
 against `src/data/ph-places.json` (every Philippine city and municipality, from
 Wikidata; rebuild with `node scripts/fetch-ph-places.js`). On a suspicious
 result or a report the portal offers to use the phone's GPS; it is reduced to
-a city before anything is stored.
+a city before anything is stored. It is what the phone reports, and a phone can
+be made to report anywhere, so staff read it as a lead, not proof.
 
 ---
 
