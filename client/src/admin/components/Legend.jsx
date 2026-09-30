@@ -82,7 +82,7 @@ function sections(nav) {
         {
           term: 'Genuine',
           symbol: <ResultBadge result="genuine" />,
-          text: "The code is on record, its batch is released and in date, and it hasn't already been verified elsewhere.",
+          text: "The code is on record, its batch is released and in date, its QR (when scanned) was printed by the manufacturer, and it hasn't already been verified by someone else.",
         },
         {
           term: 'Flagged',
@@ -117,11 +117,15 @@ function sections(nav) {
       note: 'The Reason column of the scan log, and each check in Code lookup.',
       needs: ['scans:read', 'codes:read'],
       rows: [
-        { term: 'ok', symbol: reason('ok'), text: 'Genuine - the first time this pack was verified.' },
+        {
+          term: 'ok',
+          symbol: reason('ok'),
+          text: 'Genuine - the first time this pack was verified. From a delivery check (api), genuine and not yet checked by a patient.',
+        },
         {
           term: 'ok repeat same source',
           symbol: reason('ok_repeat_same_source'),
-          text: 'Genuine - the same person checking their own pack again.',
+          text: 'Genuine - the same person checking their own pack again. For someone who gave no details: the same connection, or by text the same number, within 15 minutes.',
         },
         { term: 'checksum failed', symbol: reason('checksum_failed'), text: 'Invalid - one character is wrong, most likely a typo.' },
         {
@@ -137,7 +141,7 @@ function sections(nav) {
         {
           term: 'duplicate scan',
           symbol: reason('duplicate_scan'),
-          text: 'Flagged - already verified by someone else. The pack may have been copied.',
+          text: 'Flagged - already verified by someone else, or a pack a patient has checked turning up in a delivery. The pack may have been copied.',
         },
         { term: 'recalled', symbol: reason('recalled'), text: 'Flagged - the batch has been recalled.' },
         { term: 'void', symbol: reason('void'), text: 'Flagged - this code has been withdrawn.' },
@@ -165,7 +169,7 @@ function sections(nav) {
         {
           term: 'api',
           symbol: word('api'),
-          text: "A delivery checked in bulk. It doesn't count as a patient's check, so the buyer's own check is still the first.",
+          text: "A delivery checked in bulk. It doesn't count as a patient's check, so the buyer's own check is still the first - in Code lookup it adds to Total checks, not to Successful verifications. A pack a patient has already checked is flagged as a duplicate scan.",
         },
         { term: 'QR signature valid', symbol: word('QR signature valid'), text: 'Scanned from a genuine printed QR code.' },
         {
@@ -194,9 +198,13 @@ function sections(nav) {
         {
           term: 'high',
           symbol: <SeverityBadge severity="high" />,
-          text: 'Urgent - for example, a duplicate scan, code-guessing or a patient report.',
+          text: 'Urgent - for example, a duplicate scan, a QR the manufacturer did not print, code-guessing, or a patient report made after their own check.',
         },
-        { term: 'medium', symbol: <SeverityBadge severity="medium" />, text: 'Look into it soon - for example, an unknown code.' },
+        {
+          term: 'medium',
+          symbol: <SeverityBadge severity="medium" />,
+          text: 'Look into it soon - for example, an unknown code, unusual checking, or a patient report with no check behind it.',
+        },
         { term: 'low', symbol: <SeverityBadge severity="low" />, text: 'For the record - for example, an expired pack was checked.' },
       ],
     },
@@ -216,7 +224,11 @@ function sections(nav) {
       title: 'Alert types',
       needs: ['alerts:read'],
       rows: [
-        { term: 'duplicate scan', symbol: reason('duplicate_scan'), text: 'One code verified from more than one place. Starts high.' },
+        {
+          term: 'duplicate scan',
+          symbol: reason('duplicate_scan'),
+          text: 'One code verified from more than one place, or a pack a patient has checked turning up in a delivery. Starts high.',
+        },
         {
           term: 'unknown code',
           symbol: reason('unknown_code'),
@@ -227,12 +239,12 @@ function sections(nav) {
         {
           term: 'guess attack',
           symbol: reason('guess_attack'),
-          text: 'Many failed look-ups from one source - someone may be guessing codes. Starts high.',
+          text: 'Many failed look-ups from one source - one connection, or one phone number for text messages. Someone may be guessing codes. Starts high.',
         },
         {
           term: 'consumer report',
           symbol: reason('consumer_report'),
-          text: 'A patient reported a problem with a pack. Starts high when it follows their own check of the pack, medium when there was no check - those can be filed by anyone about any code.',
+          text: 'A patient reported a problem with a pack. Starts high when it follows their own check of the pack. Starts medium, with "(no check made)" in its title, when there was no check - those can be filed by anyone about any code.',
         },
         {
           term: 'batch anomaly',
@@ -247,7 +259,7 @@ function sections(nav) {
         {
           term: 'unusual checking',
           symbol: reason('unusual_checking'),
-          text: 'One person, phone or connection checked 20 or more different packs for the first time within an hour. A patient checks one or two; this can be someone spoiling genuine stock with codes read off a shelf. Starts medium.',
+          text: 'One person, phone number or connection checked 20 or more different packs for the first time within an hour. A patient checks one or two; this can be someone spoiling genuine stock with codes read off a shelf. It is about a source, not one pack, so it shows no product, batch or scan history. Starts medium.',
         },
       ],
     },
@@ -288,7 +300,11 @@ function sections(nav) {
         { term: 'issued', symbol: <StatusBadge status="issued" />, text: 'Made, not yet printed.' },
         { term: 'printed', symbol: <StatusBadge status="printed" />, text: "Printed on a pack; the batch isn't released yet." },
         { term: 'released', symbol: <StatusBadge status="released" />, text: 'On a pack that is for sale.' },
-        { term: 'verified', symbol: <StatusBadge status="verified" />, text: 'A patient has checked this pack and it came out genuine.' },
+        {
+          term: 'verified',
+          symbol: <StatusBadge status="verified" />,
+          text: 'A patient has checked this pack and it came out genuine. A delivery check alone leaves it released.',
+        },
         {
           term: 'flagged',
           symbol: <StatusBadge status="flagged" />,
