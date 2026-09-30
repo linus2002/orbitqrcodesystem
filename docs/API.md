@@ -90,8 +90,8 @@ signature, so a code sent with `via: "qr"` and no signature - or with any
 wrong signature - is flagged `bad_signature`.
 
 While the `portal.require_details` setting is `on` (the default), every
-verify endpoint - this one, `GET /api/verify/:code` and `POST /api/verify/bulk` -
-refuses with `403 details_required` until the browser has given its details
+verify endpoint - this one, `GET /api/verify/:code` and (when switched on)
+`POST /api/verify/bulk` - refuses with `403 details_required` until the browser has given its details
 through [`POST /api/portal/details`](#post-apiportaldetails). A browser that
 has given them is recorded against each check, whether the setting is on or
 off.
@@ -187,6 +187,11 @@ response to `POST /api/verify`.
 ---
 
 ### `POST /api/verify/bulk`
+
+> **Switched off.** No screen uses it and no pharmacy is set up to, so it
+> answers `404 not_found`, exactly as an address that does not exist. The
+> route and its tests are kept; setting `bulkCheck.enabled` to `true` in
+> `src/routes/public.js` switches it back on as described below.
 
 A pharmacist checking a delivery. Max 100 codes. Rate limit: 20/hour.
 

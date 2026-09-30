@@ -21,7 +21,7 @@ does not defend against.
 | 10 | Patient data leaks from the scan log | IPs and phone numbers stored only as keyed digests; location kept to city granularity - a GPS reading is reduced to its city before it is stored, and only this site may ask for it (`Permissions-Policy: geolocation=(self)`) | - |
 | 11 | Insider tampers with records | Append-only scans, audit log and SMS log; every admin action audited; the Studio is read-only | A member of the Sanity project, or anyone holding the API token, can still edit documents through the Sanity API |
 | 12 | The database is read directly, bypassing the app | Sanity credentials are server-side only and never sent to the browser; the dataset is private; no CORS origin for the web app; the build fails on a public dataset | The token grants full read/write - store it as a secret, give it to nothing else |
-| 13 | Someone spoils genuine stock by checking codes read off packs they did not buy, so each real buyer is told "already verified elsewhere" | The bulk (delivery) check does not count as a verification; one person, phone or connection making many first checks in an hour raises `unusual_checking` | One check per code still spoils it; codes printed on the outside of the pack can be read by anyone who handles it |
+| 13 | Someone spoils genuine stock by checking codes read off packs they did not buy, so each real buyer is told "already verified elsewhere" | The bulk (delivery) check is switched off, and when on it does not count as a verification; one person, phone or connection making many first checks in an hour raises `unusual_checking` | One check per code still spoils it; codes printed on the outside of the pack can be read by anyone who handles it |
 
 ---
 
@@ -148,7 +148,7 @@ chunk, so it can be built and served independently.
 | Endpoint | Limit |
 |---|---|
 | `POST /api/verify` | 12/min and 80/hour per IP |
-| `POST /api/verify/bulk` | 20/hour per IP |
+| `POST /api/verify/bulk` | Switched off (answers as an unknown address). When on: 20/hour per IP |
 | `POST /api/report` | 5/hour per IP |
 | `POST /api/auth/login` | 5 per 15 min per IP+email |
 | `POST /api/sms/inbound` | 60/min for the gateway, plus `RL_VERIFY_PER_MIN` / `RL_VERIFY_PER_HOUR` per sender number (every text arrives from the gateway's one address, so the number is the only fair key) |

@@ -140,6 +140,19 @@ router.get(
 // ---------------------------------------------------------------------------
 // POST /api/verify/bulk - a pharmacist checking a delivery
 // ---------------------------------------------------------------------------
+/*
+ * The bulk check is switched off. No screen uses it and no pharmacy is set
+ * up to, so as a public address it only let a stranger check a hundred codes
+ * at a time. While `enabled` is false the address answers exactly as one
+ * that does not exist, before the rate limit and the details check, either
+ * of which would show that it is here.
+ *
+ * Nothing is deleted: this route, verification.verifyBulk and their tests are
+ * kept, so switching it back on is setting `enabled` to true - and giving
+ * back the legend's delivery-check wording (admin/components/Legend.jsx).
+ */
+export const bulkCheck = { enabled: false };
+
 /**
  * Body: { codes: string[] }  (max 100)
  *
@@ -148,6 +161,8 @@ router.get(
  */
 router.post(
   '/verify/bulk',
+  // Switched off: passed on as if this route were not here.
+  (req, res, next) => (bulkCheck.enabled ? next() : next('route')),
   rateLimit({ limiters: [bulkLimiter] }),
   verifiers.requireDetails,
   async (req, res) => {

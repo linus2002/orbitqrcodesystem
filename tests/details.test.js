@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { freshDb, seedBasics, seedUser, startServer, resetRateLimits, giveDetails, DETAILS } from './helpers.js';
 import * as db from '../src/db/index.js';
 import { normalizePhone } from '../src/services/verifiers.js';
+import { bulkCheck } from '../src/routes/public.js';
 
 let client;
 let codes;
@@ -52,8 +53,15 @@ test('a check is refused until the person says who they are', async () => {
   const deepLink = await client.get(`/api/verify/${encodeURIComponent(codes[0])}`);
   assert.equal(deepLink.status, 403);
 
-  const bulk = await client.post('/api/verify/bulk', { codes: [codes[0], codes[1]] });
-  assert.equal(bulk.status, 403);
+  // The bulk check is switched off (see bulk-check-off.test.js); switched on,
+  // it is behind the same gate.
+  bulkCheck.enabled = true;
+  try {
+    const bulk = await client.post('/api/verify/bulk', { codes: [codes[0], codes[1]] });
+    assert.equal(bulk.status, 403);
+  } finally {
+    bulkCheck.enabled = false;
+  }
 
   assert.equal(await db.count('scan'), 0, 'nothing was checked or logged');
 });

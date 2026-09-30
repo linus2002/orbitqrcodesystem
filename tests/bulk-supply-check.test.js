@@ -10,20 +10,26 @@
  * Now a delivery check is decided by the same rules but changes nothing a
  * patient's check depends on; and a pack a patient HAS verified, turning up
  * in a delivery, is flagged whatever the duplicate threshold.
+ *
+ * The bulk check is switched off (see bulk-check-off.test.js). These tests
+ * switch it on, so the rules are right on the day it comes back.
  */
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { freshDb, seedBasics, startServer, resetRateLimits, giveDetails } from './helpers.js';
 import * as db from '../src/db/index.js';
+import { bulkCheck } from '../src/routes/public.js';
 
 let client;
 let codes;
 
 before(async () => {
   client = await startServer();
+  bulkCheck.enabled = true;
 });
 after(async () => {
+  bulkCheck.enabled = false;
   await client.close();
 });
 

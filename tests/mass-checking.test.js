@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { freshDb, seedBasics, startServer, resetRateLimits, giveDetails } from './helpers.js';
 import * as db from '../src/db/index.js';
 import { config } from '../src/config.js';
+import { bulkCheck } from '../src/routes/public.js';
 
 let client;
 let codes;
@@ -73,9 +74,16 @@ test('re-checking packs already checked does not count - only first checks do', 
 });
 
 test('a delivery check of many codes does not count', async () => {
-  const res = await client.post('/api/verify/bulk', { codes: codes.slice(0, LIMIT + 5) }, { fromIp: '198.51.100.90' });
-  assert.equal(res.body.genuine, LIMIT + 5);
-  assert.equal(await db.count('alert', { type: 'unusual_checking' }), 0);
+  // The bulk check is switched off (see bulk-check-off.test.js); this is for
+  // the day it is switched back on.
+  bulkCheck.enabled = true;
+  try {
+    const res = await client.post('/api/verify/bulk', { codes: codes.slice(0, LIMIT + 5) }, { fromIp: '198.51.100.90' });
+    assert.equal(res.body.genuine, LIMIT + 5);
+    assert.equal(await db.count('alert', { type: 'unusual_checking' }), 0);
+  } finally {
+    bulkCheck.enabled = false;
+  }
 });
 
 test('different people each checking a few packs raise nothing', async () => {
