@@ -338,29 +338,20 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
    -------------------------------------------------------------------------- */
 
 /*
- * Buttons share the pill look of the status badges: a solid colour that
- * lightens toward the bottom edge, white text, a soft shadow. Blue is the
- * button colour; --pill swaps it (red for a destructive action). The quiet
- * and ghost variants stay transparent - they are the low-weight actions.
+ * Buttons share the flat pill look of the status badges: one solid colour,
+ * bold white text, no border and no shadow. Blue is the button colour;
+ * --pill swaps it (red for a destructive action). The quiet and ghost
+ * variants stay transparent - they are the low-weight actions.
  */
 .btn {
-  --pill: var(--brand);
+  --pill: var(--logo-blue);
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   font: 500 0.94rem/1 var(--sans);
   padding: 11px 20px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 0;
   color: #fff;
-  background: linear-gradient(
-    180deg,
-    var(--pill) 0%,
-    var(--pill) 45%,
-    color-mix(in srgb, var(--pill) 72%, #fff) 100%
-  );
-  box-shadow:
-    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
-    0 1px 3px color-mix(in srgb, var(--pill) 40%, transparent);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  background: var(--pill);
   cursor: pointer;
   text-decoration: none;
   transition: filter 0.14s, background 0.14s, transform 0.06s;
@@ -387,7 +378,7 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .btn-quiet:hover:not(:disabled),
 .btn-ghost:hover:not(:disabled) { background: var(--surface-3); filter: none; }
 
-.btn-primary { --pill: var(--brand); }
+.btn-primary { --pill: var(--logo-blue); }
 .btn-danger { --pill: #e0402f; }
 
 .btn-lg { font-size: 1.05rem; padding: 15px 26px; min-height: 52px; }
@@ -519,8 +510,8 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
    Badges + pills
    -------------------------------------------------------------------------- */
 
-/* Solid pills: one colour per tone, lightening toward the bottom edge, with
-   white text. --pill is the tone; the gradient and shadow derive from it. */
+/* Solid pills: one flat colour per tone, bold white text, no border or
+   shadow. --pill is the tone the background derives from. */
 .badge {
   --pill: #7b8494;
   display: inline-flex; align-items: center; gap: 5px;
@@ -529,43 +520,25 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
   border-radius: 999px;
   border: 0;
   color: #fff;
-  background: linear-gradient(
-    180deg,
-    var(--pill) 0%,
-    var(--pill) 45%,
-    color-mix(in srgb, var(--pill) 72%, #fff) 100%
-  );
-  box-shadow:
-    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
-    0 1px 2px color-mix(in srgb, var(--pill) 35%, transparent);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  background: var(--pill);
   white-space: nowrap;
 }
 .badge svg { width: 13px; height: 13px; }
 .badge-good { --pill: #16a34a; }
 .badge-danger { --pill: #e0402f; }
 .badge-warn { --pill: #f07a12; }
-.badge-info { --pill: #2a78d6; }
+.badge-info { --pill: var(--logo-blue); }
 .badge-neutral { --pill: #7b8494; }
 
 /* A small action button in the same solid-pill style (the "View" in a table row) */
 .btn-pill {
-  --pill: #2a78d6;
+  --pill: var(--logo-blue);
   display: inline-flex; align-items: center; justify-content: center;
   font: 500 0.78rem/1 var(--sans);
   padding: 7px 16px;
   border: 0; border-radius: 999px;
   color: #fff; cursor: pointer;
-  background: linear-gradient(
-    180deg,
-    var(--pill) 0%,
-    var(--pill) 45%,
-    color-mix(in srgb, var(--pill) 72%, #fff) 100%
-  );
-  box-shadow:
-    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
-    0 1px 3px color-mix(in srgb, var(--pill) 40%, transparent);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  background: var(--pill);
   transition: filter 0.15s ease, transform 0.15s ease;
 }
 .btn-pill:hover { filter: brightness(1.06); }
@@ -735,7 +708,7 @@ table.data .badge {
      the subject on the right. */
   background-image:
     linear-gradient(90deg, rgba(8, 30, 52, 0.66) 0%, rgba(8, 30, 52, 0.5) 38%, rgba(8, 30, 52, 0) 62%),
-    url("/img/bgimage.jpg");
+    url("/img/contactushero.png");
   background-size: cover;
   background-position: right center;
   background-repeat: no-repeat;
@@ -747,19 +720,19 @@ table.data .badge {
   .page-white::before {
     background-position: 32% top;
     /* A phone shows only the left of the photo: darken all of it. */
-    background-image: linear-gradient(rgba(8, 30, 52, 0.58), rgba(8, 30, 52, 0.58)), url("/img/bgimage.jpg");
+    background-image: linear-gradient(rgba(8, 30, 52, 0.58), rgba(8, 30, 52, 0.58)), url("/img/contactushero.png");
   }
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .page-white::before {
     background-color: var(--page);
-    background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/bgimage.jpg");
+    background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/contactushero.png");
   }
 }
 :root[data-theme="dark"] .page-white::before {
   background-color: var(--page);
-  background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/bgimage.jpg");
+  background-image: linear-gradient(rgba(11, 17, 26, 0.86), rgba(11, 17, 26, 0.86)), url("/img/contactushero.png");
 }
 
 /* On the customer page a card has no border line: a soft shadow lifts it
