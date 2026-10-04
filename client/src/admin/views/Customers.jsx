@@ -11,7 +11,8 @@
  */
 import { useState } from 'react';
 
-import { useApi, useDebounced } from '../../lib/hooks.jsx';
+import { api } from '../../lib/api.js';
+import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber, fmtRelative } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
@@ -31,6 +32,9 @@ const ROLES = [
 ];
 const roleLabel = (role) => ROLES.find((r) => r.value === role)?.label ?? role;
 
+/** What a removed person's name, mobile and email read as (services/verifiers.js). */
+const REMOVED = '(removed)';
+
 export default function Customers() {
   const [filters, setFilters] = useState({ page: 1, role: '' });
   const [search, setSearch] = useState('');
@@ -39,7 +43,7 @@ export default function Customers() {
 
   useHeader('Customers', 'Who has been checking medicines on the portal, and how to reach them.');
 
-  const { data, error, loading } = useApi('/api/admin/customers', {
+  const { data, error, loading, reload } = useApi('/api/admin/customers', {
     query: { ...filters, search: debounced, pageSize: 25 },
   });
 
@@ -98,6 +102,7 @@ export default function Customers() {
               title: row.full_name,
               subtitle: roleLabel(row.role),
               body: <CustomerDetail id={row.id} />,
+              footer: <CustomerActions person={row} drawer={drawer} reload={reload} />,
             })
           }
           columns={[
@@ -106,6 +111,13 @@ export default function Customers() {
               render: (r) => (
                 <>
                   {r.full_name}
+                  {/* The same mobile and email from several browsers: one person. */}
+                  {r.browsers > 1 && (
+                    <>
+                      {' '}
+                      <span className="badge badge-neutral">{r.browsers} browsers</span>
+                    </>
+                  )}
                   <br />
                   <span className="text-muted text-sm">{roleLabel(r.role)}</span>
                 </>
@@ -159,6 +171,10 @@ function CustomerDetail({ id }) {
           ['Got the medicine from', data.purchase_location ?? 'not given'],
           ['Consent given', fmtDate(data.consent_at, { withTime: true })],
           ['Checks', fmtNumber(data.check_count)],
+          data.browsers > 1 && [
+            'Gave details from',
+            `${data.browsers} browsers - their checks are combined here`,
+          ],
           ['First seen', fmtDate(data.created_at, { withTime: true })],
         ]}
       />
@@ -179,5 +195,172 @@ function CustomerDetail({ id }) {
         />
       </div>
     </>
+  );
+}
+
+/**
+ * What an administrator can do on a person's request, under the privacy
+ * notice: correct their details, or remove them. Admin only - the server
+ * checks the same permission.
+ */
+function CustomerActions({ person, drawer, reload }) {
+  const canWrite = usePermission('customers:write');
+  if (!canWrite || person.full_name === REMOVED) return null;
+
+  const open = (title, body) => drawer.open({ title, subtitle: person.full_name, body });
+
+  return (
+    <div className="row row-wrap">
+      <button
+        className="btn btn-sm"
+        type="button"
+        onClick={() => open('Correct details', <CorrectForm person={person} drawer={drawer} reload={reload} />)}
+      >
+        Correct details
+      </button>
+      <button
+        className="btn btn-sm btn-danger"
+        type="button"
+        onClick={() =>
+          open("Remove this person's details", <RemoveForm person={person} drawer={drawer} reload={reload} />)
+        }
+      >
+        Remove details
+      </button>
+    </div>
+  );
+}
+
+/** The reason box both forms end with: it goes into the audit log. */
+function ReasonField({ id, value, onChange, hint }) {
+  return (
+    <div className="field">
+      <label className="label" htmlFor={id}>
+        Reason <span className="text-muted">(required)</span>
+      </label>
+      <textarea className="textarea" id={id} value={value} onChange={onChange} maxLength={300} />
+      <p className="hint">{hint}</p>
+    </div>
+  );
+}
+
+function CorrectForm({ person, drawer, reload }) {
+  const toast = useToast();
+  const initial = {
+    fullName: person.full_name ?? '',
+    phone: person.phone ?? '',
+    email: person.email ?? '',
+    city: person.city ?? '',
+    purchaseLocation: person.purchase_location ?? '',
+  };
+  const [form, setForm] = useState(initial);
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(null);
+    // Only what was changed is sent, so nothing else is touched or logged.
+    const changed = Object.fromEntries(
+      Object.entries(form).filter(([key, value]) => value.trim() !== initial[key].trim())
+    );
+    if (!Object.keys(changed).length) {
+      setError('Nothing has been changed.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/admin/customers/${person.id}`, {
+        method: 'PATCH',
+        body: { ...changed, reason: reason.trim() },
+      });
+      toast('Details corrected.', 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      setError(err.formMessage);
+      setBusy(false);
+    }
+  }
+
+  const field = (key, label, props = {}) => (
+    <div className="field">
+      <label className="label" htmlFor={`c-${key}`}>{label}</label>
+      <input className="input" id={`c-${key}`} value={form[key]} onChange={set(key)} {...props} />
+    </div>
+  );
+
+  return (
+    <form className="stack" onSubmit={submit} noValidate>
+      {field('fullName', 'Full name', { maxLength: 120 })}
+      {field('phone', 'Mobile number', { maxLength: 32, type: 'tel' })}
+      {field('email', 'Email address', { type: 'email' })}
+      {field('city', 'City or municipality', { maxLength: 120 })}
+      {field('purchaseLocation', 'Where they got the medicine', { maxLength: 200 })}
+      <ReasonField
+        id="cReason"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        hint="For example: the person called on 26 Sept to correct their mobile number."
+      />
+      {error && <p className="field-error" role="alert">{error}</p>}
+      <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
+        {busy ? 'Saving...' : 'Save the correction'}
+      </button>
+    </form>
+  );
+}
+
+function RemoveForm({ person, drawer, reload }) {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api(`/api/admin/customers/${person.id}/remove`, {
+        method: 'POST',
+        body: { reason: reason.trim() },
+      });
+      toast("The person's details have been removed.", 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      setError(err.formMessage);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="stack" onSubmit={submit} noValidate>
+      <div className="alert alert-warn">
+        <Icon name="alert" />
+        <span>
+          This cannot be undone. Their name, mobile number, email, city and where they got the
+          medicine are removed
+          {person.browsers > 1 ? `, from all ${person.browsers} browsers they used` : ''}, as are
+          the name and contact they typed into reports. Their phone will be asked for details
+          again. Their past checks stay in the scan log without their name, so the record of what
+          was checked, when and where is kept.
+        </span>
+      </div>
+      <ReasonField
+        id="rReason"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        hint="For example: the person asked by phone on 26 Sept for their details to be removed."
+      />
+      {error && <p className="field-error" role="alert">{error}</p>}
+      <button className="btn btn-danger btn-block" type="submit" disabled={busy}>
+        {busy ? 'Removing...' : 'Remove their details'}
+      </button>
+    </form>
   );
 }

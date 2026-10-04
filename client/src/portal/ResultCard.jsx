@@ -18,6 +18,8 @@ import { Link } from 'react-router-dom';
 import { fmtDate } from '../lib/format.js';
 import { Icon } from '../components/Icons.jsx';
 import ReportForm from './ReportForm.jsx';
+import WhereBought from './WhereBought.jsx';
+import { placeOffers } from './where.js';
 
 const PRESENTATION = {
   genuine: { cls: 'banner-genuine', icon: 'check', heading: 'Genuine' },
@@ -25,10 +27,25 @@ const PRESENTATION = {
   invalid: { cls: 'banner-invalid', icon: 'help', heading: 'Check the code' },
 };
 
-export default function ResultCard({ result, onCheckAnother, supportPhone, checker }) {
+/*
+ * Someone who has checked this pack twice already: not checked again, just
+ * told their last answer, which the message spells out. Calm on purpose -
+ * this is not a new finding, and a fresh red warning on every re-check is
+ * exactly what would let someone make a genuine pack look alarming.
+ */
+const LIMIT = { cls: 'banner-info', icon: 'help', heading: 'Already checked twice' };
+
+export default function ResultCard({ result, onCheckAnother, supportPhone, checker, portal, onPlaceSaved }) {
   const [reporting, setReporting] = useState(false);
-  const presentation = PRESENTATION[result.result] ?? PRESENTATION.invalid;
+  // What the person gave in "where did you buy it", so a report starts from it.
+  const [given, setGiven] = useState(null);
+  const presentation =
+    result.reason === 'check_limit' ? LIMIT : PRESENTATION[result.result] ?? PRESENTATION.invalid;
   const genuine = result.result === 'genuine';
+  // A real check of a real-looking code: not a typo, and not a repeat past
+  // the personal limit (that answer is an earlier check, already asked about).
+  const asksWhere = Boolean(result.scanId) && result.result !== 'invalid' && result.reason !== 'check_limit';
+  const offers = placeOffers(portal);
 
   return (
     <article className="card result-card">
@@ -42,7 +59,35 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
 
       {result.product && <Details result={result} />}
 
+      {/* Before the leaflet on a suspicious result - it is the thing to do
+          next - and after it on a genuine one, where it is a small favour. */}
+      {asksWhere && !genuine && (
+        <WhereBought
+          key={result.scanId}
+          result={result}
+          suspicious
+          offers={offers}
+          onSaved={(g) => {
+            setGiven(g);
+            onPlaceSaved?.(g);
+          }}
+        />
+      )}
+
       {genuine && result.leaflet && <Leaflet leaflet={result.leaflet} />}
+
+      {asksWhere && genuine && (
+        <WhereBought
+          key={result.scanId}
+          result={result}
+          suspicious={false}
+          offers={offers}
+          onSaved={(g) => {
+            setGiven(g);
+            onPlaceSaved?.(g);
+          }}
+        />
+      )}
 
       <div className="card-body">
         {/* The accordion above shows the current leaflet; the full page also
@@ -98,7 +143,17 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
         </div>
       </div>
 
-      {reporting && <ReportForm result={result} checker={checker} />}
+      {reporting && (
+        <ReportForm
+          key={result.scanId ?? 'no-check'}
+          result={result}
+          checker={checker}
+          // Their own answer for this pack, given moments ago, is not a guess:
+          // the report starts from it. Otherwise it starts empty, with offers.
+          initial={given}
+          offers={offers}
+        />
+      )}
     </article>
   );
 }

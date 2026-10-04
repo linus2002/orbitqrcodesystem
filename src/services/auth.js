@@ -33,6 +33,18 @@ import {
 import * as audit from './audit.js';
 import logger from '../lib/logger.js';
 
+/*
+ * Shipments are switched off. While this is false no role holds their
+ * permissions, so the Shipments menu entry, the screen and its API are all
+ * closed, and a batch's detail lists no shipments. Nothing is deleted: the
+ * stored shipments, the screen and the routes all stay, and
+ * tests/shipments-off.test.js keeps the routes working while they are
+ * unused. Setting this to true gives each role back exactly the access it
+ * had before (then it came with batches:read and batches:write).
+ */
+const SHIPMENTS_ENABLED = false;
+const shipments = (...perms) => (SHIPMENTS_ENABLED ? perms : []);
+
 /**
  * Role capabilities.
  *
@@ -45,15 +57,20 @@ import logger from '../lib/logger.js';
 export const PERMISSIONS = {
   admin: [
     'dashboard:view', 'products:read', 'products:write', 'batches:read', 'batches:write',
-    'codes:read', 'codes:export', 'scans:read', 'alerts:read', 'alerts:write',
+    'codes:read', 'codes:export', 'scans:read', 'customers:write', 'alerts:read', 'alerts:write',
     'reports:read', 'reports:write', 'users:read', 'users:write', 'audit:read', 'settings:write',
+    ...shipments('shipments:read', 'shipments:write'),
   ],
   security: [
     'dashboard:view', 'products:read', 'products:write', 'batches:read', 'batches:write',
     'codes:read', 'codes:export', 'scans:read', 'alerts:read', 'alerts:write',
     'reports:read', 'reports:write', 'audit:read',
+    ...shipments('shipments:read', 'shipments:write'),
   ],
-  regulator: ['dashboard:view', 'products:read', 'batches:read', 'compliance:read'],
+  regulator: [
+    'dashboard:view', 'products:read', 'batches:read', 'compliance:read',
+    ...shipments('shipments:read'),
+  ],
 };
 
 export const can = (role, permission) => (PERMISSIONS[role] ?? []).includes(permission);
@@ -107,7 +124,13 @@ export async function login(email, password, req) {
     );
   }
 
-  if (!user || user.status !== 'active' || !verifyPassword(password, user.password_hash)) {
+  // Exactly one password check on every attempt, including an unknown or a
+  // suspended account. Skipping it made those refusals ~100ms faster than a
+  // wrong password on a real account, which told a stranger which emails
+  // exist even though the message is the same.
+  const passwordOk = verifyPassword(password, user?.password_hash ?? decoyHash());
+
+  if (!user || user.status !== 'active' || !passwordOk) {
     if (user) await registerFailure(user);
     // Uniform message + uniform timing: never reveal whether the email exists.
     throw unauthorized('Email or password is incorrect.');
@@ -122,6 +145,15 @@ export async function login(email, password, req) {
 
   return { user: publicUser(await db.get('user', user.id)), ...session };
 }
+
+/*
+ * What a password is checked against when there is no account to check it
+ * against: the hash of a random password, so it matches nothing. Made on
+ * first use rather than at import, so starting the server does not pay for
+ * a hash it may never need.
+ */
+let decoy;
+const decoyHash = () => (decoy ??= hashPassword(randomToken(24)));
 
 /** Record a failed attempt and lock the account once the threshold is hit. */
 async function registerFailure(user) {

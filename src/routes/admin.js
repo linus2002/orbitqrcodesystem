@@ -187,9 +187,10 @@ router.patch('/products/:id', requirePermission('products:write'), async (req, r
  * version or none does, so two strengths of one medicine can never end up
  * telling patients different things.
  *
- * The grouping is not stored: the shared version string IS the grouping.
- * That keeps the schema unchanged, and the form reconstructs the set on the
- * next revision from whichever products share the current version.
+ * The grouping is not stored: the shared version string IS the grouping,
+ * which keeps the schema unchanged. The form does not guess the set from it
+ * on the next revision - unrelated products can share a version number - so
+ * the person ticks every product the publish covers.
  *
  * A reason is required and goes into the audit trail. Whoever operates this
  * after handover will be asked by an inspector who changed a leaflet and why,
@@ -298,6 +299,96 @@ router.post('/products/:id/leaflets', requirePermission('products:write'), async
   res.status(201).json({
     ...written[0].leaflet,
     coverage,
+    pdf: pdf ? { filename: pdf.filename, size: pdf.size } : null,
+  });
+});
+
+/**
+ * Give a product the leaflet another product already has - its current
+ * version, as it stands, without publishing a new one.
+ *
+ * The case is a new strength of a medicine: ELT25 has its leaflet, ELT50 is
+ * added later and is covered by the same document. The publish above can
+ * only bring ELT50 in by publishing a NEW version to both, which puts a
+ * revision on ELT25's record that changed nothing. This writes ELT50 a row
+ * with the same version, language, sections and PDF instead - the same
+ * shared version a joint publish would have given them. A later revision
+ * covers both when the person ticks the other under "Also applies to".
+ *
+ * `version` is the source version the person was shown, and must still be
+ * the current one: if the source was revised in the meantime, what would be
+ * copied is not what they checked, and they are asked to look again.
+ */
+router.post('/products/:id/leaflets/adopt', requirePermission('products:write'), async (req, res) => {
+  const product = await db.get('product', req.params.id);
+  if (!product) throw notFound('Product not found');
+
+  const data = validate(req.body, {
+    fromProductId: { type: 'int', required: true, min: 1 },
+    language: { type: 'string', max: 8, default: 'en' },
+    version: { type: 'string', required: true, max: 20 },
+    reason: { type: 'string', required: true, min: 5, max: 300 },
+  });
+  if (data.fromProductId === product.id) {
+    throw badRequest('Choose a different product to take the leaflet from.');
+  }
+  const source = await db.get('product', data.fromProductId);
+  if (!source) throw badRequest('The product to take the leaflet from does not exist.');
+
+  const fromId = await leaflets.currentLeafletId(source.id, { lang: data.language });
+  if (!fromId) throw conflict(`${source.sku} has no published leaflet in "${data.language}" to use.`);
+  const from = await db.get('leaflet', fromId);
+  if (from.version !== data.version) {
+    throw conflict(
+      `${source.sku}'s current leaflet is now v${from.version}, not v${data.version}: it changed ` +
+        'since you opened this. Check it again before using it.'
+    );
+  }
+
+  // Named rather than left to the unique key, as in the publish above.
+  const clash = await db.findOne(
+    'leaflet',
+    { product_id: product.id, version: from.version, language: data.language },
+    { fields: ['id'] }
+  );
+  if (clash) {
+    const mine = await leaflets.currentLeafletId(product.id, { lang: data.language });
+    throw conflict(
+      clash.id === mine
+        ? `${product.sku} already shows leaflet v${from.version} (${data.language}); nothing to change.`
+        : `${product.sku} already had a leaflet v${from.version} (${data.language}) of its own, so ` +
+            `the two cannot share that version number. Publish a new version from ${source.sku} ` +
+            `and tick ${product.sku} under "Also applies to" instead.`
+    );
+  }
+
+  const leaflet = await db.insert('leaflet', {
+    product_id: product.id,
+    version: from.version,
+    language: data.language,
+    sections: (from.sections ?? []).map((s) => ({ heading: String(s.heading), body: String(s.body) })),
+    file_id: from.file_id ?? null,
+  });
+  const pdf = from.file_id ? await leaflets.pdfFile(from.file_id) : null;
+
+  // A publish, from this product's side - its trail reads as one like any
+  // other - that says where the content came from.
+  await audit.record({
+    actor: req.user,
+    req,
+    action: 'leaflet.publish',
+    entityType: 'leaflet',
+    entityId: leaflet.id,
+    detail: {
+      sku: product.sku, version: from.version, language: data.language, reason: data.reason,
+      copiedFrom: { sku: source.sku, leafletId: from.id },
+      pdf: pdf ? { filename: pdf.filename, size: pdf.size, sha256: pdf.sha256 } : null,
+    },
+  });
+
+  res.status(201).json({
+    ...leaflet,
+    copiedFrom: { productId: source.id, sku: source.sku, leafletId: from.id },
     pdf: pdf ? { filename: pdf.filename, size: pdf.size } : null,
   });
 });
@@ -427,7 +518,11 @@ router.get('/batches/:id', requirePermission('batches:read'), async (req, res) =
   res.json({
     ...batch,
     stats: await serialization.batchStats(batch.id),
-    shipments: await db.findMany('shipment', { batch_id: batch.id }, { order: 'shipped_at desc' }),
+    // Empty while shipments are switched off (services/auth.js), so the field
+    // stays for anything that reads it but no shipment shows through here.
+    shipments: authService.can(req.user.role, 'shipments:read')
+      ? await db.findMany('shipment', { batch_id: batch.id }, { order: 'shipped_at desc' })
+      : [],
     openAlerts: await db.count('alert', { batch_id: batch.id, status: { in: ['open', 'investigating'] } }),
   });
 });
@@ -435,6 +530,72 @@ router.get('/batches/:id', requirePermission('batches:read'), async (req, res) =
 /** Run the serialization engine for a batch. */
 router.post('/batches/:id/issue-codes', requirePermission('batches:write'), async (req, res) => {
   res.status(201).json(await serialization.issueCodes(Number(req.params.id), { actor: req.user, req }));
+});
+
+/**
+ * Remove a batch that never got past planning - a typo in the batch number,
+ * the wrong product, a run that was cancelled.
+ *
+ * Only while no code exists for it. From the first code on, the codes may be
+ * with the packaging line and the batch is part of the record for good; it
+ * is recalled or closed, never removed. "planned" alone is not enough:
+ * issuance writes codes in chunks and marks the batch only after the last,
+ * so an interrupted run leaves a planned batch that already has codes. Scans,
+ * alerts and shipments naming it are checked too - none should exist without
+ * codes, and if one does, removing the batch would orphan it.
+ *
+ * The delete is conditional on the batch still being planned. An issuance
+ * that starts in the instant between the checks and the delete would fail at
+ * its final step (the batch it marks is gone), so the person issuing sees an
+ * error and no label is ever printed from it.
+ *
+ * The batch number is free again afterwards. A new batch under it gets a new
+ * id, and codes are keyed on the id, so its codes cannot collide with any this
+ * one might have had. The audit entry keeps what the batch was.
+ */
+router.delete('/batches/:id', requirePermission('batches:write'), async (req, res) => {
+  const batch = await batchWithProduct(req.params.id);
+  if (!batch) throw notFound('Batch not found');
+
+  const cannot = `Batch ${batch.batch_number} cannot be removed:`;
+  if (batch.status !== 'planned') {
+    throw conflict(`${cannot} its codes have been issued, so it is part of the record. Recall or close it instead.`);
+  }
+  const [codes, scans, alerts, shipments] = await Promise.all([
+    db.count('code', { batch_id: batch.id }),
+    db.count('scan', { batch_id: batch.id }),
+    db.count('alert', { batch_id: batch.id }),
+    db.count('shipment', { batch_id: batch.id }),
+  ]);
+  if (codes) {
+    throw conflict(
+      `${cannot} ${codes} of its codes already exist, from an issuance that did not finish. ` +
+        'Issue its codes again to complete it.'
+    );
+  }
+  if (scans || alerts || shipments) {
+    throw conflict(`${cannot} scans, alerts or shipments already refer to it.`);
+  }
+
+  const removed = await db.removeWhere('batch', { id: batch.id, status: 'planned' });
+  if (!removed) throw conflict(`${cannot} it changed while it was being removed. Reload and look again.`);
+
+  await audit.record({
+    actor: req.user,
+    req,
+    action: 'batch.delete',
+    entityType: 'batch',
+    entityId: batch.id,
+    detail: {
+      batchNumber: batch.batch_number,
+      sku: batch.sku,
+      quantity: batch.quantity,
+      mfgDate: batch.mfg_date,
+      expiryDate: batch.expiry_date,
+      isTest: batch.is_test === 1,
+    },
+  });
+  res.status(204).end();
 });
 
 /** Move a batch through its lifecycle. */
@@ -625,13 +786,28 @@ router.get('/customers.csv', requirePermission('scans:read'), async (req, res) =
     `customers-${new Date().toISOString().slice(0, 10)}.csv`,
     analytics.toCsv(items, [
       'id', 'full_name', 'phone', 'email', 'role', 'city', 'purchase_location',
-      'check_count', 'flagged_count', 'last_check_at', 'consent_at', 'created_at',
+      'check_count', 'flagged_count', 'last_check_at', 'consent_at', 'created_at', 'browsers',
     ])
   );
 });
 
 router.get('/customers/:id', requirePermission('scans:read'), async (req, res) => {
   res.json(await verifierService.detail(req.params.id));
+});
+
+/*
+ * A person's own request, under the privacy notice: correct their details,
+ * or remove them (which is also how a withdrawn agreement is honoured).
+ * Admin only, a reason every time, both in the audit log. See
+ * services/verifiers.js for what removal keeps and what it clears.
+ */
+router.patch('/customers/:id', requirePermission('customers:write'), async (req, res) => {
+  res.json(await verifierService.correct(req.params.id, req.body, { actor: req.user, req }));
+});
+
+router.post('/customers/:id/remove', requirePermission('customers:write'), async (req, res) => {
+  const { reason } = validate(req.body, { reason: { type: 'string', required: true, min: 5, max: 300 } });
+  res.json(await verifierService.remove(req.params.id, { reason, actor: req.user, req }));
 });
 
 // ===========================================================================
@@ -815,6 +991,25 @@ router.get('/reports', requirePermission('reports:read'), async (req, res) => {
       },
     })).map((c) => [c.id, c])
   );
+  // Who made the check a report is about, when they gave their details: the
+  // report keeps that check (only ever the reporter's own - see /api/report).
+  // Behind scans:read, like the Customers screen, because it names a person.
+  const checkers = new Map();
+  if (authService.can(req.user.role, 'scans:read')) {
+    const scans = await db.findMany('scan', { id: { in: rows.map((r) => r.scan_id).filter(Boolean) } }, {
+      fields: ['verifier_id'],
+    });
+    const people = new Map(
+      (await db.findMany('verifier', { id: { in: scans.map((s) => s.verifier_id).filter(Boolean) } }, {
+        fields: ['full_name', 'phone', 'email', 'role'],
+      })).map((p) => [p.id, p])
+    );
+    for (const s of scans) {
+      const p = people.get(s.verifier_id);
+      if (p) checkers.set(s.id, { id: p.id, name: p.full_name, phone: p.phone, email: p.email, role: p.role });
+    }
+  }
+
   const items = rows.map((r) => {
     const c = codes.get(r.code_id);
     return {
@@ -822,6 +1017,7 @@ router.get('/reports', requirePermission('reports:read'), async (req, res) => {
       registry_code: c?.code ?? null,
       batch_number: c?.batch_number ?? null,
       product_name: c?.product_name ?? null,
+      checker: checkers.get(r.scan_id) ?? null,
     };
   });
   res.json({ items, total, ...meta });
@@ -841,9 +1037,13 @@ router.patch('/reports/:id', requirePermission('reports:write'), async (req, res
 
 // ===========================================================================
 // Shipments (distribution leg)
+//
+// Switched off: no role holds shipments:read or shipments:write, so every
+// route here answers 403. They are kept, and tested, so switching shipments
+// back on is one line (SHIPMENTS_ENABLED in services/auth.js).
 // ===========================================================================
 
-router.get('/shipments', requirePermission('batches:read'), async (req, res) => {
+router.get('/shipments', requirePermission('shipments:read'), async (req, res) => {
   const { limit, offset, ...meta } = db.paginate(listQuery(req));
   const total = await db.count('shipment');
   const items = await db.findMany('shipment', {}, {
@@ -858,7 +1058,7 @@ router.get('/shipments', requirePermission('batches:read'), async (req, res) => 
   res.json({ items, total, ...meta });
 });
 
-router.post('/shipments', requirePermission('batches:write'), async (req, res) => {
+router.post('/shipments', requirePermission('shipments:write'), async (req, res) => {
   const data = validate(req.body, {
     batchId: { type: 'int', required: true, min: 1 },
     reference: { type: 'string', required: true, max: 40 },
@@ -893,7 +1093,7 @@ router.post('/shipments', requirePermission('batches:write'), async (req, res) =
   res.status(201).json(shipment);
 });
 
-router.patch('/shipments/:id/receive', requirePermission('batches:write'), async (req, res) => {
+router.patch('/shipments/:id/receive', requirePermission('shipments:write'), async (req, res) => {
   const shipment = await db.get('shipment', req.params.id);
   if (!shipment) throw notFound('Shipment not found');
 

@@ -48,8 +48,11 @@ test('health check reports the database state', async () => {
 
 test('a counterfeit is a 200 with a flagged body, not an HTTP error', async () => {
   await client.post('/api/verify', { code: codes[0] }, { fromIp: '198.51.100.7' });
-  // A different device: the same-source grace window must not apply.
-  const res = await client.post('/api/verify', { code: codes[0] }, { fromIp: '203.0.113.20' });
+  // A different person on a different device: nothing makes it a repeat.
+  const res = await client.post('/api/verify', { code: codes[0] }, {
+    fromIp: '203.0.113.20',
+    person: await client.newPerson(),
+  });
 
   assert.equal(res.status, 200, 'a detected fake is a successful verification');
   assert.equal(res.body.result, 'flagged');
@@ -150,6 +153,31 @@ test('a wrong password gives the same message as an unknown account', async () =
     wrongPassword.body.error.message,
     unknownUser.body.error.message,
     'the response must not reveal whether an account exists'
+  );
+});
+
+test('an unknown email takes as long to refuse as a wrong password', async () => {
+  /** The fastest of three sign-ins: the least noisy measure of the work done. */
+  const fastest = async (body) => {
+    let best = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      const res = await client.post('/api/auth/login', body);
+      best = Math.min(best, performance.now() - started);
+      assert.equal(res.status, 401);
+    }
+    return best;
+  };
+
+  // Three failures, under the lockout threshold of five.
+  const wrongPassword = await fastest({ ...ADMIN, password: 'nope-not-it' });
+  const unknownUser = await fastest({ email: 'nobody@test.local', password: 'nope-not-it' });
+
+  // Both pay for one password hash (~100ms). Without it an unknown email is
+  // answered in a few milliseconds, a gap far wider than this margin.
+  assert.ok(
+    unknownUser >= wrongPassword * 0.5,
+    `unknown email ${unknownUser.toFixed(1)}ms vs wrong password ${wrongPassword.toFixed(1)}ms`
   );
 });
 
@@ -281,9 +309,12 @@ test('the code export is valid CSV with one row per unit', async () => {
 
 test('closing an alert requires an explanatory note', async () => {
   await client.post('/api/verify', { code: codes[5] }, { fromIp: '198.51.100.30' });
-  // A second device checking the same code is a genuine duplicate, so this
+  // A second person checking the same code is a genuine duplicate, so this
   // raises the alert the test then works through.
-  await client.post('/api/verify', { code: codes[5] }, { fromIp: '203.0.113.30' });
+  await client.post('/api/verify', { code: codes[5] }, {
+    fromIp: '203.0.113.30',
+    person: await client.newPerson(),
+  });
   await client.post('/api/auth/login', ADMIN);
 
   const alerts = await client.get('/api/admin/alerts');

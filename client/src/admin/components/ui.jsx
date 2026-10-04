@@ -302,6 +302,49 @@ export function StatusBadge({ status }) {
 }
 
 // ---------------------------------------------------------------------------
+// Where a pack was bought, against where it was checked
+// ---------------------------------------------------------------------------
+
+const PLACE_CHECK = {
+  nearby: ['badge-good', 'Nearby'],
+  plausible: ['badge-neutral', 'Plausible'],
+  inconsistent: ['badge-warn', 'Inconsistent'],
+};
+
+/** The badge alone: Nearby, Plausible or Inconsistent. */
+export function PlaceCheckBadge({ consistency }) {
+  const [cls, label] = PLACE_CHECK[consistency] ?? ['badge-neutral', consistency];
+  return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+/**
+ * The check on a purchase place, as staff read it: the label, where the
+ * check was made from, and always the source. Rules in services/places.js:
+ * up to 50 km nearby; 50-300 km in one island group plausible; beyond, or
+ * across island groups, inconsistent. A label is a lead, not a verdict -
+ * and one resting on the connection's location is approximate, which is why
+ * it says so rather than leave staff to assume GPS.
+ */
+export function PlaceCheck({ consistency, source, from, km }) {
+  const known = PLACE_CHECK[consistency];
+  const how = source === 'gps' ? 'GPS' : 'connection-based, approximate';
+  if (!known) {
+    return (
+      <span className="text-sm text-muted">
+        {from ? `Checked from ${from} (${how}) - nothing to compare` : 'No location to compare'}
+      </span>
+    );
+  }
+  return (
+    <span className="text-sm">
+      <PlaceCheckBadge consistency={consistency} />{' '}
+      {from ? `checked from ${from}` : ''} ({how}
+      {km !== null && km !== undefined ? `, ${km} km apart` : ''})
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Definition list, used inside drawers
 // ---------------------------------------------------------------------------
 

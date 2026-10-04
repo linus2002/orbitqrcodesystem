@@ -4,7 +4,7 @@
  * The SKU is immutable once created: it is embedded in every code already
  * printed on packs, so changing it would orphan them.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { api, upload } from '../../lib/api.js';
 import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
@@ -137,12 +137,14 @@ async function openProduct(id, drawer, reload, canWrite) {
             </p>
           )}
           {canWrite && (
-            <button
-              className="btn btn-sm mt-8"
-              onClick={() => openPublishLeaflet(p, drawer, reload)}
-            >
-              {p.leaflets.length ? 'Publish new version' : 'Publish leaflet'}
-            </button>
+            <div className="row row-wrap mt-8">
+              <button className="btn btn-sm" onClick={() => openPublishLeaflet(p, drawer, reload)}>
+                {p.leaflets.length ? 'Publish new version' : 'Publish leaflet'}
+              </button>
+              <button className="btn btn-sm" onClick={() => openUseLeaflet(p, drawer, reload)}>
+                Use another product&apos;s leaflet
+              </button>
+            </div>
           )}
         </div>
 
@@ -482,15 +484,17 @@ function PublishLeafletForm({ product, drawer, reload }) {
 
   /*
    * The other products this document covers. One leaflet usually spans every
-   * strength of a medicine, and the product list with each one's current
-   * version is what lets the form pre-tick the siblings: whichever products
-   * share this product's current version were published together last time.
+   * strength of a medicine, so the list shows each product's current version
+   * to help the person choose.
    *
-   * `null` until that list arrives, so the pre-selection is applied exactly
-   * once and a later refetch (the language changed) never overwrites what
-   * the person has since ticked or unticked.
+   * Nothing is ticked for them. The form used to pre-tick every product
+   * sharing this one's current version, but a version number is all that
+   * guess had to go on - unrelated medicines that each happen to be on "1.0"
+   * came pre-ticked too, and a publish that goes out with a box nobody
+   * noticed puts one medicine's leaflet on another. Every product a publish
+   * covers is now one the person chose.
    */
-  const [extra, setExtra] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
   const lang = useDebounced(language.trim() || 'en');
   const { data: list, error: listError, loading: listLoading } = useApi(
     '/api/admin/leaflet-codes',
@@ -498,19 +502,9 @@ function PublishLeafletForm({ product, drawer, reload }) {
     [lang]
   );
 
-  useEffect(() => {
-    if (extra !== null || !list) return;
-    const mine = list.items.find((p) => p.id === product.id)?.leaflet_version ?? null;
-    const siblings = mine
-      ? list.items.filter((p) => p.id !== product.id && p.leaflet_version === mine).map((p) => p.id)
-      : [];
-    setExtra(new Set(siblings));
-  }, [list, extra, product.id]);
-
-  const selected = extra ?? new Set();
   const toggle = (id, on) =>
-    setExtra((s) => {
-      const next = new Set(s ?? []);
+    setSelected((s) => {
+      const next = new Set(s);
       if (on) next.add(id);
       else next.delete(id);
       return next;
@@ -570,6 +564,20 @@ function PublishLeafletForm({ product, drawer, reload }) {
 
   return (
     <form className="stack" onSubmit={submit} noValidate>
+      {/* The mistake this saves: publishing a new version to both products
+          just to give a new strength the leaflet its sister already has. */}
+      <p className="hint">
+        Is {product.sku} covered by a leaflet another product already has - a new strength of the
+        same medicine, say? Then use that leaflet as it is instead of publishing a new version.{' '}
+        <button
+          className="btn btn-sm btn-quiet"
+          type="button"
+          onClick={() => openUseLeaflet(product, drawer, reload)}
+        >
+          Use another product&apos;s leaflet
+        </button>
+      </p>
+
       <div className="field">
         <label className="label" htmlFor="lf-version">Version</label>
         <input
@@ -634,9 +642,9 @@ function PublishLeafletForm({ product, drawer, reload }) {
           </p>
         )}
         <p className="hint">
-          Up to 25 MB; it uploads as soon as you choose it. With a PDF attached, the leaflet QR on
-          the carton opens it straight away and the sections below become optional - but they are
-          what a screen reader can read, so keep them where you can.
+          Up to 25 MB; it uploads as soon as you choose it. With a PDF attached, the leaflet page
+          the carton&apos;s QR opens offers it as a button and the sections below become optional -
+          but they are what a screen reader can read, so keep them where you can.
         </p>
       </div>
 
@@ -693,8 +701,7 @@ function PublishLeafletForm({ product, drawer, reload }) {
         <p className="hint mb-8">
           One leaflet usually covers every strength of a medicine. Tick the other products this
           document covers and they all receive this version together, so no two strengths can end
-          up saying different things. Products already sharing the current version are ticked for
-          you.
+          up saying different things. Nothing is ticked for you - check each one yourself.
         </p>
         {listLoading && !list && <p className="text-sm text-muted">Loading products...</p>}
         {listError && (
@@ -719,6 +726,16 @@ function PublishLeafletForm({ product, drawer, reload }) {
                 </span>
               </label>
             ))}
+        {/* The whole reach of this publish in one line, read back before
+            the button - what the ticks add up to, not what they might be. */}
+        <p className="text-sm mt-8">
+          <strong>Publishes to:</strong> {product.sku}
+          {list?.items
+            .filter((p) => selected.has(p.id))
+            .map((p) => `, ${p.sku}`)
+            .join('')}
+          {selected.size === 0 && <span className="text-muted"> only</span>}
+        </p>
       </div>
 
       <div className="field">
@@ -744,15 +761,267 @@ function PublishLeafletForm({ product, drawer, reload }) {
 
       {error && <p className="field-error" role="alert">{error}</p>}
 
-      {/* Held until the product list has loaded (or failed), so a quick
-          submit cannot skip the pre-ticked siblings and split a medicine's
-          strengths onto different versions. */}
+      {/* Held until the product list has loaded (or failed), so nobody
+          publishes before they could see which other products to tick. */}
       <button
         className="btn btn-primary btn-block"
         type="submit"
         disabled={busy || (listLoading && !list && !listError)}
       >
         {busy ? 'Publishing...' : 'Publish leaflet'}
+      </button>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Using another product's leaflet
+//
+// For a product covered by the leaflet another product already has - a new
+// strength of a medicine, usually. It takes that product's current version
+// as it stands, where publishing would put a new version on both (see the
+// adopt route in routes/admin.js). Everything needed to be sure it is the
+// right leaflet is on screen before the button: what will be copied, what
+// this product shows now and after, and a warning when the two products are
+// different medicines.
+// ---------------------------------------------------------------------------
+
+function openUseLeaflet(product, drawer, reload) {
+  drawer.open({
+    title: `Use another product's leaflet for ${product.name}`,
+    subtitle: `${product.sku} - takes that leaflet as it is, without publishing a new version`,
+    body: <UseLeafletForm product={product} drawer={drawer} reload={reload} />,
+  });
+}
+
+/** "Eltrombopag 25 mg (ELT25)" */
+const productLabel = (p) => `${p.name}${p.strength ? ` ${p.strength}` : ''} (${p.sku})`;
+
+/** Two strengths of one medicine share its name; that is the usual case. */
+const sameMedicine = (a, b) => a.name.trim().toLowerCase() === b.name.trim().toLowerCase();
+
+function UseLeafletForm({ product, drawer, reload }) {
+  const toast = useToast();
+  const [fromId, setFromId] = useState('');
+  const [language, setLanguage] = useState('en');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const lang = useDebounced(language.trim() || 'en');
+  const { data: list, error: listError } = useApi(
+    '/api/admin/leaflet-codes',
+    { query: { lang } },
+    [lang]
+  );
+
+  const items = list?.items ?? [];
+  const mine = items.find((p) => p.id === product.id);
+  // Only a product with a leaflet in this language has one to give. The same
+  // medicine's other strengths come first: they are almost always the answer.
+  const candidates = items.filter((p) => p.id !== product.id && p.hasLeaflet);
+  const siblings = candidates.filter((p) => sameMedicine(p, product));
+  const others = candidates.filter((p) => !sameMedicine(p, product));
+  const source = candidates.find((p) => String(p.id) === fromId) ?? null;
+
+  // The source's leaflet as a patient reads it. What is shown here is what
+  // is copied: its version goes with the request, and the server refuses if
+  // the source has been revised since.
+  const { data: preview, error: previewError, loading: previewLoading } = useApi(
+    source ? `/api/product/${encodeURIComponent(source.sku)}/leaflet` : '',
+    { query: { lang }, skip: !source },
+    [source?.sku, lang]
+  );
+  // Only the chosen product's: just after the choice changes, the previous
+  // one's preview is still held until the new fetch begins.
+  const shown = source && preview?.product?.sku === source.sku ? preview.leaflet : null;
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(null);
+    if (!source || !shown) {
+      setError('Choose the product whose leaflet this one should use.');
+      return;
+    }
+    if (reason.trim().length < 5) {
+      setError('Say why - it goes in the audit log.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `From now on, ${product.sku}'s leaflet QR and genuine scan results show ` +
+          `${source.sku}'s leaflet v${shown.version}.` +
+          (mine?.hasLeaflet
+            ? ` ${product.sku}'s own v${mine.leaflet_version} is kept in its history, marked superseded.`
+            : '') +
+          '\n\nContinue?'
+      )
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await api(`/api/admin/products/${product.id}/leaflets/adopt`, {
+        method: 'POST',
+        body: { fromProductId: source.id, language: lang, version: shown.version, reason: reason.trim() },
+      });
+      toast(`${product.sku} now uses ${source.sku}'s leaflet v${shown.version}.`, 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      setError(err.formMessage ?? err.message);
+      setBusy(false);
+    }
+  }
+
+  const option = (p) => (
+    <option key={p.id} value={p.id}>
+      {productLabel(p)} - leaflet v{p.leaflet_version}
+    </option>
+  );
+
+  return (
+    <form className="stack" onSubmit={submit} noValidate>
+      <p className="hint">
+        For a product covered by the same leaflet as another. {product.sku} gets that product&apos;s
+        current leaflet as it is - the same text and the same PDF - and no new version is published
+        for either.
+      </p>
+
+      <div className="field">
+        <label className="label" htmlFor="ul-from">Use the leaflet of</label>
+        <select
+          className="select"
+          id="ul-from"
+          value={fromId}
+          onChange={(e) => setFromId(e.target.value)}
+          disabled={!list}
+        >
+          <option value="">{list ? 'Choose a product' : 'Loading products...'}</option>
+          {siblings.length > 0 && (
+            <optgroup label={`Other strengths of ${product.name}`}>{siblings.map(option)}</optgroup>
+          )}
+          {others.length > 0 && <optgroup label="Other products">{others.map(option)}</optgroup>}
+        </select>
+        {list && !candidates.length && (
+          <p className="hint">
+            No other product has a leaflet in &quot;{lang}&quot; yet. Publish one instead.
+          </p>
+        )}
+        {listError && <p className="field-error">The product list could not be loaded.</p>}
+      </div>
+
+      <div className="field">
+        <label className="label" htmlFor="ul-language">Language</label>
+        <input
+          className="input mono"
+          id="ul-language"
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          maxLength={8}
+          placeholder="en"
+          spellCheck={false}
+        />
+        <p className="hint">The leaflet in this language is the one used.</p>
+      </div>
+
+      {source && (
+        <div className="field">
+          <label className="label">Check this is the right leaflet</label>
+          {previewLoading && <p className="text-sm text-muted">Loading {source.sku}&apos;s leaflet...</p>}
+          {previewError && (
+            <p className="field-error">{source.sku}&apos;s leaflet could not be loaded to check.</p>
+          )}
+          {shown && !previewLoading && (
+            <div className="stack-sm">
+              {!sameMedicine(source, product) && (
+                <div className="alert alert-warn">
+                  <Icon name="alert" />
+                  <span>
+                    {source.sku} is <strong>{source.name}</strong>, not {product.name}. Continue
+                    only if this leaflet really covers {product.sku}.
+                  </span>
+                </div>
+              )}
+
+              <KV
+                rows={[
+                  ['Leaflet of', productLabel(source)],
+                  ['Version', `v${shown.version} (${shown.language}), effective ${fmtDate(shown.effectiveFrom)}`],
+                  ['PDF', shown.pdf ? `${shown.pdf.filename ?? 'leaflet.pdf'} (${fmtSize(shown.pdf.size ?? 0)})` : 'None - text only'],
+                  [
+                    'Sections',
+                    shown.sections.length
+                      ? shown.sections.map((s) => s.heading).join(' · ')
+                      : 'None - PDF only',
+                  ],
+                ]}
+              />
+              <p className="text-sm">
+                <a
+                  href={`/leaflet/${encodeURIComponent(source.sku)}${lang !== 'en' ? `?lang=${encodeURIComponent(lang)}` : ''}`}
+                  target="_blank"
+                  rel="noopener"
+                >
+                  Open it as patients see it
+                </a>{' '}
+                (new tab).
+              </p>
+
+              <div className="alert alert-info">
+                <Icon name="help" />
+                <span>
+                  {mine?.hasLeaflet ? (
+                    <>
+                      {product.sku} shows its own leaflet v{mine.leaflet_version} now. After this, its
+                      leaflet QR and genuine scan results show {source.sku}&apos;s v{shown.version}{' '}
+                      instead, and v{mine.leaflet_version} stays in its history, marked superseded.
+                    </>
+                  ) : (
+                    <>
+                      {product.sku} has no leaflet yet. After this, its leaflet QR and genuine scan
+                      results show this one.
+                    </>
+                  )}{' '}
+                  When either is revised later, tick the other under &quot;Also applies to&quot; so
+                  they keep saying the same thing.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="field">
+        <label className="label" htmlFor="ul-reason">Reason</label>
+        <textarea
+          className="textarea"
+          id="ul-reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={300}
+          placeholder={
+            source
+              ? `${product.sku} is covered by the same leaflet as ${source.sku}.`
+              : 'Why this product uses that leaflet.'
+          }
+        />
+        <p className="hint">Recorded in the audit log against your account.</p>
+      </div>
+
+      {error && <p className="field-error" role="alert">{error}</p>}
+
+      <button
+        className="btn btn-primary btn-block"
+        type="submit"
+        disabled={busy || !shown || previewLoading}
+      >
+        {busy
+          ? 'Saving...'
+          : source
+            ? `Use ${source.sku}'s leaflet for ${product.sku}`
+            : 'Choose a product first'}
       </button>
     </form>
   );

@@ -18,6 +18,7 @@ import BrandLoader from '../components/BrandLoader.jsx';
 import Clock from './components/Clock.jsx';
 import { DrawerProvider, useDrawer } from './components/Drawer.jsx';
 import { HeaderProvider, PageHeader, useHeader } from './components/PageHeader.jsx';
+import { NavContext } from './components/Legend.jsx';
 
 import Dashboard from './views/Dashboard.jsx';
 import Alerts from './views/Alerts.jsx';
@@ -47,7 +48,9 @@ const ROUTES = [
   { path: 'products', label: 'Products', icon: 'pill', perm: 'products:read', group: 'Manage', element: <Products /> },
   { path: 'leaflet-codes', label: 'Leaflet QR codes', icon: 'qr', perm: 'products:read', group: 'Manage', element: <LeafletCodes /> },
   { path: 'batches', label: 'Batches & codes', icon: 'box', perm: 'batches:read', group: 'Manage', element: <Batches /> },
-  { path: 'shipments', label: 'Shipments', icon: 'truck', perm: 'batches:read', group: 'Manage', element: <Shipments /> },
+  // Switched off: no role holds shipments:read, so this entry never shows.
+  // SHIPMENTS_ENABLED in src/services/auth.js brings it back.
+  { path: 'shipments', label: 'Shipments', icon: 'truck', perm: 'shipments:read', group: 'Manage', element: <Shipments /> },
 
   { path: 'compliance', label: 'Compliance', icon: 'log', perm: 'batches:read', group: 'Governance', element: <Compliance /> },
   { path: 'audit', label: 'Audit log', icon: 'log', perm: 'audit:read', group: 'Governance', element: <Audit /> },
@@ -108,40 +111,44 @@ export default function AdminApp() {
 
   return (
     <HeaderProvider>
-      <DrawerProvider>
-        <div className="admin-shell">
-          <Sidebar open={navOpen} routes={allowed} session={session} />
-
-          <div className="admin-main">
-            <header className="topbar">
-              <button
-                className="icon-btn menu-btn"
-                type="button"
-                onClick={() => setNavOpen((v) => !v)}
-                aria-label="Open navigation"
-                aria-expanded={navOpen}
-              >
-                <Icon name="menu" />
-              </button>
-              <PageHeader />
-              <ShellTools signOut={session.signOut} user={session.user} />
-            </header>
-
-            <main className="view" aria-live="polite">
-              <Routes>
-                {ROUTES.map((r) => (
-                  <Route
-                    key={r.path || 'index'}
-                    path={r.path}
-                    element={can(r.perm) ? r.element : <Denied role={session.user.role} />}
-                  />
-                ))}
-                <Route path="*" element={<Denied role={session.user.role} notFound />} />
-              </Routes>
-            </main>
+      {/* The legend lists the sidebar's icons from this, so it shows exactly
+          the entries this person sees. */}
+      <NavContext.Provider value={allowed}>
+        <DrawerProvider>
+          <div className="admin-shell">
+            <Sidebar open={navOpen} routes={allowed} session={session} />
+  
+            <div className="admin-main">
+              <header className="topbar">
+                <button
+                  className="icon-btn menu-btn"
+                  type="button"
+                  onClick={() => setNavOpen((v) => !v)}
+                  aria-label="Open navigation"
+                  aria-expanded={navOpen}
+                >
+                  <Icon name="menu" />
+                </button>
+                <PageHeader />
+                <ShellTools signOut={session.signOut} user={session.user} />
+              </header>
+  
+              <main className="view" aria-live="polite">
+                <Routes>
+                  {ROUTES.map((r) => (
+                    <Route
+                      key={r.path || 'index'}
+                      path={r.path}
+                      element={can(r.perm) ? r.element : <Denied role={session.user.role} />}
+                    />
+                  ))}
+                  <Route path="*" element={<Denied role={session.user.role} notFound />} />
+                </Routes>
+              </main>
+            </div>
           </div>
-        </div>
-      </DrawerProvider>
+        </DrawerProvider>
+      </NavContext.Provider>
     </HeaderProvider>
   );
 }

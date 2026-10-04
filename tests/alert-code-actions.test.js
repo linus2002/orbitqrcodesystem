@@ -44,10 +44,10 @@ beforeEach(async () => {
   await resetRateLimits();
 });
 
-/** Verify from one device, then another: a duplicate_scan alert and a flagged code. */
+/** Verified by one person, then another: a duplicate_scan alert and a flagged code. */
 async function duplicate(code) {
   await client.post('/api/verify', { code }, { fromIp: '198.51.100.7' });
-  await client.post('/api/verify', { code }, { fromIp: '203.0.113.20' });
+  await client.post('/api/verify', { code }, { fromIp: '203.0.113.20', person: await client.newPerson() });
   const row = await db.getCode(code);
   const alert = await db.findOne('alert', { code_id: row.id, type: 'duplicate_scan' });
   return { row, alert };
@@ -94,7 +94,10 @@ test('after clearing, a scan from yet another device is flagged again', async ()
   await client.login(ADMIN.email, ADMIN.password);
   await client.post(`/api/admin/alerts/${alert.id}/false-positive`, { reason: REASON });
 
-  const res = await client.post('/api/verify', { code: codes[2] }, { fromIp: '192.0.2.99' });
+  const res = await client.post('/api/verify', { code: codes[2] }, {
+    fromIp: '192.0.2.99',
+    person: await client.newPerson(),
+  });
 
   assert.equal(res.body.result, 'flagged', 'clearing the label never weakens detection');
   assert.equal((await codeRow(row.id)).status, 'flagged');

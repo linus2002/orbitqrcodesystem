@@ -27,13 +27,15 @@ export const ROLE_OPTIONS = [
   ['other', 'Other'],
 ];
 
+// Where the medicine was bought is not asked here any more: it is asked per
+// check, on the result (WhereBought.jsx), because one person buys from many
+// places and a single answer on the person sent investigators to the wrong one.
 const EMPTY = {
   fullName: '',
   phone: '',
   email: '',
   role: '',
   city: '',
-  purchaseLocation: '',
   consent: false,
 };
 
@@ -89,7 +91,6 @@ export default function DetailsForm({ pendingCode, onDone, supportPhone }) {
           email: fields.email.trim(),
           role: fields.role,
           city: fields.city.trim() || null,
-          purchaseLocation: fields.purchaseLocation.trim() || null,
           consent: fields.consent,
           policyVersion: POLICY_VERSION,
         },
@@ -224,33 +225,18 @@ export default function DetailsForm({ pendingCode, onDone, supportPhone }) {
           )}
         </div>
 
-        <div className="two-up">
-          <div className="field">
-            <label className="label" htmlFor="dCity">
-              City or municipality <span className="text-muted">(optional)</span>
-            </label>
-            <input
-              className="input"
-              id="dCity"
-              value={fields.city}
-              onChange={set('city')}
-              maxLength={120}
-              autoComplete="address-level2"
-            />
-          </div>
-          <div className="field">
-            <label className="label" htmlFor="dWhere">
-              Where did you get the medicine? <span className="text-muted">(optional)</span>
-            </label>
-            <input
-              className="input"
-              id="dWhere"
-              value={fields.purchaseLocation}
-              onChange={set('purchaseLocation')}
-              maxLength={200}
-              placeholder="Pharmacy or shop name"
-            />
-          </div>
+        <div className="field">
+          <label className="label" htmlFor="dCity">
+            City or municipality <span className="text-muted">(optional)</span>
+          </label>
+          <input
+            className="input"
+            id="dCity"
+            value={fields.city}
+            onChange={set('city')}
+            maxLength={120}
+            autoComplete="address-level2"
+          />
         </div>
 
         <div className="field">

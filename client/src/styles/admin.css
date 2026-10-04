@@ -172,7 +172,10 @@
 .topbar .sub { font-size: 0.82rem; color: var(--ink-muted); margin-top: 2px; }
 .menu-btn { display: none; }
 
-.view { padding: 22px 24px 60px; display: grid; gap: 18px; align-content: start; }
+/* One column that never grows past the screen: left to size itself, the column
+   took the widest child's natural width, so on a phone the Overview tiles sat
+   side by side at 825px and pushed the whole page, and any modal, off-screen. */
+.view { padding: 22px 24px 60px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; }
 
 /* --- Stat tiles ---------------------------------------------------------- */
 
@@ -1027,3 +1030,42 @@
 /* The QR link in a product's code list: an icon, sized like a button icon. */
 .code-qr { display: inline-flex; color: var(--brand); }
 .code-qr svg { width: 22px; height: 22px; }
+
+/* --- Legend (opened from the Overview) ------------------------------------
+   Symbol on the left, meaning on the right, one row per symbol. The symbols
+   are the screens' own badges and icons; only the helpers below are local. */
+.legend-key { display: grid; gap: 18px; }
+.legend-key-section { display: grid; gap: 6px; }
+.legend-key-rows { display: grid; margin: 0; }
+.legend-key-rows > div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+.legend-key-rows > div:first-child { border-top: 0; }
+.legend-key-rows dt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 22px; }
+.legend-key-rows dd { margin: 0; color: var(--ink-2); line-height: 1.45; }
+.legend-key-rows dt > svg,
+.legend-key-icons svg { width: 18px; height: 18px; color: var(--ink-2); }
+.legend-key-icons { display: inline-flex; gap: 6px; }
+.legend-key-word { font-weight: 500; }
+.legend-key .nav-count { margin-left: 0; }
+/* The tiles' change pill and corner arrow, which are white on the tile's
+   colour - shown on the same blue here, so they read as they do there. */
+.legend-key-tile {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  padding: 3px 8px; border-radius: 999px;
+  font: 600 0.7rem/1 var(--sans); white-space: nowrap;
+  color: #fff; background: var(--series-genuine);
+}
+.legend-key-tile-link { width: 26px; height: 26px; padding: 0; }
+.legend-key-tile-link svg { width: 15px; height: 15px; transform: rotate(-45deg); }
+.legend-key-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.legend-key-swatch.is-genuine { background: var(--series-genuine); }
+.legend-key-swatch.is-flagged { background: var(--series-flagged); }
+@media (max-width: 480px) {
+  .legend-key-rows > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}

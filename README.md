@@ -216,13 +216,19 @@ AMX25 - 260921 - 087498 - Z7
 
 Two properties do the security work:
 
-**Serials are non-sequential but collision-free.** Each unit index is run
+**Serials are non-sequential and never repeat.** Each unit index is run
 through a keyed format-preserving permutation (an alternating Feistel network)
 over the serial space. Reading one pack tells you nothing about the next, and
 because a Feistel round is individually invertible, the result is a bijection
-by construction - no two units can ever collide, and there is no
-"generate-random-and-retry" loop. The serial space is automatically widened so
-it is at least 100x the batch quantity.
+by construction - no two units of a batch can ever collide. The serial space is
+automatically widened so it is at least 100x the batch quantity.
+
+Two batches of one product made on the same day share that serial space (the
+code is SKU + date + serial), so a later batch can land on an earlier one's
+code. Issuance passes over any code another batch already holds and takes the
+next from its own sequence. Each code is created under an id that is the code
+itself, so a duplicate cannot be stored even by two issuances at once, and an
+issuance cut short picks up where it stopped when run again.
 
 **The checksum is keyed, not public.** Those last two characters are a
 truncated HMAC of the rest of the code. That catches typing mistakes *and*
@@ -472,6 +478,13 @@ headers CDNs already provide (`CF-IPCountry` and friends). Drop a MaxMind
 GeoLite2 or IP2Location lookup into that one function for real resolution. It
 is deliberately coarse - the dashboard needs "where are flags clustering", not
 a patient's address.
+
+Where a pack was **bought** is a separate question, asked per check on the
+result and compared with where it was checked by `src/services/places.js`
+against `src/data/ph-places.json` (every Philippine city and municipality, from
+Wikidata; rebuild with `node scripts/fetch-ph-places.js`). On a suspicious
+result or a report the portal offers to use the phone's GPS; it is reduced to
+a city before anything is stored.
 
 ---
 

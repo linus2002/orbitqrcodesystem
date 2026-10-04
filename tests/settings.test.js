@@ -46,11 +46,13 @@ async function storeRaw(key, value) {
 
 const setThreshold = (n) => storeRaw('alerts.duplicate_threshold', String(n));
 
-/** Verify one code from several distinct devices; return each result. */
+/** Verify one code by several distinct people on their own devices; return each result. */
 async function fromDevices(code, n) {
   const out = [];
   for (let i = 0; i < n; i++) {
-    const res = await client.post('/api/verify', { code }, { fromIp: `198.51.100.${10 + i}` });
+    // The first is this browser's own person; each after is somebody else.
+    const person = i === 0 ? undefined : await client.newPerson();
+    const res = await client.post('/api/verify', { code }, { fromIp: `198.51.100.${10 + i}`, person });
     out.push(res.body.result);
   }
   return out;
@@ -72,6 +74,24 @@ test('threshold 1 is the same as no setting', async () => {
 test('threshold 2 lets a second device through and flags the third', async () => {
   await setThreshold(2);
   assert.deepEqual(await fromDevices(codes[2], 3), ['genuine', 'genuine', 'flagged']);
+});
+
+test('a later genuine check says it has been checked before, not "for the first time"', async () => {
+  await setThreshold(3);
+  const said = [];
+  for (const [i, ip] of ['198.51.100.60', '198.51.100.61', '198.51.100.62'].entries()) {
+    // Three different people, each giving their own details on their own phone.
+    client.clearCookies();
+    await giveDetails(client, { fullName: `Checker ${i + 1}` });
+    const res = await client.post('/api/verify', { code: codes[4] }, { fromIp: ip });
+    assert.equal(res.body.result, 'genuine');
+    said.push(res.body.message);
+  }
+  assert.deepEqual(said, [
+    'This pack is genuine. It has been verified for the first time.',
+    'This pack is genuine. It has been checked once before.',
+    'This pack is genuine. It has been checked 2 times before.',
+  ]);
 });
 
 test('the same device re-checking inside the grace window stays genuine at any threshold', async () => {
@@ -198,7 +218,10 @@ test('the portal reads the notice, the support number and the shortcode, with sa
       role: 'patient',
       roleLabel: 'Patient',
       city: 'Quezon City',
+      purchaseLocation: null,
+      lastPurchase: null, // no pack bought anywhere yet
     },
+    here: null, // the test request carries no connection location
   });
 
   await client.login(ADMIN.email, ADMIN.password);
@@ -214,5 +237,6 @@ test('the portal reads the notice, the support number and the shortcode, with sa
     smsShortcode: '32123',
     detailsRequired: true,
     checker: null,
+    here: null,
   });
 });

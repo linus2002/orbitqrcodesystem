@@ -142,7 +142,7 @@ export async function leafletSheet({ lang = 'en' } = {}) {
 //
 // A leaflet may be published as the PDF the artwork department already has,
 // instead of - or as well as - structured text. When one is attached, the
-// leaflet QR opens it directly. The text sections stay the accessible form,
+// leaflet page offers it as a button. The text sections stay the accessible form,
 // which is why the form keeps asking for them even when a PDF is attached.
 //
 // The file arrives and leaves in pieces, never as one value: a Vercel

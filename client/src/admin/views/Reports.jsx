@@ -14,7 +14,7 @@ import { fmtDate, fmtNumber, fmtRelative } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
 import {
-  TableCard, Table, Pager, Toolbar, Spacer, Select, KV, StatusBadge, ErrorNote,
+  TableCard, Table, Pager, Toolbar, Spacer, Select, KV, StatusBadge, ErrorNote, PlaceCheck,
 } from '../components/ui.jsx';
 
 export default function Reports() {
@@ -101,8 +101,28 @@ function ReportDetail({ report }) {
           ['Product', report.product_name ?? '-'],
           ['Batch', report.batch_number ? <span className="mono">{report.batch_number}</span> : '-'],
           ['Bought at', report.purchase_location ?? 'not stated'],
+          // Absent on reports made before the town was picked from a list.
+          report.place_consistency && [
+            'Place check',
+            <PlaceCheck
+              consistency={report.place_consistency}
+              source={report.location_source}
+              from={report.located_place}
+              km={report.place_distance_km}
+            />,
+          ],
           ['Reporter', report.reporter_name ?? 'anonymous'],
           ['Contact', report.reporter_contact ?? 'none given'],
+          // From the details they gave before checking, not typed into the
+          // report - the part to trust if the two differ.
+          [
+            'Checked by',
+            report.checker
+              ? [report.checker.name, report.checker.phone, report.checker.email, report.checker.role]
+                  .filter(Boolean)
+                  .join(' · ')
+              : 'not linked to a registered check',
+          ],
         ]}
       />
       <div>

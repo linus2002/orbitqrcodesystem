@@ -18,10 +18,12 @@ import * as alerts from '../services/alerts.js';
 import * as settingsService from '../services/settings.js';
 import * as verifiers from '../services/verifiers.js';
 import * as leafletService from '../services/leaflets.js';
+import * as places from '../services/places.js';
+import { pseudonymize } from '../lib/crypto.js';
 import { normalizeCode } from '../lib/codes.js';
 import { validate } from '../lib/validate.js';
 import { createLimiter, rateLimit } from '../lib/ratelimit.js';
-import { notFound, badRequest } from '../lib/errors.js';
+import { notFound, badRequest, conflict } from '../lib/errors.js';
 import logger from '../lib/logger.js';
 
 const router = Router();
@@ -51,6 +53,9 @@ const bulkLimiter = createLimiter({ name: 'verify-bulk', windowMs: 3_600_000, ma
 // Giving details is a once-per-device event; anything like a stream of them
 // from one source is someone filling the table with junk.
 const detailsLimiter = createLimiter({ name: 'details', windowMs: 3_600_000, max: 10 });
+// One place per check, and checks are themselves limited; this only stops a
+// script from walking the scan ids.
+const placeLimiter = createLimiter({ name: 'check-place', windowMs: 3_600_000, max: 40 });
 
 /** When someone hits the ceiling, that is itself a signal worth recording. */
 const onVerifyLimit = (req) => {
@@ -163,6 +168,35 @@ router.post(
  * a HIGH severity alert, because a human bothering to fill in this form is a
  * stronger signal than most automated ones.
  */
+/**
+ * The check a report is about, kept only when it is this browser's own.
+ *
+ * The scan id comes from the browser, and staff see the report beside the
+ * person who made that check - so a report naming somebody else's check
+ * (or one that does not exist) is kept without it, never tied to them.
+ * A check made without details given matches a report made without them,
+ * which is how it worked before details were asked for.
+ */
+async function ownScan(scanId, req) {
+  if (!scanId) return null;
+  const scan = await db.get('scan', scanId);
+  if (!scan) return null;
+  const me = await verifiers.fromRequest(req);
+  return (scan.verifier_id ?? null) === (me?.id ?? null) ? scan.id : null;
+}
+
+/**
+ * A GPS reading as the browser sends it, or undefined. Only its shape is
+ * checked here; services/places.js decides whether it is usable and reduces
+ * it to a city - the coordinates themselves are never stored.
+ */
+function gpsFrom(body) {
+  const loc = body?.location;
+  if (loc === undefined || loc === null) return undefined;
+  if (typeof loc !== 'object' || Array.isArray(loc)) throw badRequest('location must be { lat, lng, accuracy }.');
+  return { lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy };
+}
+
 router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res) => {
   const data = validate(req.body, {
     code: { type: 'string', max: 64 },
@@ -170,33 +204,47 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
     reporterName: { type: 'string', max: 120 },
     reporterContact: { type: 'string', max: 160 },
     purchaseLocation: { type: 'string', max: 200 },
+    // Picked from the city list (GET /api/places); the shop goes in purchaseLocation.
+    placeCode: { type: 'string', max: 12 },
     scanId: { type: 'int', min: 1 },
   });
 
   const normalized = data.code ? normalizeCode(data.code) : null;
   const codeRow = normalized ? await db.getCode(normalized) : null;
+  const scanId = await ownScan(data.scanId, req);
+  // Where it was bought, against where the report is sent from.
+  const place = places.facts({
+    placeCode: data.placeCode,
+    outlet: data.purchaseLocation,
+    location: gpsFrom(req.body),
+    req,
+  });
+  const boughtAt = [place.purchase_outlet, place.purchase_place].filter(Boolean).join(' - ') || null;
 
   // The report, its alert and the link between them land together or not at all.
   const report = await db.tx(async () => {
     const row = await db.insert('consumerReport', {
       code_text: normalized,
       code_id: codeRow?.id ?? null,
-      scan_id: data.scanId ?? null,
+      scan_id: scanId,
       reporter_name: data.reporterName ?? null,
       reporter_contact: data.reporterContact ?? null,
-      purchase_location: data.purchaseLocation ?? null,
+      purchase_location: boughtAt,
       description: data.description,
+      ...place,
     });
 
     const alert = await alerts.raise({
       type: 'consumer_report',
       codeId: codeRow?.id ?? null,
       batchId: codeRow?.batch_id ?? null,
-      scanId: data.scanId ?? null,
+      scanId,
       context: {
         summary: data.description.slice(0, 120),
         code: normalized,
-        purchaseLocation: data.purchaseLocation ?? null,
+        purchaseLocation: boughtAt,
+        placeConsistency: place.place_consistency,
+        locationSource: place.location_source,
         hasContactDetails: Boolean(data.reporterContact),
       },
     });
@@ -217,6 +265,64 @@ router.post('/report', rateLimit({ limiters: [reportLimiter] }), async (req, res
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/checks/:scanId/place - where the pack behind a check was bought
+// ---------------------------------------------------------------------------
+/**
+ * Body: { placeCode?, outlet?, location?: { lat, lng, accuracy } }
+ *
+ * Asked on the result, after the check: optional on a genuine one, asked
+ * plainly on a suspicious one, which is also the only time the page asks for
+ * the phone's location. Stored beside the scan rather than on it, because
+ * scans are never edited (see checkPlace in db/schema.js).
+ *
+ * Only for this browser's own check, and only for a day after it: the scan id
+ * is a plain number, so without both a script could pin places on anybody's
+ * checks. For a check made without details given, "own" means the same
+ * connection, since there is no person to match. One place per check.
+ */
+const PLACE_WINDOW_MS = 24 * 3_600_000;
+
+router.post('/checks/:scanId/place', rateLimit({ limiters: [placeLimiter] }), async (req, res) => {
+  const data = validate(req.body, {
+    placeCode: { type: 'string', max: 12 },
+    outlet: { type: 'string', max: 120 },
+  });
+  const location = gpsFrom(req.body);
+  if (!data.placeCode && !data.outlet && location === undefined) {
+    throw badRequest('Say where the pack was bought, or share a location.');
+  }
+
+  const scanId = Number.parseInt(req.params.scanId, 10);
+  const scan = Number.isInteger(scanId) && scanId > 0 ? await db.get('scan', scanId) : null;
+  const me = await verifiers.fromRequest(req);
+  const mine =
+    scan &&
+    (scan.verifier_id ?? null) === (me?.id ?? null) &&
+    (scan.verifier_id || (scan.ip_hash && scan.ip_hash === pseudonymize(req.clientIp, config.secrets.session))) &&
+    Date.now() - new Date(scan.created_at).getTime() < PLACE_WINDOW_MS;
+  if (!mine) throw notFound('That check was not found.');
+
+  if (await db.findOne('checkPlace', { scan_id: scan.id }, { fields: ['id'] })) {
+    throw conflict('Where this pack was bought has already been recorded.');
+  }
+  const place = places.facts({ placeCode: data.placeCode, outlet: data.outlet, location, req });
+  // The unique key on scan_id settles two sends that race each other.
+  const row = await db.insert('checkPlace', { scan_id: scan.id, verifier_id: scan.verifier_id ?? null, ...place });
+
+  // What the page may show back: the place, never a verdict on the person.
+  res.status(201).json({ ok: true, purchasePlace: row.purchase_place, outlet: row.purchase_outlet });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/places - the cities and municipalities the purchase place is picked from
+// ---------------------------------------------------------------------------
+router.get('/places', (req, res) => {
+  // The same for everyone and changed only by a deploy.
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.json({ places: places.list() });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/portal - what the public page shows that staff can change
 // ---------------------------------------------------------------------------
 router.get('/portal', async (req, res) => {
@@ -224,9 +330,16 @@ router.get('/portal', async (req, res) => {
   // are asked for. None is sensitive, and all are read fresh so a change
   // shows on the next page load. `checker` is who this browser said it was,
   // so the page can skip the form for someone who has already filled it in.
+  // `here` is the city the connection points to, and `lastPurchase` where the
+  // person last said they bought a pack: what "where did you buy it" offers
+  // first, so the usual answer is one tap.
+  const me = await verifiers.fromRequest(req);
+  const checker = verifiers.publicView(me);
+  const here = places.fromConnection(req);
   res.json({
     ...(await settingsService.portal()),
-    checker: verifiers.publicView(await verifiers.fromRequest(req)),
+    checker: checker && { ...checker, lastPurchase: await verifiers.lastPurchase(me) },
+    here: here && { code: here.code, label: here.label },
   });
 });
 
@@ -302,8 +415,8 @@ router.get('/product/:sku/leaflet', async (req, res) => {
       // Said explicitly rather than left for the page to work out from the
       // history: it drives a warning the reader must see before the content.
       superseded: !current,
-      // The current version's PDF address names no version, so it is the
-      // address the QR-opened page redirects to and it never goes stale.
+      // The current version's PDF address names no version, so the page's
+      // "Open the leaflet (PDF)" button never goes stale.
       pdf: leafletService.pdfInfo(product.sku, wanted, {
         lang,
         version: current ? undefined : wanted.version,

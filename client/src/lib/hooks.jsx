@@ -69,10 +69,12 @@ export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const nextId = useRef(1);
 
-  const push = useCallback((message, kind = 'info') => {
+  // `ms` is for the odd message that tells someone where to go next: it has
+  // to stay up long enough to be read in full.
+  const push = useCallback((message, kind = 'info', { ms = 4200 } = {}) => {
     const id = nextId.current++;
     setToasts((t) => [...t, { id, message, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ms);
   }, []);
 
   return (

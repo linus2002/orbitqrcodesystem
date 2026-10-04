@@ -16,7 +16,7 @@ import QRCode from 'qrcode';
 import * as db from '../db/index.js';
 import { TYPES } from '../db/schema.js';
 import { config, LOCAL_BASE_URL_WARNING } from '../config.js';
-import { generateBatchCodes, serialWidthFor, qrPayload } from '../lib/codes.js';
+import { batchCandidates, serialWidthFor, qrPayload } from '../lib/codes.js';
 import { conflict, notFound, badRequest } from '../lib/errors.js';
 import * as audit from './audit.js';
 import logger from '../lib/logger.js';
@@ -43,17 +43,41 @@ export function assertTransition(from, to) {
   }
 }
 
+/** Candidates looked up, and codes written, per round: one transaction each. */
+const ISSUE_CHUNK = 250;
+/** Integer ids reserved at a time, so a large batch is not a round trip per chunk. */
+const ID_BLOCK = 5000;
+/** Tries at one round when another issuance takes one of its codes first. */
+const MAX_ROUND_ATTEMPTS = 5;
+/**
+ * How many codes held by other batches may be passed over, beyond the batch's
+ * own size. Past that, more than half of what was tried was taken - a serial
+ * space that crowded should stop an issuance with a clear message, not keep
+ * it scanning a space of up to a billion serials.
+ */
+const SKIP_ALLOWANCE = 1000;
+
 /**
  * Generate and store every unit code for a batch.
  *
  * A batch can run to hundreds of thousands of units - far more than one
  * Sanity transaction can carry - so the codes are written in chunks, and the
- * batch only moves to `codes_issued` once every chunk has landed. What makes
- * that safe is that issuance is DETERMINISTIC: the same batch always yields
- * the same codes, and each is written with createIfNotExists under an id that
- * is the code itself. An issuance interrupted part-way leaves the batch in
- * `planned`; running it again rewrites nothing that exists and fills in the
- * rest. A duplicate code cannot arise even from two runs at once.
+ * batch only moves to `codes_issued` once every one of them is stored and
+ * counted.
+ *
+ * Codes are taken from the batch's own shuffled sequence of candidates (see
+ * batchCandidates). Two batches of one SKU made on the same day share a
+ * serial space, so a candidate may already be another batch's code; it is
+ * passed over and the next is taken. Every code is written with `create`
+ * under an id that IS the code, in one transaction per chunk, so a code
+ * taken between the look-up and the write fails the whole chunk, which is
+ * then looked at again. A duplicate code cannot be stored, even by two
+ * issuances at once.
+ *
+ * An issuance cut short (a timeout, a lost connection) leaves the batch in
+ * `planned` with some codes stored. Running it again walks the same sequence
+ * from the start, keeps what is already this batch's, and fills in the rest -
+ * so it finishes with the codes an uninterrupted run would have stored.
  *
  * Returns a summary plus a small preview of the codes.
  */
@@ -70,63 +94,53 @@ export async function issueCodes(batchId, { actor, req } = {}) {
   if (batch.quantity > MAX_BATCH_QUANTITY) {
     throw badRequest(`Batch quantity exceeds the ${MAX_BATCH_QUANTITY.toLocaleString()} unit limit.`);
   }
+  // Without the product there is no SKU, and the codes would read "NULL-...".
+  if (!batch.sku) {
+    throw conflict(`Batch ${batch.batch_number} has no product record, so its codes cannot be made.`);
+  }
 
   const width = serialWidthFor(batch.quantity);
   const started = Date.now();
 
-  /*
-   * Generated lazily and written a slice at a time, so a 500,000-unit batch
-   * never sits in memory whole. Each slice is several Sanity transactions
-   * (db.insertMany chunks them); the slice only bounds memory.
-   */
-  const SLICE = 5000;
-  let inserted = 0;
-  let pending = [];
-  const flush = async () => {
-    if (!pending.length) return;
-    await db.insertMany('code', pending, {
-      ifNotExists: true,
-      // Two batches of one SKU made on the same day can, rarely, mint the same
-      // code. The first keeps it and this issuance stops, loudly.
-      accept: (existing) => existing.batch_id === batch.id,
+  const { created, kept, skipped } = await storeCodes(batch, width);
+
+  // Check, don't assume: exactly one stored code per planned unit.
+  const stored = await db.count('code', { batch_id: batch.id });
+  if (stored !== batch.quantity) {
+    logger.error('code issuance does not add up', {
+      batch: batch.batch_number,
+      stored,
+      planned: batch.quantity,
+      created,
+      kept,
     });
-    inserted += pending.length;
-    pending = [];
-  };
-
-  for (const { unitIndex, serial, code } of generateBatchCodes({
-    sku: batch.sku,
-    mfgDate: batch.mfg_date,
-    quantity: batch.quantity,
-    // Binding the permutation key to the batch means two batches of the same
-    // SKU on the same day still get completely different serial orderings.
-    batchKey: `${batch.batch_number}:${batch.id}`,
-    secret: config.secrets.code,
-  })) {
-    pending.push({ code, batch_id: batch.id, product_id: batch.product_id, unit_index: unitIndex, serial, status: 'issued' });
-    if (pending.length >= SLICE) await flush();
+    throw conflict(
+      `Issuing stopped: ${stored.toLocaleString()} codes are stored for batch ${batch.batch_number}, ` +
+        `not the ${batch.quantity.toLocaleString()} planned. The batch has been left as planned and this ` +
+        'has been logged - please contact the system administrator before trying again.'
+    );
   }
-  await flush();
 
-  // Only now, with every code stored, does the batch say so.
-  await db.update('batch', batch, { status: 'codes_issued', serial_width: width, codes_issued_at: db.now() });
+  // Only now does the batch say so.
+  const marked = await markIssued(batch, width);
 
   const ms = Date.now() - started;
-  logger.info('codes issued', { batch: batch.batch_number, count: inserted, ms });
-
-  await audit.record({
-    actor,
-    req,
-    action: 'batch.issue_codes',
-    entityType: 'batch',
-    entityId: batch.id,
-    detail: { batchNumber: batch.batch_number, quantity: inserted, serialWidth: width, ms },
-  });
+  if (marked) {
+    logger.info('codes issued', { batch: batch.batch_number, count: stored, created, kept, skipped, ms });
+    await audit.record({
+      actor,
+      req,
+      action: 'batch.issue_codes',
+      entityType: 'batch',
+      entityId: batch.id,
+      detail: { batchNumber: batch.batch_number, quantity: stored, serialWidth: width, ms, skipped },
+    });
+  }
 
   return {
     batchId: batch.id,
     batchNumber: batch.batch_number,
-    issued: inserted,
+    issued: stored,
     serialWidth: width,
     durationMs: ms,
     preview: await db.findMany('code', { batch_id: batch.id }, {
@@ -135,6 +149,180 @@ export async function issueCodes(batchId, { actor, req } = {}) {
       fields: ['code', 'serial', 'unit_index'],
     }),
   };
+}
+
+/**
+ * Store a batch's codes, a round at a time, and say how it went.
+ *
+ * Each candidate in a round is one of three things:
+ *   - free: written now, with the next unit index;
+ *   - already this batch's, from a run that was cut short: kept, and it must
+ *     carry the unit index it would be given now - anything else means the
+ *     stored codes are not what this procedure wrote, and nothing more is
+ *     written;
+ *   - another batch's: passed over.
+ * Unit indexes therefore run 0..quantity-1 with no gap and no repeat.
+ */
+async function storeCodes(batch, width) {
+  const candidates = batchCandidates({
+    sku: batch.sku,
+    mfgDate: batch.mfg_date,
+    width,
+    // Binding the permutation key to the batch means two batches of the same
+    // SKU on the same day get completely different serial orderings.
+    batchKey: `${batch.batch_number}:${batch.id}`,
+    secret: config.secrets.code,
+  });
+
+  let next = 0; // the unit index the next free candidate gets
+  let created = 0;
+  let kept = 0;
+  let skipped = 0;
+  let ids = []; // reserved, not yet used
+
+  while (next < batch.quantity) {
+    const round = take(candidates, Math.min(ISSUE_CHUNK, batch.quantity - next));
+    if (!round.length) throw crowded(batch);
+
+    for (let attempt = 1; ; attempt++) {
+      const held = await holders(round);
+      const rows = [];
+      let n = next;
+      let roundKept = 0;
+      let roundSkipped = 0;
+
+      for (const c of round) {
+        const holder = held.get(db.docIdOf('code', c));
+        if (!holder) {
+          rows.push({
+            code: c.code,
+            batch_id: batch.id,
+            product_id: batch.product_id,
+            unit_index: n,
+            serial: c.serial,
+            status: 'issued',
+          });
+          n += 1;
+        } else if (holder._type === 'code' && holder.batch_id === batch.id) {
+          if (holder.unit_index !== n) throw outOfOrder(batch, c.code, holder.unit_index, n);
+          roundKept += 1;
+          n += 1;
+        } else {
+          roundSkipped += 1;
+        }
+      }
+      if (skipped + roundSkipped > batch.quantity + SKIP_ALLOWANCE) throw crowded(batch);
+
+      if (rows.length) {
+        if (ids.length < rows.length) {
+          // Never more than the units still to fill, so a finished batch
+          // leaves at most a small gap in the ids - which ids allow.
+          const want = Math.max(rows.length, Math.min(ID_BLOCK, batch.quantity - next)) - ids.length;
+          ids = ids.concat(await db.nextIds('code', want));
+        }
+        rows.forEach((row, i) => {
+          row.id = ids[i];
+        });
+        try {
+          // One transaction of plain creates: if any of these codes was taken
+          // since the look-up, none of them is written.
+          await db.insertMany('code', rows, { chunk: rows.length });
+        } catch (err) {
+          if (!isTaken(err)) throw err;
+          if (attempt >= MAX_ROUND_ATTEMPTS) throw busy(batch);
+          continue;
+        }
+        ids = ids.slice(rows.length);
+      }
+
+      next = n;
+      created += rows.length;
+      kept += roundKept;
+      skipped += roundSkipped;
+      break;
+    }
+  }
+  return { created, kept, skipped };
+}
+
+/**
+ * Move the batch to `codes_issued` if it is still planned, as a
+ * compare-and-set on its revision: when two runs of one batch finish
+ * together, exactly one marks it (and records it in the audit log). Returns
+ * false when another run already had.
+ */
+async function markIssued(batch, width) {
+  for (let attempt = 1; attempt <= MAX_ROUND_ATTEMPTS; attempt++) {
+    const current = await db.query('*[_id == $id][0]{ _rev, status }', { id: db.docIdOf('batch', batch) });
+    if (!current) {
+      logger.error('batch removed during code issuance', { batch: batch.batch_number, id: batch.id });
+      throw conflict(
+        `Batch ${batch.batch_number} was removed while its codes were being issued. ` +
+          'This has been logged - please contact the system administrator.'
+      );
+    }
+    if (current.status !== 'planned') return false;
+    try {
+      await db.update(
+        'batch',
+        batch,
+        { status: 'codes_issued', serial_width: width, codes_issued_at: db.now() },
+        { ifRevision: current._rev }
+      );
+      return true;
+    } catch (err) {
+      // Changed since it was read: look again.
+      if (!isTaken(err)) throw err;
+    }
+  }
+  throw conflict(`Batch ${batch.batch_number} was being changed at the same moment - please try again.`);
+}
+
+/** The next `k` values of an iterator (fewer at its end). */
+function take(iterator, k) {
+  const out = [];
+  while (out.length < k) {
+    const { value, done } = iterator.next();
+    if (done) break;
+    out.push(value);
+  }
+  return out;
+}
+
+/** Who already holds each candidate's code, by document id. */
+async function holders(round) {
+  const docs = await db.query('*[_id in $ids]{ _id, _type, batch_id, unit_index }', {
+    ids: round.map((c) => db.docIdOf('code', c)),
+  });
+  return new Map(docs.map((d) => [d._id, d]));
+}
+
+/** A create that failed because the document exists - taken since the look-up. */
+const isTaken = (err) => err?.status === 409 || err?.statusCode === 409;
+
+function busy(batch) {
+  return conflict(
+    `Another batch of ${batch.sku} made on the same day was issuing codes at the same moment. ` +
+      'The codes stored so far are kept - please try again.'
+  );
+}
+
+function crowded(batch) {
+  logger.error('serial space crowded', { batch: batch.batch_number, sku: batch.sku, mfgDate: batch.mfg_date });
+  return conflict(
+    `Batch ${batch.batch_number} cannot be issued: most of the serial numbers for ${batch.sku} made on ` +
+      `${batch.mfg_date} are already used by other batches. This has been logged - please contact the ` +
+      'system administrator.'
+  );
+}
+
+function outOfOrder(batch, code, stored, expected) {
+  logger.error('stored codes out of order', { batch: batch.batch_number, code, stored, expected });
+  return conflict(
+    `Batch ${batch.batch_number} already has codes stored that do not match how they are issued, so ` +
+      'nothing more was written. The batch has been left as planned and this has been logged - please ' +
+      'contact the system administrator.'
+  );
 }
 
 /**

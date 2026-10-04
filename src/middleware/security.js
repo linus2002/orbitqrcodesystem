@@ -40,8 +40,10 @@ export function securityHeaders(req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // The portal needs the camera; it needs nothing else.
-  res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(), microphone=(), payment=()');
+  // The portal needs the camera, and the phone's location for a suspicious
+  // result or a report - asked each time, never on its own - from this site
+  // only. Nothing else. Keep vercel.json's copy of this header the same.
+  res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self), microphone=(), payment=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
 

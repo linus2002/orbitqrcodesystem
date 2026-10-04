@@ -18,7 +18,7 @@ does not defend against.
 | 7 | Attacker brute-forces a staff password | scrypt, per-IP+email rate limit, account lockout | - |
 | 8 | Cross-site request forgery | `SameSite=Strict` plus double-submit CSRF token | - |
 | 9 | Regulator or auditor over-reaches into patient data | Role matrix enforced server-side; the compliance report is built from aggregates only | - |
-| 10 | Patient data leaks from the scan log | IPs and phone numbers stored only as keyed digests; location kept to city granularity | - |
+| 10 | Patient data leaks from the scan log | IPs and phone numbers stored only as keyed digests; location kept to city granularity - a GPS reading is reduced to its city before it is stored, and only this site may ask for it (`Permissions-Policy: geolocation=(self)`) | - |
 | 11 | Insider tampers with records | Append-only scans, audit log and SMS log; every admin action audited; the Studio is read-only | A member of the Sanity project, or anyone holding the API token, can still edit documents through the Sanity API |
 | 12 | The database is read directly, bypassing the app | Sanity credentials are server-side only and never sent to the browser; the dataset is private; no CORS origin for the web app; the build fails on a public dataset | The token grants full read/write - store it as a secret, give it to nothing else |
 
@@ -38,10 +38,13 @@ rest, keyed with `CODE_SECRET`. Two consequences:
   API for every guess, where rate limiting and alerting apply.
 
 Serials come from a keyed format-preserving permutation (an alternating Feistel
-network) over the serial space, so they are unpredictable but collision-free by
-construction. The space is auto-sized to at least 100x the batch quantity, so a
-well-formed blind guess has at most a ~1% chance of naming a real unit -
-before the checksum's additional ~1/1024 filter.
+network) over the serial space, so they are unpredictable and never repeat
+within a batch. Batches of one product made on the same day share a serial
+space: issuance passes over any code another batch already holds, and the
+store refuses a second document with the same code, so no two packs share one.
+The space is auto-sized to at least 100x the batch quantity, so a well-formed
+blind guess has about a 1% chance of naming a real unit for each batch made
+that day - before the checksum's additional ~1/1024 filter.
 
 > `CODE_SECRET` is effectively permanent. Rotating it invalidates the checksum
 > of every code already printed on a physical pack. Back it up; never rotate it
@@ -97,6 +100,18 @@ printable label sheet (`client/src/admin/views/Batches.jsx`). It renders QR
 SVG markup produced by our own server-side `qrcode` renderer from a code in
 our own registry - never from user input. Any future use of that API should be
 treated as requiring the same justification.
+
+The same applies to spreadsheet exports. The scan log and customer CSVs carry
+text the public typed on the portal - a checker's name, a code, where they
+bought the pack - and a spreadsheet runs a cell that starts with `=`, `+`, `-`
+or `@` as a formula. `csvCell` in `src/services/analytics.js` writes such a
+cell as text (a leading apostrophe) and quotes any value containing a
+semicolon or tab as well as a comma, so it cannot be split into a new cell.
+Plain numbers, mobile numbers included, are left as they are. Any new CSV
+export should go through `toCsv`. The `.xlsx` exports need nothing: the
+library stores text as text and only writes a formula when told to. The
+packaging line's `codes.csv` has its own writer and holds only values the
+system generates or restricts to letters, digits and hyphens.
 
 ### Separating staff access from the public portal
 
