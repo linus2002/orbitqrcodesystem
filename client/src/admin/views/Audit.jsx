@@ -90,6 +90,7 @@ export default function Audit() {
             },
             {
               label: 'Detail',
+              className: 'td-wrap',
               render: (r) =>
                 r.detail ? (
                   <span className="text-sm text-muted">{summarise(r.detail)}</span>

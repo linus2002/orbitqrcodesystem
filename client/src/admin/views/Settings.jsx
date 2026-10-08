@@ -14,10 +14,13 @@ import { fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { Card, TableCard, Table, ErrorNote, Loading } from '../components/ui.jsx';
 import ProfileEditor from '../components/ProfileEditor.jsx';
+import { useTour } from '../components/GuidedTour.jsx';
+import { Icon } from '../../components/Icons.jsx';
 
 export default function Settings() {
   const canWrite = usePermission('settings:write');
   const { data, error, loading } = useApi('/api/admin/settings');
+  const startTour = useTour();
 
   useHeader(
     'Settings',
@@ -51,7 +54,15 @@ export default function Settings() {
     <>
       {/* Your own account first: it is the only thing on this page a
           non-administrator can change. */}
-      <Card title="Your profile">
+      <Card
+        title="Your profile"
+        actions={
+          <button type="button" className="btn btn-ghost btn-sm" onClick={startTour}>
+            <Icon name="help" />
+            Take the tour again
+          </button>
+        }
+      >
         <ProfileEditor />
       </Card>
 
@@ -82,6 +93,7 @@ export default function Settings() {
             },
             {
               label: 'What it does',
+              className: 'td-wrap',
               render: (s) => (
                 <span className="text-sm text-muted">
                   {s.description ?? ''}

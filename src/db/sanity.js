@@ -27,6 +27,9 @@ export class SanityBackend {
       perspective: 'published',
       // No request tagging with anything identifying; and never log the token.
       requestTagPrefix: 'qrshield',
+      // The client's default is five minutes, so a dropped connection would
+      // hang a request (or the boot check) long after anyone stopped waiting.
+      timeout: 30_000,
     });
     this.dataset = dataset;
   }

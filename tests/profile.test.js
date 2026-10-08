@@ -126,3 +126,17 @@ test('the endpoint refuses an anonymous caller', async () => {
   const res = await client.patch('/api/auth/profile', { fullName: 'Nobody' });
   assert.equal(res.status, 401);
 });
+
+test('the guided tour opens until it is finished, then stays closed', async () => {
+  assert.equal((await client.get('/api/auth/me')).body.user.tourDone, false);
+
+  const done = await client.post('/api/auth/tour-done', {});
+  assert.equal(done.status, 200);
+  assert.equal(done.body.user.tourDone, true);
+  assert.equal((await client.get('/api/auth/me')).body.user.tourDone, true);
+
+  // Replaying it from Settings keeps the date it was first finished.
+  const first = (await db.findOne('user')).tour_done_at;
+  await client.post('/api/auth/tour-done', {});
+  assert.equal((await db.findOne('user')).tour_done_at, first);
+});

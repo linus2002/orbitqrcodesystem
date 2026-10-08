@@ -1,179 +1,135 @@
 /**
- * The rotating panel beside the sign-in form.
+ * The sign-in card's left half: a cluster of 3D tiles for what the system
+ * does - a QR code under a sweeping scan line, verified scans, the shield,
+ * a flagged pack, live scans - over captions that rotate.
  *
- * Each slide is one capability of the system, in the order a pack actually
- * travels: serialized on the line, checked by a patient, cloned and caught,
- * investigated by a person, accounted for to a regulator. Somebody evaluating
- * the system sees what it does; somebody signing in every morning sees why
- * their work matters. The same five slides serve both.
- *
- * ---------------------------------------------------------------------------
- * PHOTOGRAPHY
- *
- * Every slide is written around a person, because the subject of each one is a
- * person doing something - not a screenshot of software. A brief sits above
- * each slide below.
- *
- * Shooting notes that apply to all five:
- *
- *   - Real people in real settings. Stock photography of models in unbranded
- *     lab coats reads as stock, and this system's whole claim is that it is in
- *     use in actual pharmacies and actual production lines.
- *   - Portrait or landscape both work; the panel uses object-fit: cover, so
- *     keep the subject off-centre-left, away from where the text sits.
- *   - Roughly 1200x1500 or larger, under a few hundred KB each. This is the
- *     first thing anybody downloads on the sign-in page.
- *   - No readable patient details, no identifiable prescriptions, no real
- *     codes on a pack that could be photographed and reused.
- *   - Written consent from anybody recognisable, including staff.
- *
- * Drop the files into `client/public/img/signin/` and point `image` at them.
- * The files currently there are designed placeholders, not photographs.
- * ---------------------------------------------------------------------------
- *
- * Images are served from our own origin, so the strict `img-src 'self'`
- * Content-Security-Policy stays intact. Do not point these at a CDN without
- * widening that directive.
+ * Everything is drawn in CSS and inline SVG in the app's own palette, so it
+ * themes with the page and costs no image requests. Hidden on phones, where
+ * it would only stand between the user and the form.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Icon } from '../components/Icons.jsx';
 
-/** How long each slide is held, in milliseconds. */
-const INTERVAL = 7000;
-
-export const SLIDES = [
-  {
-    /* PHOTO: a packaging operator in gowning inspecting a coded carton, with
-     the line running behind her. Serialization happens at manufacture, not
-     in an office afterwards. */
-    image: '/img/signin/slide-1.jpg',
-    title: 'Serialized at the line',
-    body: 'Every pack leaves production with its own signed, non-sequential code. Batches of up to 500,000 units are issued and exported for the printer in one step.',
-  },
-  {
-    /* PHOTO: a woman at a kitchen table, phone raised to the code on a
-     medicine box. Ordinary clothes, ordinary room - deliberately not a
-     clinician, because this slide is about the person the system is for. */
-    image: '/img/signin/slide-2.jpg',
-    title: 'Anyone can check a pack',
-    body: 'A patient scans the code and gets a plain answer in seconds - no app, no account, no sign-up. Where there is no data signal, the same check works over SMS.',
-  },
-  {
-    /* PHOTO: two hands holding two identical-looking packs at a pharmacy
-     counter. You cannot tell which is the copy by looking, which is the
-     entire argument this slide makes. */
-    image: '/img/signin/slide-3.jpg',
-    title: 'Copies surface themselves',
-    body: 'A cloned code passes exactly once. The second time anyone checks it, in any pharmacy or any city, the duplicate is flagged and an alert is raised.',
-  },
-  {
-    /* PHOTO: an analyst on the phone mid-decision, pen in hand, screen out of
-     focus behind her. The subject is the judgement, not the dashboard. */
-    image: '/img/signin/slide-4.jpg',
-    title: 'A person decides, not a rule',
-    body: 'Flags become work for the security team, never an automatic recall. Every decision, and who made it, is written to an append-only audit log.',
-  },
-  {
-    /* PHOTO: a quality lead working through a printed binder. Paper matters
-     here: this slide is about what you can hand to an inspector. */
-    image: '/img/signin/slide-5.jpg',
-    title: 'Evidence for the regulator',
-    body: 'Every scan, alert and batch transition is retained and exportable. A recall reaches the next person to scan the pack, and the record shows exactly who was told what, and when.',
-  },
+const SLIDES = [
+  'Every pack verified at the scan',
+  'Counterfeits flagged the moment they surface',
+  'Recalls reach the next person to scan',
 ];
 
+const SLIDE_MS = 4500;
+
+/*
+ * A 21 x 21 QR-like pattern: the three finder squares in their corners, and
+ * modules from a fixed seed so the code looks the same on every load. It is
+ * artwork, not a scannable code.
+ */
+const QR_PATH = (() => {
+  const n = 21;
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const inFinder = (x, y) =>
+    (x < 8 && y < 8) || (x > n - 9 && y < 8) || (x < 8 && y > n - 9);
+  let d = '';
+  const sq = (x, y, s = 1) => {
+    d += `M${x} ${y}h${s}v${s}h-${s}z`;
+  };
+  for (const [fx, fy] of [[0, 0], [n - 7, 0], [0, n - 7]]) {
+    for (let i = 0; i < 7; i++) {
+      for (let j = 0; j < 7; j++) {
+        const ring = i === 0 || i === 6 || j === 0 || j === 6;
+        const core = i >= 2 && i <= 4 && j >= 2 && j <= 4;
+        if (ring || core) sq(fx + i, fy + j);
+      }
+    }
+  }
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (!inFinder(x, y) && rand() < 0.5) sq(x, y);
+    }
+  }
+  return d;
+})();
+
 export default function SignInShowcase() {
-  const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const panelRef = useRef(null);
-
-  // Someone who has asked for reduced motion should not get a panel that
-  // changes under them; they can still step through it by hand.
-  const reducedMotion =
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-
-  const go = useCallback((next) => {
-    setIndex(((next % SLIDES.length) + SLIDES.length) % SLIDES.length);
-  }, []);
+  const [slide, setSlide] = useState(0);
 
   useEffect(() => {
-    if (reducedMotion || paused) return undefined;
-    const timer = setTimeout(() => go(index + 1), INTERVAL);
+    // Captions hold still for anyone who has asked for less motion.
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
+    const timer = setTimeout(() => setSlide((s) => (s + 1) % SLIDES.length), SLIDE_MS);
     return () => clearTimeout(timer);
-  }, [index, paused, reducedMotion, go]);
-
-  // Preload the next image so the crossfade has something to fade to.
-  useEffect(() => {
-    const next = new Image();
-    next.src = SLIDES[(index + 1) % SLIDES.length].image;
-  }, [index]);
-
-  // Publish the interval to CSS so the progress bar fills in step with the
-  // timer above, from one source of truth. Set through the CSSOM rather than
-  // a style attribute, which the Content-Security-Policy forbids.
-  useEffect(() => {
-    panelRef.current?.style.setProperty('--slide-ms', `${INTERVAL}ms`);
-  }, []);
-
-  const slide = SLIDES[index];
+  }, [slide]);
 
   return (
-    <aside
-      className="showcase"
-      ref={panelRef}
-      aria-label="About Getmeds"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-    >
-      <div className="showcase-stage">
-        {SLIDES.map((s, i) => (
-          <img
-            key={s.image}
-            className={`showcase-img${i === index ? ' on' : ''}`}
-            src={s.image}
-            alt=""
-            aria-hidden="true"
-            // Only the first slide blocks paint; the rest arrive lazily.
-            loading={i === 0 ? 'eager' : 'lazy'}
-            fetchPriority={i === 0 ? 'high' : 'low'}
-            draggable="false"
-          />
-        ))}
-        <div className="showcase-scrim" />
+    <div className="showcase">
+      <span className="showcase-glow one" aria-hidden="true" />
+      <span className="showcase-glow two" aria-hidden="true" />
+
+      <div className="showcase-art" aria-hidden="true">
+        <div className="showcase-stage">
+          {/* The float sits on its own wrapper: its transform would replace the tilt. */}
+          <div className="tile-main-pos">
+            <div className="float">
+              <div className="tile-main">
+                <div className="tile-main-plate">
+                  <svg className="tile-qr" viewBox="0 0 21 21" shapeRendering="crispEdges">
+                    <path d={QR_PATH} />
+                  </svg>
+                  <span className="tile-scanline" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="float-slow tile-pos-bubble">
+            <div className="tile-bubble">
+              <Icon name="check" />
+              12.4k
+            </div>
+          </div>
+
+          <div className="float tile-pos-shield">
+            <div className="tile-shield">
+              <Icon name="shield" />
+            </div>
+          </div>
+
+          <div className="float-slow tile-pos-chip">
+            <div className="tile-chip">
+              <span className="tile-ping" />
+              36 live scans
+            </div>
+          </div>
+
+          <div className="float tile-pos-alert">
+            <div className="tile-alert">
+              <Icon name="alert" />
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* aria-live so a screen reader hears the copy change rather than
-          silently missing it. */}
-      <div className="showcase-caption" aria-live="polite">
-        <div className="showcase-progress" role="tablist" aria-label="Choose a slide">
-          {SLIDES.map((s, i) => (
+      <div className="showcase-caption">
+        <p className="showcase-text" aria-live="polite">
+          {SLIDES[slide]}
+        </p>
+        <div className="showcase-dots">
+          {SLIDES.map((text, i) => (
             <button
-              key={s.image}
+              key={text}
               type="button"
-              role="tab"
-              aria-selected={i === index}
-              aria-label={`Slide ${i + 1}: ${s.title}`}
-              className={[
-                'showcase-bar',
-                i === index ? 'on' : '',
-                i < index ? 'done' : '',
-                i === index && !reducedMotion && !paused ? 'running' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => {
-                setPaused(true);
-                go(i);
-              }}
+              onClick={() => setSlide(i)}
+              aria-label={`Show slide ${i + 1}`}
+              aria-current={i === slide}
             >
-              <span className="showcase-bar-fill" />
+              <span className={i === slide ? 'on' : undefined} />
             </button>
           ))}
         </div>
-
-        <h2 className="showcase-title">{slide.title}</h2>
-        <p className="showcase-body">{slide.body}</p>
       </div>
-    </aside>
+    </div>
   );
 }

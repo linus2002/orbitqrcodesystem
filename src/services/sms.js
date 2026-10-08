@@ -55,7 +55,7 @@ export function composeReply(result) {
 
     default:
       lines.push('Sorry, that code was not readable.');
-      lines.push('Check it and send again, e.g. AMX25-260921-00483-K7');
+      lines.push('Check it and send again, e.g. AMX25-7KQ2M9-K7');
   }
 
   return lines.join(' ').slice(0, MAX_SMS);

@@ -3,6 +3,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from './api.js';
+import { Icon } from '../components/Icons.jsx';
 
 // ---------------------------------------------------------------------------
 // Theme
@@ -65,25 +66,54 @@ export function applyStoredTheme() {
 
 const ToastContext = createContext(() => {});
 
+const TOAST_TITLES = { error: 'Something went wrong', success: 'Done', info: 'Notice' };
+const TOAST_ICONS = { error: 'alert', success: 'check', info: 'shield' };
+// How long a toast takes to slide out; it is removed once that has played.
+const TOAST_LEAVE_MS = 320;
+
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const nextId = useRef(1);
 
-  // `ms` is for the odd message that tells someone where to go next: it has
-  // to stay up long enough to be read in full.
-  const push = useCallback((message, kind = 'info', { ms = 4200 } = {}) => {
-    const id = nextId.current++;
-    setToasts((t) => [...t, { id, message, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ms);
+  const dismiss = useCallback((id) => {
+    setToasts((t) => t.map((x) => (x.id === id ? { ...x, leaving: true } : x)));
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), TOAST_LEAVE_MS);
   }, []);
+
+  // `ms` is for the odd message that tells someone where to go next: it has
+  // to stay up long enough to be read in full. `title` replaces the heading
+  // that otherwise comes from the kind.
+  const push = useCallback(
+    (message, kind = 'info', { ms = 4200, title } = {}) => {
+      const id = nextId.current++;
+      setToasts((t) => [...t, { id, message, kind, ms, title: title ?? TOAST_TITLES[kind] ?? TOAST_TITLES.info }]);
+      setTimeout(() => dismiss(id), ms);
+    },
+    [dismiss]
+  );
 
   return (
     <ToastContext.Provider value={push}>
       {children}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind === 'error' ? 'err' : t.kind === 'success' ? 'ok' : ''}`}>
-            {t.message}
+          <div
+            key={t.id}
+            className={`toast toast-${TOAST_ICONS[t.kind] ? t.kind : 'info'}${t.leaving ? ' leaving' : ''}`}
+            role={t.kind === 'error' ? 'alert' : 'status'}
+            style={{ '--toast-ms': `${t.ms}ms` }}
+          >
+            <span className="toast-icon" aria-hidden="true">
+              <Icon name={TOAST_ICONS[t.kind] ?? TOAST_ICONS.info} />
+            </span>
+            <div className="toast-text">
+              <strong>{t.title}</strong>
+              <span>{t.message}</span>
+            </div>
+            <button type="button" className="toast-close" onClick={() => dismiss(t.id)} aria-label="Dismiss">
+              <Icon name="x" />
+            </button>
+            <span className="toast-timer" aria-hidden="true" />
           </div>
         ))}
       </div>

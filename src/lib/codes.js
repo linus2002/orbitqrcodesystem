@@ -1,14 +1,24 @@
 /**
  * Unique product code generation, formatting and validation.
  *
- * FORMAT (per the QR Shield field guide):
+ * FORMAT - compact, issued for every new batch:
+ *
+ *      AMX25 - 7KQ2M9 - K7
+ *      -----   ------   --
+ *        |       |       `- keyed checksum (2 chars), catches typos
+ *        |       `--------- non-sequential unit serial, 6 Crockford Base32
+ *        |                  characters (32^6 = ~1.07 billion per SKU)
+ *        `----------------- product SKU + strength
+ *
+ * LEGACY - what batches issued before the compact format carry, and what a
+ * batch part-issued in it finishes with. Still parsed and verified, because
+ * these codes are already printed on packs:
  *
  *      AMX25 - 260921 - 00483 - K7
- *      -----   ------   -----   --
- *        |        |       |      `- keyed checksum (2 chars), catches typos
- *        |        |       `-------- non-sequential unit serial
- *        |        `---------------- batch manufacturing date, YYMMDD
- *        `------------------------- product SKU + strength
+ *        SKU   YYMMDD   serial  checksum
+ *
+ * The manufacturing date left the code because nothing reads it from there:
+ * a code is looked up whole, and the batch records its own date.
  *
  * Two properties matter and are implemented here:
  *
@@ -32,6 +42,12 @@ import { hmac } from './crypto.js';
  */
 export const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CHECK_LEN = 2; // 32^2 = 1024 possible checksums
+
+/** The two code shapes: see the top of this file. */
+export const CODE_FORMAT = Object.freeze({ COMPACT: 'compact', LEGACY: 'legacy' });
+
+/** Serial characters in a compact code. */
+export const COMPACT_WIDTH = 6;
 const SIG_LEN = 10; // 32^10 = ~1.1e15, the QR-borne signature
 
 /** Map look-alike characters onto their Crockford equivalents. */
@@ -61,7 +77,7 @@ function keyedDigest(domain, body, secret, len) {
   return toBase32(Buffer.from(hmac(`${domain}:${body}`, secret, 'hex'), 'hex'), len);
 }
 
-/** The 2-character checksum for a code body (`SKU-YYMMDD-SERIAL`). */
+/** The 2-character checksum for a code body (`SKU-SERIAL` or `SKU-YYMMDD-SERIAL`). */
 export function computeChecksum(body, secret) {
   return keyedDigest('chk', body.toUpperCase(), secret, CHECK_LEN);
 }
@@ -94,17 +110,19 @@ export function serialWidthFor(quantity, { min = 5, max = 9 } = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a bijection over [0, 10^width) keyed by `key`.
+ * Build a bijection over [0, radix^width) keyed by `key`.
  *
  * The domain is split as a*b (e.g. 10^5 -> 1000 * 100) and we alternate
  * rounds that mix each half modulo its own size. Every round is individually
  * invertible, so the composition is a permutation for ANY round function,
  * which is what guarantees "no two units ever share a serial".
+ *
+ * `radix` is 10 for legacy digit serials and 32 for compact ones.
  */
-export function serialPermutation(key, width, rounds = 8) {
-  const domain = 10 ** width;
-  const a = 10 ** Math.ceil(width / 2);
-  const b = 10 ** Math.floor(width / 2);
+export function serialPermutation(key, width, rounds = 8, radix = 10) {
+  const domain = radix ** width;
+  const a = radix ** Math.ceil(width / 2);
+  const b = radix ** Math.floor(width / 2);
 
   // Round function: keyed, deterministic, reduced to the target modulus.
   const F = (round, value, mod) => {
@@ -138,9 +156,27 @@ export function dateSegment(date) {
   return `${p(d.getUTCFullYear() % 100)}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
 }
 
-/** Assemble a complete code from its parts. */
+/** A serial number as `width` Crockford Base32 characters. */
+export function encodeSerial(n, width = COMPACT_WIDTH) {
+  let out = '';
+  for (let i = 0; i < width; i++) {
+    out = ALPHABET[n % 32] + out;
+    n = Math.floor(n / 32);
+  }
+  return out;
+}
+
+const skuSegment = (sku) => String(sku).toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Assemble a compact code, `SKU-SERIAL-CHK`, from a Base32 serial. */
+export function buildCompactCode({ sku, serial, secret }) {
+  const body = `${skuSegment(sku)}-${serial}`;
+  return `${body}-${computeChecksum(body, secret)}`;
+}
+
+/** Assemble a legacy code, `SKU-YYMMDD-SERIAL-CHK`, from its parts. */
 export function buildCode({ sku, mfgDate, serial, width, secret }) {
-  const skuSeg = String(sku).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const skuSeg = skuSegment(sku);
   const dateSeg =
     typeof mfgDate === 'string' && /^\d{6}$/.test(mfgDate) ? mfgDate : dateSegment(mfgDate);
   const serialSeg = String(serial).padStart(width, '0');
@@ -149,8 +185,8 @@ export function buildCode({ sku, mfgDate, serial, width, secret }) {
 }
 
 /**
- * Normalise anything a human might type or a scanner might emit into the
- * canonical `SKU-YYMMDD-SERIAL-CHK` shape.
+ * Normalise anything a human might type or a scanner might emit into one of
+ * the canonical shapes, `SKU-SERIAL-CHK` or legacy `SKU-YYMMDD-SERIAL-CHK`.
  *
  * Accepts: lower case, spaces, underscores, en/em dashes, a full QR URL, and
  * look-alike characters in the numeric and checksum segments.
@@ -177,6 +213,14 @@ export function normalizeCode(raw) {
     .replace(/^-|-$/g, '');
 
   const parts = s.split('-');
+  if (parts.length === 3) {
+    const [sku, serial, check] = parts;
+    return [
+      sku.replace(/[^A-Z0-9]/g, ''),
+      decodeConfusables(serial).replace(/[^A-Z0-9]/g, ''),
+      decodeConfusables(check).replace(/[^A-Z0-9]/g, ''),
+    ].join('-');
+  }
   if (parts.length !== 4) return s; // let parseCode report the structural error
 
   const [sku, date, serial, check] = parts;
@@ -188,13 +232,22 @@ export function normalizeCode(raw) {
   ].join('-');
 }
 
-const CODE_RE = /^([A-Z0-9]{2,12})-(\d{6})-(\d{4,9})-([A-Z0-9]{2})$/;
+const COMPACT_RE = /^([A-Z0-9]{2,12})-([0-9A-HJKMNP-TV-Z]{6})-([A-Z0-9]{2})$/;
+const LEGACY_RE = /^([A-Z0-9]{2,12})-(\d{6})-(\d{4,9})-([A-Z0-9]{2})$/;
+
+/** Which shape a normalised code has, or null when it has neither. */
+export function codeFormatOf(code) {
+  if (COMPACT_RE.test(code)) return CODE_FORMAT.COMPACT;
+  if (LEGACY_RE.test(code)) return CODE_FORMAT.LEGACY;
+  return null;
+}
 
 /**
- * Parse and structurally validate a code.
+ * Parse and structurally validate a code, in either format.
  *
- * Returns `{ ok: true, code, sku, dateSegment, serial, checksum }` or
- * `{ ok: false, error }` where error is 'empty' | 'malformed' | 'checksum'.
+ * Returns `{ ok: true, code, format, sku, dateSegment, serial, checksum }` -
+ * `dateSegment` is null for a compact code - or `{ ok: false, error }` where
+ * error is 'empty' | 'malformed' | 'checksum'.
  *
  * A checksum failure is a TYPO, not a counterfeit. The caller must present
  * those two cases very differently to the patient.
@@ -203,14 +256,21 @@ export function parseCode(raw, secret) {
   const code = normalizeCode(raw);
   if (!code) return { ok: false, error: 'empty' };
 
-  const m = CODE_RE.exec(code);
+  const compact = COMPACT_RE.exec(code);
+  if (compact) {
+    const [, sku, serial, checksum] = compact;
+    if (checksum !== computeChecksum(`${sku}-${serial}`, secret)) return { ok: false, error: 'checksum', code };
+    return { ok: true, code, format: CODE_FORMAT.COMPACT, sku, dateSegment: null, serial, checksum };
+  }
+
+  const m = LEGACY_RE.exec(code);
   if (!m) return { ok: false, error: 'malformed', code };
 
   const [, sku, dateSeg, serial, checksum] = m;
   const expected = computeChecksum(`${sku}-${dateSeg}-${serial}`, secret);
   if (checksum !== expected) return { ok: false, error: 'checksum', code };
 
-  return { ok: true, code, sku, dateSegment: dateSeg, serial, checksum };
+  return { ok: true, code, format: CODE_FORMAT.LEGACY, sku, dateSegment: dateSeg, serial, checksum };
 }
 
 /**
@@ -232,16 +292,28 @@ export function qrPayload(code, secret, baseUrl) {
  * A batch's candidate codes, in the batch's own shuffled order.
  *
  * Position p carries serial permute(p). The permutation never repeats a
- * serial, so a batch's candidates never collide with each other - but two
- * batches of one SKU with one manufacturing date draw from the same serial
- * space, and can land on the same code. Issuance therefore takes candidates
- * in order and passes over any code another batch already holds, which is
- * why this runs past the batch size, up to the whole serial space. Lazy, so
- * a large batch is never materialised in memory.
+ * serial, so a batch's candidates never collide with each other - but other
+ * batches draw from the same serial space (every batch of the SKU, for a
+ * compact code; those of the same SKU and manufacturing date, for a legacy
+ * one) and can land on the same code. Issuance therefore takes candidates in
+ * order and passes over any code another batch already holds, which is why
+ * this runs past the batch size, up to the whole serial space. Lazy, so a
+ * large batch is never materialised in memory.
  *
- * @param {number} width serial digits - serialWidthFor(quantity), always
+ * @param {string} format CODE_FORMAT.COMPACT (the default) or LEGACY
+ * @param {number} width legacy only: serial digits - serialWidthFor(quantity)
  */
-export function* batchCandidates({ sku, mfgDate, width, batchKey, secret }) {
+export function* batchCandidates({ sku, mfgDate, width, batchKey, secret, format = CODE_FORMAT.COMPACT }) {
+  if (format === CODE_FORMAT.COMPACT) {
+    const permute = serialPermutation(`${batchKey}:${secret}`, COMPACT_WIDTH, 8, 32);
+    const domain = 32 ** COMPACT_WIDTH;
+    for (let position = 0; position < domain; position++) {
+      const serial = encodeSerial(permute(position));
+      yield { position, serial, code: buildCompactCode({ sku, serial, secret }) };
+    }
+    return;
+  }
+
   const permute = serialPermutation(`${batchKey}:${secret}`, width);
   const dateSeg = dateSegment(mfgDate);
   const domain = 10 ** width;
@@ -258,14 +330,14 @@ export function* batchCandidates({ sku, mfgDate, width, batchKey, secret }) {
 
 /**
  * The first `quantity` candidates of a batch - its codes when no other batch
- * of the same SKU and date holds any of them.
+ * holds any of them.
  *
  * Yields `{ unitIndex, serial, code, signature }` lazily so a 100k-unit batch
  * never has to be materialised in memory all at once.
  */
-export function* generateBatchCodes({ sku, mfgDate, quantity, batchKey, secret }) {
+export function* generateBatchCodes({ sku, mfgDate, quantity, batchKey, secret, format = CODE_FORMAT.COMPACT }) {
   const width = serialWidthFor(quantity);
-  for (const { position, serial, code } of batchCandidates({ sku, mfgDate, width, batchKey, secret })) {
+  for (const { position, serial, code } of batchCandidates({ sku, mfgDate, width, batchKey, secret, format })) {
     if (position >= quantity) return;
     yield { unitIndex: position, serial, code, signature: computeSignature(code, secret) };
   }

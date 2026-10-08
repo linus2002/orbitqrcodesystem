@@ -87,6 +87,7 @@ export function publicUser(row) {
     lastLoginAt: row.last_login_at,
     avatar: row.avatar ?? null,
     mustChangePassword: row.must_change_pw === 1,
+    tourDone: Boolean(row.tour_done_at),
     createdAt: row.created_at,
     permissions: PERMISSIONS[row.role] ?? [],
   };
@@ -254,6 +255,20 @@ export async function listUsers() {
  * role is the whole access model - letting either be self-served would turn
  * this endpoint into privilege escalation.
  */
+/**
+ * Record that this person has been through the dashboard's guided tour -
+ * finished or skipped - so it no longer opens on sign-in. The first time
+ * only: replaying it later from Settings leaves the original date.
+ *
+ * Not audited: it changes what one person is shown, nothing about the data.
+ */
+export async function completeTour(userId) {
+  const user = await db.get('user', userId);
+  if (!user) throw notFound('Account not found');
+  if (!user.tour_done_at) await db.update('user', user, { tour_done_at: db.now() });
+  return publicUser(await db.get('user', userId));
+}
+
 export async function updateProfile(userId, { fullName, avatar }, { req } = {}) {
   const user = await db.get('user', userId);
   if (!user) throw notFound('Account not found');

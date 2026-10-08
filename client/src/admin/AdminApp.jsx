@@ -6,7 +6,7 @@
  * measure only - the server enforces the same matrix independently, and
  * hand-typing /admin/scans as a regulator still gets a 403.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { api } from '../lib/api.js';
@@ -19,6 +19,7 @@ import Clock from './components/Clock.jsx';
 import { DrawerProvider, useDrawer } from './components/Drawer.jsx';
 import { HeaderProvider, PageHeader, useHeader } from './components/PageHeader.jsx';
 import { NavContext } from './components/Legend.jsx';
+import GuidedTour, { TourContext } from './components/GuidedTour.jsx';
 
 import Dashboard from './views/Dashboard.jsx';
 import Alerts from './views/Alerts.jsx';
@@ -78,6 +79,23 @@ export default function AdminApp() {
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setNavOpen(false), [location.pathname]);
 
+  // The guided tour opens by itself until this account has been through it.
+  // Keyed on the account, so it does not reopen when the session refreshes.
+  const [touring, setTouring] = useState(false);
+  const userId = session.user?.id;
+  const tourDone = session.user?.tourDone;
+  useEffect(() => {
+    if (userId && tourDone === false) setTouring(true);
+  }, [userId, tourDone]);
+
+  const startTour = useCallback(() => setTouring(true), []);
+  const endTour = useCallback(() => {
+    setTouring(false);
+    // Fire and forget: if this fails the tour simply offers itself again at
+    // the next sign-in, which is the harmless way round.
+    api('/api/auth/tour-done', { method: 'POST' }).catch(() => {});
+  }, []);
+
   if (session.status === 'idle' || session.status === 'loading') {
     return (
       <div className="page-loading">
@@ -110,6 +128,7 @@ export default function AdminApp() {
   const allowed = ROUTES.filter((r) => can(r.perm));
 
   return (
+    <TourContext.Provider value={startTour}>
     <HeaderProvider>
       {/* The legend lists the sidebar's icons from this, so it shows exactly
           the entries this person sees. */}
@@ -150,7 +169,61 @@ export default function AdminApp() {
         </DrawerProvider>
       </NavContext.Provider>
     </HeaderProvider>
+    {touring && <GuidedTour steps={tourSteps(session.user, allowed)} onClose={endTour} />}
+    </TourContext.Provider>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Guided tour
+// ---------------------------------------------------------------------------
+
+/**
+ * What the tour says about each section, by route path. A section this
+ * person cannot see is left out, so a regulator's tour is shorter than an
+ * administrator's and never points at something that is not there.
+ */
+const TOUR_SECTIONS = {
+  '': ['Overview', 'Your home screen: the last 30 days of checks, flagged packs and what needs attention, at a glance.'],
+  alerts: ['Alerts', 'Suspicious scans wait here for someone to review them. The red count is how many are still open.'],
+  scans: ['Scan log', 'Every verification attempt, genuine or not - when, where, and through which channel.'],
+  reports: ['Patient reports', 'Packs that patients and pharmacists have reported to you directly.'],
+  lookup: ['Code lookup', 'Type any pack code to see its product, batch, status and every time it was checked.'],
+  products: ['Products', 'The catalogue. A product\'s SKU starts every code issued for it.'],
+  batches: ['Batches & codes', 'Plan a production batch, issue its codes, and move it from printed to released.'],
+  audit: ['Audit log', 'Every change anyone makes in the dashboard is recorded here, and can never be edited.'],
+  users: ['Users', 'Add staff accounts and choose what each person can see and do.'],
+  settings: ['Settings', 'Portal notices, support numbers and alert thresholds - and your own profile.'],
+};
+
+function tourSteps(user, allowed) {
+  const firstName = (user.fullName || '').split(' ')[0];
+  const sections = allowed
+    .filter((r) => TOUR_SECTIONS[r.path])
+    .map((r) => {
+      const [title, text] = TOUR_SECTIONS[r.path];
+      return { id: `nav-${r.path || 'overview'}`, target: `nav-${r.path || 'overview'}`, title, text };
+    });
+
+  return [
+    {
+      id: 'welcome',
+      title: firstName ? `Welcome, ${firstName}` : 'Welcome',
+      text: 'Here is a quick look at where everything is in the dashboard. It takes about a minute.',
+    },
+    ...sections,
+    {
+      id: 'tools',
+      target: 'tools',
+      title: 'Theme, sign out and your account',
+      text: 'Switch between light and dark, sign out, or open your account from your picture.',
+    },
+    {
+      id: 'done',
+      title: 'You are all set',
+      text: 'You can take this tour again at any time from Settings.',
+    },
+  ];
 }
 
 function Denied({ role, notFound = false }) {
@@ -191,7 +264,7 @@ function ShellTools({ signOut, user }) {
   const { open: openAccount, loading } = useOpenAccount(user);
 
   return (
-    <div className="shell-tools">
+    <div className="shell-tools" data-tour="tools">
       <Clock />
       <span className="shell-tools-sep" aria-hidden="true" />
       <button
@@ -302,6 +375,7 @@ function Sidebar({ open, routes, session }) {
           ) : (
             <NavLink
               key={item.route.path || 'index'}
+              data-tour={`nav-${item.route.path || 'overview'}`}
               to={`/admin/${item.route.path}`}
               end={item.route.path === ''}
               className={({ isActive }) => (isActive ? 'active' : undefined)}

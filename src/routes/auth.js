@@ -86,6 +86,13 @@ router.get('/me', requireAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/auth/tour-done - the guided tour was finished or skipped
+// ---------------------------------------------------------------------------
+router.post('/tour-done', requireAuth, requireCsrf, async (req, res) => {
+  res.json({ user: await authService.completeTour(req.user.id) });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/auth/change-password
 // ---------------------------------------------------------------------------
 router.post('/change-password', requireAuth, requireCsrf, async (req, res) => {

@@ -152,10 +152,17 @@ export function createApp() {
 /** Start listening. Exported so tests can start an ephemeral server. */
 export async function start({ port = config.port } = {}) {
   db.open();
-  await db.migrate({ silent: true });
 
+  // Listen first, then prove the store is reachable. Waiting on Sanity before
+  // listening meant a network blip at boot (a laptop waking, Wi-Fi
+  // reconnecting) left the port closed with nothing logged, and the Vite proxy
+  // could only report ECONNREFUSED.
   const app = createApp();
-  const server = app.listen(port, () => {
+  const server = app.listen(port, (err) => {
+    if (err) {
+      logger.error(`Could not listen on port ${port}`, { error: err.message });
+      process.exit(1);
+    }
     logger.info(`QR Shield listening on http://localhost:${port}`, {
       env: config.env,
       publicBaseUrl: config.publicBaseUrl,
@@ -168,6 +175,17 @@ export async function start({ port = config.port } = {}) {
       logger.warn(LOCAL_BASE_URL_WARNING, { publicBaseUrl: config.publicBaseUrl });
     }
   });
+
+  try {
+    await db.migrate({ silent: true });
+  } catch (err) {
+    logger.error(`${db.describe()} is unreachable; requests that need it will fail until it answers`, {
+      error: err.message,
+    });
+    // A deployed instance with no store is useless: exit so the platform
+    // restarts it. In development keep serving so the cause is visible.
+    if (config.isProd) process.exit(1);
+  }
 
   // Expire old session rows hourly so the table cannot grow without bound.
   // Fire-and-forget on a timer, so a failed prune is logged rather than

@@ -80,6 +80,12 @@ export default [
         "type": "datetime"
       },
       {
+        "name": "tour_done_at",
+        "title": "Tour done at",
+        "readOnly": true,
+        "type": "datetime"
+      },
+      {
         "name": "must_change_pw",
         "title": "Must change pw",
         "readOnly": true,

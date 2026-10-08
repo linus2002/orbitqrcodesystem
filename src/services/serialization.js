@@ -16,7 +16,9 @@ import QRCode from 'qrcode';
 import * as db from '../db/index.js';
 import { TYPES } from '../db/schema.js';
 import { config, LOCAL_BASE_URL_WARNING } from '../config.js';
-import { batchCandidates, serialWidthFor, qrPayload } from '../lib/codes.js';
+import {
+  batchCandidates, serialWidthFor, qrPayload, codeFormatOf, CODE_FORMAT, COMPACT_WIDTH,
+} from '../lib/codes.js';
 import { conflict, notFound, badRequest } from '../lib/errors.js';
 import * as audit from './audit.js';
 import logger from '../lib/logger.js';
@@ -66,9 +68,9 @@ const SKIP_ALLOWANCE = 1000;
  * counted.
  *
  * Codes are taken from the batch's own shuffled sequence of candidates (see
- * batchCandidates). Two batches of one SKU made on the same day share a
- * serial space, so a candidate may already be another batch's code; it is
- * passed over and the next is taken. Every code is written with `create`
+ * batchCandidates). Batches of one SKU share a serial space, so a candidate
+ * may already be another batch's code; it is passed over and the next is
+ * taken. Every code is written with `create`
  * under an id that IS the code, in one transaction per chunk, so a code
  * taken between the look-up and the write fails the whole chunk, which is
  * then looked at again. A duplicate code cannot be stored, even by two
@@ -99,10 +101,11 @@ export async function issueCodes(batchId, { actor, req } = {}) {
     throw conflict(`Batch ${batch.batch_number} has no product record, so its codes cannot be made.`);
   }
 
-  const width = serialWidthFor(batch.quantity);
+  const format = await formatFor(batch);
+  const width = format === CODE_FORMAT.COMPACT ? COMPACT_WIDTH : serialWidthFor(batch.quantity);
   const started = Date.now();
 
-  const { created, kept, skipped } = await storeCodes(batch, width);
+  const { created, kept, skipped } = await storeCodes(batch, width, format);
 
   // Check, don't assume: exactly one stored code per planned unit.
   const stored = await db.count('code', { batch_id: batch.id });
@@ -133,7 +136,7 @@ export async function issueCodes(batchId, { actor, req } = {}) {
       action: 'batch.issue_codes',
       entityType: 'batch',
       entityId: batch.id,
-      detail: { batchNumber: batch.batch_number, quantity: stored, serialWidth: width, ms, skipped },
+      detail: { batchNumber: batch.batch_number, quantity: stored, serialWidth: width, format, ms, skipped },
     });
   }
 
@@ -152,6 +155,19 @@ export async function issueCodes(batchId, { actor, req } = {}) {
 }
 
 /**
+ * The code format a batch is issued in.
+ *
+ * Compact for a batch with no codes yet. A batch whose issuance was cut short
+ * in the legacy format finishes in it: resuming walks the same candidates and
+ * keeps the codes already stored, so switching format part-way would leave the
+ * batch with two kinds of code and the stored ones out of order.
+ */
+async function formatFor(batch) {
+  const [first] = await db.findMany('code', { batch_id: batch.id }, { limit: 1, fields: ['code'] });
+  return first && codeFormatOf(first.code) === CODE_FORMAT.LEGACY ? CODE_FORMAT.LEGACY : CODE_FORMAT.COMPACT;
+}
+
+/**
  * Store a batch's codes, a round at a time, and say how it went.
  *
  * Each candidate in a round is one of three things:
@@ -163,11 +179,12 @@ export async function issueCodes(batchId, { actor, req } = {}) {
  *   - another batch's: passed over.
  * Unit indexes therefore run 0..quantity-1 with no gap and no repeat.
  */
-async function storeCodes(batch, width) {
+async function storeCodes(batch, width, format) {
   const candidates = batchCandidates({
     sku: batch.sku,
     mfgDate: batch.mfg_date,
     width,
+    format,
     // Binding the permutation key to the batch means two batches of the same
     // SKU on the same day get completely different serial orderings.
     batchKey: `${batch.batch_number}:${batch.id}`,
@@ -302,7 +319,7 @@ const isTaken = (err) => err?.status === 409 || err?.statusCode === 409;
 
 function busy(batch) {
   return conflict(
-    `Another batch of ${batch.sku} made on the same day was issuing codes at the same moment. ` +
+    `Another batch of ${batch.sku} was issuing codes at the same moment. ` +
       'The codes stored so far are kept - please try again.'
   );
 }
@@ -310,9 +327,8 @@ function busy(batch) {
 function crowded(batch) {
   logger.error('serial space crowded', { batch: batch.batch_number, sku: batch.sku, mfgDate: batch.mfg_date });
   return conflict(
-    `Batch ${batch.batch_number} cannot be issued: most of the serial numbers for ${batch.sku} made on ` +
-      `${batch.mfg_date} are already used by other batches. This has been logged - please contact the ` +
-      'system administrator.'
+    `Batch ${batch.batch_number} cannot be issued: most of the serial numbers for ${batch.sku} are ` +
+      'already used by other batches. This has been logged - please contact the system administrator.'
   );
 }
 

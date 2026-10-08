@@ -301,14 +301,16 @@
 .checker-line {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
   margin-bottom: 12px;
-  font-size: 0.86rem; color: var(--ink-muted);
+  font-size: 0.86rem; color: #fff;
 }
-.checker-line strong { color: var(--ink); }
+.checker-line strong { color: #fff; }
 .checker-line button {
-  background: none; border: 0; padding: 0;
-  font: inherit; color: var(--brand); text-decoration: underline;
+  background: var(--brand); border: 0; border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit; font-weight: 600; color: #fff;
   cursor: pointer;
 }
+.checker-line button:hover { filter: brightness(0.9); }
 
 @media (min-width: 640px) {
   .details-card { padding: 28px; }

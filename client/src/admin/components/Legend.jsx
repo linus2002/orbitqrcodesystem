@@ -127,7 +127,7 @@ function sections(nav) {
         {
           term: 'malformed',
           symbol: reason('malformed'),
-          text: 'Invalid - not in the code format, which looks like AMX25-260921-00483-K7.',
+          text: 'Invalid - not in the code format, which looks like AMX25-7KQ2M9-K7 (older packs: AMX25-260921-00483-K7).',
         },
         {
           term: 'unknown code',

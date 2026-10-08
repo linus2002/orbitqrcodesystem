@@ -69,9 +69,39 @@ test('every generated code parses and validates', () => {
   })) {
     const parsed = parseCode(code, SECRET);
     assert.equal(parsed.ok, true, `${code} should parse`);
+    assert.equal(parsed.format, 'compact');
     assert.equal(parsed.sku, 'ART20');
+    assert.equal(parsed.dateSegment, null);
+    assert.match(code, /^ART20-[0-9A-HJKMNP-TV-Z]{6}-[0-9A-Z]{2}$/);
+  }
+});
+
+test('a compact code is 15 characters for a 5-character SKU, shorter than a legacy one', () => {
+  const opts = { sku: 'ART20', mfgDate: '2026-07-13', quantity: 200, batchKey: 'B2', secret: SECRET };
+  const [compact] = [...generateBatchCodes(opts)];
+  const [legacy] = [...generateBatchCodes({ ...opts, format: 'legacy' })];
+  assert.equal(compact.code.length, 15);
+  assert.ok(compact.code.length < legacy.code.length);
+});
+
+test('legacy codes - already printed on packs - still parse and validate', () => {
+  for (const { code } of generateBatchCodes({
+    sku: 'ART20', mfgDate: '2026-07-13', quantity: 200, batchKey: 'B2', secret: SECRET, format: 'legacy',
+  })) {
+    const parsed = parseCode(code, SECRET);
+    assert.equal(parsed.ok, true, `${code} should parse`);
+    assert.equal(parsed.format, 'legacy');
     assert.equal(parsed.dateSegment, '260713');
   }
+});
+
+test('a compact serial typed with look-alike letters is read the same', () => {
+  const [{ code }] = [...generateBatchCodes({
+    sku: 'AMX25', mfgDate: '2026-09-21', quantity: 1, batchKey: 'B6', secret: SECRET,
+  })];
+  // O for 0 and I for 1, wherever the serial has those digits.
+  const typed = code.replace(/^(\w+-)(\w+)/, (_, sku, serial) => sku + serial.replace(/0/g, 'O').replace(/1/g, 'I'));
+  assert.equal(parseCode(typed, SECRET).ok, true);
 });
 
 test('every single-character typo is caught by the checksum', () => {

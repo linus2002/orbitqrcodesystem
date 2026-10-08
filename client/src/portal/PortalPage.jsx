@@ -326,7 +326,7 @@ export default function PortalPage() {
                             setCode(formatCodeInput(e.target.value));
                             setFieldError(null);
                           }}
-                          placeholder="AMX25-260921-00483-K7"
+                          placeholder="AMX25-7KQ2M9-K7"
                           autoComplete="off"
                           autoCapitalize="characters"
                           spellCheck="false"

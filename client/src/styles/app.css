@@ -75,10 +75,10 @@
   --axis: #c3ccd8;
 
   /* Shape + depth */
-  --r-sm: 6px;
-  --r: 10px;
-  --r-lg: 14px;
-  --r-xl: 20px;
+  --r-sm: 8px;
+  --r: 14px;
+  --r-lg: 22px;   /* cards */
+  --r-xl: 28px;   /* panels */
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
   --shadow: 0 2px 4px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.07);
   --shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.13);
@@ -304,17 +304,16 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-sm);
 }
-.card-pad { padding: 20px; }
+.card-pad { padding: 20px 22px; }
 .card-head {
-  padding: 16px 20px;
+  padding: 18px 22px;
   border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
 }
-.card-head h2, .card-head h3 { font-size: 1rem; font-weight: 600; }
-.card-body { padding: 20px; }
-.card-foot { padding: 14px 20px; border-top: 1px solid var(--line); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.card-head h2, .card-head h3 { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; }
+.card-body { padding: 20px 22px; }
+.card-foot { padding: 14px 22px; border-top: 1px solid var(--line); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
 
 /*
  * A heading that sits above its card instead of inside it - see `TableCard`.
@@ -341,51 +340,51 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
    -------------------------------------------------------------------------- */
 
 /*
- * Buttons share the flat pill look of the status badges: one solid colour,
- * bold white text, no border and no shadow. Blue is the button colour;
- * --pill swaps it (red for a destructive action). The quiet and ghost
- * variants stay transparent - they are the low-weight actions.
+ * Pills, 44px tall. One filled blue button for the main action on a screen;
+ * the rest step back: outlined (.btn-ghost) for the next most likely action,
+ * soft blue (.btn-soft) for a side job, plain (.btn-quiet) for backing out,
+ * and red only for a destructive action. --pill sets the filled colour.
  */
 .btn {
   --pill: var(--logo-blue);
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  font: 500 0.94rem/1 var(--sans);
-  padding: 11px 20px;
+  font: 500 0.9rem/1 var(--sans);
+  height: 44px;
+  padding: 0 22px;
   border-radius: 999px;
-  border: 0;
+  border: 1.5px solid transparent;
   color: #fff;
   background: var(--pill);
   cursor: pointer;
   text-decoration: none;
-  transition: filter 0.14s, background 0.14s, transform 0.06s;
-  min-height: 42px;
+  white-space: nowrap;
+  transition: filter 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
 }
 .btn:hover:not(:disabled) { filter: brightness(1.06); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/*
- * A secondary action: no border, no fill, until you point at it. For controls
- * that sit beside the thing they act on - a download next to a row, a print
- * button above a grid - where a filled pill would give each one the same
- * weight as the page's primary action.
- */
-.btn-quiet,
-.btn-ghost {
-  background: none;
-  border-color: transparent;
-  color: var(--ink);
-  box-shadow: none;
-  text-shadow: none;
+.btn-quiet {
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0 14px;
 }
-.btn-quiet:hover:not(:disabled),
-.btn-ghost:hover:not(:disabled) { background: var(--surface-3); filter: none; }
+.btn-quiet:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); filter: none; }
+
+.btn-ghost {
+  background: var(--surface);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--brand-tint); filter: none; }
+
+.btn-soft { background: var(--brand-tint); color: var(--brand-ink); }
+.btn-soft:hover:not(:disabled) { filter: brightness(0.97); }
 
 .btn-primary { --pill: var(--logo-blue); }
-.btn-danger { --pill: #e0402f; }
+.btn-danger { --pill: var(--danger); }
 
-.btn-lg { font-size: 1.05rem; padding: 15px 26px; min-height: 52px; }
-.btn-sm { font-size: 0.83rem; padding: 7px 14px; min-height: 34px; }
+.btn-lg { font-size: 1rem; height: 52px; padding: 0 28px; }
+.btn-sm { font-size: 0.82rem; height: 34px; padding: 0 16px; }
 .btn-block { width: 100%; }
 .btn svg { width: 18px; height: 18px; flex: none; }
 .btn-lg svg { width: 22px; height: 22px; }
@@ -395,35 +394,37 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
    -------------------------------------------------------------------------- */
 
 .field { display: grid; gap: 6px; }
-.label { font-size: 0.85rem; font-weight: 600; color: var(--ink-2); }
-.hint { font-size: 0.8rem; color: var(--ink-muted); }
+.label { font-size: 0.82rem; font-weight: 500; color: var(--ink-2); padding-left: 4px; }
+.hint { font-size: 0.78rem; color: var(--ink-muted); padding-left: 4px; }
 
 .input, .select, .textarea {
   width: 100%;
-  font: 400 1rem var(--sans);
+  font: 400 0.92rem var(--sans);
   color: var(--ink);
   background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
-  padding: 11px 13px;
-  min-height: 44px;
+  border: 1px solid color-mix(in srgb, var(--ink-muted) 70%, var(--surface));
+  border-radius: 999px;
+  padding: 11px 20px;
+  min-height: 46px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .input::placeholder, .textarea::placeholder { color: var(--ink-muted); }
+.input:hover, .select:hover, .textarea:hover { border-color: var(--ink-muted); }
 .input:focus, .select:focus, .textarea:focus {
   outline: none;
-  border-color: var(--brand);
+  border-color: var(--ink);
   box-shadow: 0 0 0 3px var(--brand-tint);
 }
 .input[aria-invalid="true"] { border-color: var(--danger); }
-.textarea { min-height: 110px; resize: vertical; line-height: 1.55; }
+.textarea { min-height: 110px; resize: vertical; line-height: 1.55; border-radius: 20px; padding: 12px 20px; }
 /* A native select with the browser chrome stripped, so it needs its own
    arrow: a chevron drawn as a data URL (allowed by img-src), mid-grey so it
    reads on both the light and the dark surface. */
 .select {
-  appearance: none; padding-right: 34px; cursor: pointer;
+  appearance: none; padding-right: 44px; cursor: pointer;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237b8a9c' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 11px center;
+  background-position: right 18px center;
   background-size: 16px 16px;
 }
 
@@ -434,7 +435,7 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .pw-toggle {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
   display: inline-flex; align-items: center; justify-content: center;
-  width: 34px; height: 34px; border-radius: 8px;
+  width: 34px; height: 34px; border-radius: 50%;
   background: none; border: 0; padding: 0;
   color: var(--ink-muted); cursor: pointer;
 }
@@ -444,6 +445,7 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 
 /* The code entry field: monospace, spaced, uppercase - it is a serial number. */
 .input-code {
+  border-radius: 20px;
   font-family: var(--mono);
   font-size: 1.12rem;
   letter-spacing: 0.06em;
@@ -513,48 +515,52 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
    Badges + pills
    -------------------------------------------------------------------------- */
 
-/* Solid pills: one flat colour per tone, bold white text, no border or
-   shadow. --pill is the tone the background derives from. */
+/* Tags: a soft tint with text in the same hue's ink, and a dot when there
+   is no icon. The word always carries the meaning; colour only backs it. */
 .badge {
-  --pill: #7b8494;
-  display: inline-flex; align-items: center; gap: 5px;
-  font: 500 0.75rem/1 var(--sans);
-  padding: 6px 11px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 500 0.76rem/1 var(--sans);
+  height: 26px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 0;
-  color: #fff;
-  background: var(--pill);
+  color: var(--ink-2);
+  background: var(--surface-3);
   white-space: nowrap;
 }
+.badge:not(:has(svg))::before {
+  content: '';
+  width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor; flex: none;
+}
 .badge svg { width: 13px; height: 13px; }
-.badge-good { --pill: #16a34a; }
-.badge-danger { --pill: #e0402f; }
-.badge-warn { --pill: #f07a12; }
-.badge-info { --pill: var(--logo-blue); }
-.badge-neutral { --pill: #7b8494; }
+.badge-good { background: var(--good-tint); color: var(--good-ink); }
+.badge-danger { background: var(--danger-tint); color: var(--danger-ink); }
+.badge-warn { background: var(--warn-tint); color: var(--warn-ink); }
+.badge-info { background: var(--info-tint); color: var(--info-ink); }
+.badge-neutral { background: var(--surface-3); color: var(--ink-2); }
 
-/* A small action button in the same solid-pill style (the "View" in a table row) */
+/* A small soft action button (the "View" in a table row) */
 .btn-pill {
-  --pill: var(--logo-blue);
   display: inline-flex; align-items: center; justify-content: center;
   font: 500 0.78rem/1 var(--sans);
-  padding: 7px 16px;
+  height: 32px;
+  padding: 0 16px;
   border: 0; border-radius: 999px;
-  color: #fff; cursor: pointer;
-  background: var(--pill);
-  transition: filter 0.15s ease, transform 0.15s ease;
+  color: var(--brand-ink); cursor: pointer;
+  background: var(--brand-tint);
+  transition: filter 0.15s ease;
 }
-.btn-pill:hover { filter: brightness(1.06); }
-.btn-pill:active { transform: translateY(1px); }
-.btn-pill:focus-visible { outline: 2px solid var(--pill); outline-offset: 2px; }
+.btn-pill:hover { filter: brightness(0.96); }
+.btn-pill:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 /* --------------------------------------------------------------------------
    Tables
    -------------------------------------------------------------------------- */
 
 /*
- * Solid blue header, zebra-striped body, roomy cells, and the first column set
- * bold so each row has an obvious anchor to read from.
+ * A solid blue header, hairline rows that tint under the pointer, and the first
+ * column set bold so each row has an obvious anchor to read from.
  *
  * `overflow: hidden` on the wrapper is what clips the header fill and the last
  * row into the rounded corners - the corners are on the wrapper, but the
@@ -577,19 +583,25 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 table.data { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 table.data th {
   text-align: left;
-  font: 600 0.78rem/1.4 var(--sans);
+  font: 500 0.76rem/1.4 var(--sans);
   letter-spacing: 0;
   text-transform: none;
   color: #fff;
   background: var(--table-head);
-  padding: 11px 22px;
+  padding: 13px 20px;
   border-bottom: 0;
   white-space: nowrap;
   position: sticky; top: 0; z-index: 1;
 }
+/*
+ * One line per cell: a date, a code or a name never breaks a word to a line.
+ * A table wider than its card scrolls sideways inside .table-wrap instead.
+ * Columns of running text opt back into wrapping with .td-wrap.
+ */
 table.data td {
-  padding: 16px 22px;
-  border-bottom: 1px solid var(--table-rule);
+  padding: 14px 20px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
   vertical-align: middle;
   color: var(--ink-2);
 }
@@ -603,18 +615,19 @@ table.data tbody td:first-child { font-weight: 600; color: var(--ink); }
 table.data tbody td:first-child .text-muted { font-weight: 400; }
 /* Emphasis a cell asks for in its own markup, held to the same weight. */
 table.data strong, table.data b { font-weight: 600; }
-table.data tbody tr:nth-child(even) { background: var(--table-stripe); }
 table.data tbody tr:last-child td { border-bottom: 0; }
 table.data tbody tr:hover { background: var(--brand-tint); }
 table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data td.td-wrap { white-space: normal; min-width: 240px; max-width: 420px; }
 table.data td.code { font-family: var(--mono); font-size: 0.76rem; white-space: nowrap; }
 /* The secondary line under a row's subject. */
 table.data td .text-sm { font-size: 0.78rem; }
 
-/* Status pills in a table cell: the same gradient pills, a step smaller. */
+/* Tags in a table cell: the same tags, a step smaller. */
 table.data .badge {
-  font-size: 0.68rem;
-  padding: 4px 9px;
+  font-size: 0.72rem;
+  height: 24px;
+  padding: 0 10px;
 }
 
 .empty {
@@ -629,18 +642,18 @@ table.data .badge {
    -------------------------------------------------------------------------- */
 
 .alert {
-  display: flex; gap: 11px; align-items: flex-start;
-  padding: 13px 15px;
-  border-radius: var(--r);
-  border: 1px solid transparent;
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 14px 18px;
+  border-radius: 18px;
+  border: 0;
   font-size: 0.91rem;
   line-height: 1.5;
 }
 .alert svg { width: 19px; height: 19px; flex: none; margin-top: 1px; }
-.alert-error { background: var(--danger-tint); color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
-.alert-success { background: var(--good-tint); color: var(--good-ink); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
-.alert-warn { background: var(--warn-tint); color: var(--warn-ink); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
-.alert-info { background: var(--info-tint); color: var(--info-ink); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
+.alert-error { background: var(--danger-tint); color: var(--danger-ink); }
+.alert-success { background: var(--good-tint); color: var(--good-ink); }
+.alert-warn { background: var(--warn-tint); color: var(--warn-ink); }
+.alert-info { background: var(--info-tint); color: var(--info-ink); }
 
 .spinner {
   width: 18px; height: 18px; flex: none;

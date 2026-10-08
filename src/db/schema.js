@@ -74,6 +74,9 @@ export const TYPES = {
       failed_attempts: { kind: 'int', required: true, default: 0 },
       locked_until: { kind: 'datetime' },
       last_login_at: { kind: 'datetime' },
+      // When this person finished or skipped the dashboard's guided tour; the
+      // tour opens on sign-in until it is set.
+      tour_done_at: { kind: 'datetime' },
       must_change_pw: { kind: 'bool01', required: true, default: 0 },
       avatar: { kind: 'text', secret: true },
       created_by: { kind: 'int' },

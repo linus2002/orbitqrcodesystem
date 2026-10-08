@@ -62,7 +62,7 @@ export default function Lookup() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="AMX25-260812-088159-BM"
+              placeholder="AMX25-7KQ2M9-K7"
               autoComplete="off"
               spellCheck="false"
             />

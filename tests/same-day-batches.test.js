@@ -1,13 +1,19 @@
 /**
  * Two batches of one product made on the same day.
  *
- * A code is SKU + manufacturing date + serial + checksum, and each batch
- * shuffles its serials over a space only ~100x its size - so two batches of
- * one SKU and one date share a serial space, and a second batch of a few
- * hundred units all but certainly lands on some of the first one's codes.
- * Issuance used to stop there ("code ... already exists"), leaving the
+ * A legacy code is SKU + manufacturing date + serial + checksum, and each
+ * batch shuffles its serials over a space only ~100x its size - so two
+ * batches of one SKU and one date share a serial space, and a second batch of
+ * a few hundred units all but certainly lands on some of the first one's
+ * codes. Issuance used to stop there ("code ... already exists"), leaving the
  * second batch impossible to issue. It now passes over a code another batch
  * holds and takes the next from its own sequence.
+ *
+ * New batches get compact codes (SKU + serial + checksum) whose serial space
+ * per SKU is over a billion, so a natural clash is all but impossible - but
+ * the same passing-over applies to them, and a batch part-issued in the
+ * legacy format still finishes in it. The tests that need a natural clash
+ * start their batches in the legacy format (startLegacy).
  *
  * What must hold, whatever happens part-way:
  *   - no code is ever stored twice, and no batch loses a code it has;
@@ -32,6 +38,7 @@ import * as serialization from '../src/services/serialization.js';
 import { config } from '../src/config.js';
 import {
   batchCandidates, generateBatchCodes, serialWidthFor, parseCode, serialPermutation, buildCode, dateSegment,
+  buildCompactCode, encodeSerial, codeFormatOf, CODE_FORMAT, COMPACT_WIDTH,
 } from '../src/lib/codes.js';
 
 const DAY = '2026-09-28';
@@ -53,20 +60,29 @@ const storedCodes = async (batchId) =>
   db.findMany('code', { batch_id: batchId }, { order: 'unit_index asc', fields: ['id', 'code', 'unit_index', 'serial'] });
 
 /** The batch's candidates in order - what issuance walks through. */
-const candidatesOf = (batch) =>
+const candidatesOf = (batch, format = CODE_FORMAT.COMPACT) =>
   batchCandidates({
     sku: 'BEL25', mfgDate: batch.mfg_date, width: serialWidthFor(batch.quantity),
-    batchKey: `${batch.batch_number}:${batch.id}`, secret: config.secrets.code,
+    batchKey: `${batch.batch_number}:${batch.id}`, secret: config.secrets.code, format,
   });
+
+/**
+ * Store a batch's first legacy code, as a run of the legacy issuance cut
+ * short would have left it - so issuing the batch finishes it in that format.
+ */
+async function startLegacy(batch) {
+  const [c] = candidatesOf(batch, CODE_FORMAT.LEGACY);
+  await db.insert('code', { code: c.code, batch_id: batch.id, product_id: 1, unit_index: 0, serial: c.serial });
+}
 
 /**
  * What a batch must end with: its first `quantity` candidates that no other
  * batch holds, and how many held ones were passed over on the way.
  */
-function expected(batch, heldElsewhere) {
+function expected(batch, heldElsewhere, format) {
   const codes = [];
   let skipped = 0;
-  for (const c of candidatesOf(batch)) {
+  for (const c of candidatesOf(batch, format)) {
     if (heldElsewhere.has(c.code)) skipped += 1;
     else codes.push(c.code);
     if (codes.length === batch.quantity) break;
@@ -75,9 +91,9 @@ function expected(batch, heldElsewhere) {
 }
 
 /** Everything a correct issuance leaves behind. */
-async function assertIssued(batch, heldElsewhere) {
+async function assertIssued(batch, heldElsewhere, format = CODE_FORMAT.COMPACT) {
   const rows = await storedCodes(batch.id);
-  const want = expected(batch, heldElsewhere);
+  const want = expected(batch, heldElsewhere, format);
 
   assert.equal((await db.get('batch', batch.id)).status, 'codes_issued');
   assert.equal(rows.length, batch.quantity);
@@ -86,6 +102,7 @@ async function assertIssued(batch, heldElsewhere) {
   for (const r of rows) {
     assert.equal(heldElsewhere.has(r.code), false, `${r.code} belongs to another batch`);
     assert.equal(parseCode(r.code, config.secrets.code).ok, true, `${r.code} must validate`);
+    assert.equal(codeFormatOf(r.code), format, `${r.code} is in the ${format} format`);
   }
   assert.equal(new Set(rows.map((r) => r.id)).size, rows.length, 'every code has its own id');
   return { rows, skipped: want.skipped };
@@ -118,9 +135,12 @@ const issueAudits = (batchId) => db.count('auditLog', { action: 'batch.issue_cod
 // ---------------------------------------------------------------------------
 
 test('a second batch of the same product and day gets all its codes, sharing none', async () => {
-  // As reported: a 500-unit pilot batch, then a 1,000-unit batch, same day.
+  // As reported: a 500-unit pilot batch, then a 1,000-unit batch, same day -
+  // both in the legacy format, where their serial spaces overlap.
   const pilot = await makeBatch('BEL25-000TEST', 500, { is_test: 1 });
   const second = await makeBatch('BEL25-0001TEST', 1000);
+  await startLegacy(pilot);
+  await startLegacy(second);
 
   await serialization.issueCodes(pilot.id, {});
   const pilotCodes = await codeSet(pilot.id);
@@ -129,7 +149,7 @@ test('a second batch of the same product and day gets all its codes, sharing non
   const res = await serialization.issueCodes(second.id, {});
 
   assert.equal(res.issued, 1000);
-  const { skipped } = await assertIssued(second, pilotCodes);
+  const { skipped } = await assertIssued(second, pilotCodes, CODE_FORMAT.LEGACY);
   assert.ok(skipped > 0, 'the test must actually pass over some of the pilot batch\'s codes');
   assert.deepEqual(await storedCodes(pilot.id), before, 'the first batch is untouched');
 
@@ -137,13 +157,36 @@ test('a second batch of the same product and day gets all its codes, sharing non
   assert.equal(JSON.parse(audit.detail_json).skipped, skipped);
 });
 
-test('a batch with no clash gets exactly the codes it always did', async () => {
+test('a new batch with no clash gets compact codes: unit i is serial permute(i)', async () => {
   const batch = await makeBatch('BEL25-SOLO', 800);
 
   await serialization.issueCodes(batch.id, {});
 
-  // Rebuilt from the primitives, as the code before this change did it -
-  // unit i is serial permute(i) - rather than through the new generator.
+  // Rebuilt from the primitives rather than through the generator.
+  const permute = serialPermutation(`BEL25-SOLO:${batch.id}:${config.secrets.code}`, COMPACT_WIDTH, 8, 32);
+  const want = Array.from({ length: 800 }, (_, i) => {
+    const serial = encodeSerial(permute(i));
+    return [i, buildCompactCode({ sku: 'BEL25', serial, secret: config.secrets.code }), serial];
+  });
+  const rows = await storedCodes(batch.id);
+  assert.deepEqual(rows.map((r) => [r.unit_index, r.code, r.serial]), want);
+  assert.match(rows[0].code, /^BEL25-[0-9A-Z]{6}-[0-9A-Z]{2}$/);
+  assert.equal((await db.get('batch', batch.id)).serial_width, COMPACT_WIDTH);
+
+  // And the generator the rest of the code uses still says the same.
+  const generated = [...generateBatchCodes({
+    sku: 'BEL25', mfgDate: DAY, quantity: 800, batchKey: `BEL25-SOLO:${batch.id}`, secret: config.secrets.code,
+  })];
+  assert.deepEqual(generated.map((c) => [c.unitIndex, c.code, c.serial]), want);
+});
+
+test('a batch started in the legacy format gets exactly the codes it always did', async () => {
+  const batch = await makeBatch('BEL25-SOLO', 800);
+  await startLegacy(batch);
+
+  await serialization.issueCodes(batch.id, {});
+
+  // Rebuilt from the primitives, as the legacy issuance did it.
   const width = serialWidthFor(800);
   const permute = serialPermutation(`BEL25-SOLO:${batch.id}:${config.secrets.code}`, width);
   const old = Array.from({ length: 800 }, (_, i) => [
@@ -154,9 +197,9 @@ test('a batch with no clash gets exactly the codes it always did', async () => {
   const rows = await storedCodes(batch.id);
   assert.deepEqual(rows.map((r) => [r.unit_index, r.code, r.serial]), old);
 
-  // And the generator the rest of the code uses still says the same.
   const generated = [...generateBatchCodes({
     sku: 'BEL25', mfgDate: DAY, quantity: 800, batchKey: `BEL25-SOLO:${batch.id}`, secret: config.secrets.code,
+    format: CODE_FORMAT.LEGACY,
   })];
   assert.deepEqual(generated.map((c) => [c.unitIndex, c.code, c.serial]), old);
 });
@@ -241,13 +284,15 @@ test('a write that landed but was reported as failed is kept, not stored twice',
 
 test('a batch left part-issued by the old code finishes', async () => {
   // The old code wrote unit i as candidate i, and stopped at the first clash.
+  // Both batches are legacy: that code only ever wrote the legacy format.
   const first = await makeBatch('BEL25-A', 500);
   const second = await makeBatch('BEL25-B', 1000);
+  await startLegacy(first);
   await serialization.issueCodes(first.id, {});
   const held = await codeSet(first.id);
 
   const prefix = [];
-  for (const c of candidatesOf(second)) {
+  for (const c of candidatesOf(second, CODE_FORMAT.LEGACY)) {
     if (held.has(c.code)) break;
     prefix.push({ code: c.code, batch_id: second.id, product_id: 1, unit_index: c.position, serial: c.serial });
   }
@@ -255,7 +300,7 @@ test('a batch left part-issued by the old code finishes', async () => {
   await db.insertMany('code', prefix);
 
   await serialization.issueCodes(second.id, {});
-  await assertIssued(second, held);
+  await assertIssued(second, held, CODE_FORMAT.LEGACY);
 });
 
 // ---------------------------------------------------------------------------

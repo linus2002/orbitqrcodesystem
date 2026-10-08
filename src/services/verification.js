@@ -68,7 +68,7 @@ const MESSAGES = {
   [REASONS.OK_REPEAT_SAME_SOURCE]: 'This pack is genuine. You have checked it before.',
   [REASONS.EMPTY]: 'Please enter the code printed on the pack.',
   [REASONS.MALFORMED]:
-    'That code is not in the expected format. It should look like AMX25-260921-00483-K7.',
+    'That code is not in the expected format. It should look like AMX25-7KQ2M9-K7 (older packs: AMX25-260921-00483-K7).',
   [REASONS.CHECKSUM_FAILED]:
     'That code does not look quite right - please check for a mistyped character and try again.',
   [REASONS.UNKNOWN_CODE]:
