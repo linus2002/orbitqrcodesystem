@@ -471,6 +471,28 @@ A patient texts the code (optionally prefixed `CHECK`) and gets a plain-words
 reply. Adding another gateway means adding one entry to `PROVIDERS` in
 `src/services/sms.js`; nothing else changes.
 
+### Alert emails
+
+High and critical alerts - and any alert that rises to high or critical as it
+recurs - are emailed to the alert inbox, **ai@getmeds.ph** by
+default, with a link to the Alerts page. `ALERT_EMAIL_TO` changes it (several
+addresses separated by commas; they are sent by Bcc). Low and medium alerts only wait in the queue. Sending
+happens after the response (`waitUntil` on Vercel), so a slow or failing mail
+server never delays a patient's check.
+
+By default (`MAIL_PROVIDER=console`) nothing is sent: each email is written to
+the log instead. To send through [Brevo](https://www.brevo.com)'s transactional
+email API, set:
+
+| Variable | Value |
+| --- | --- |
+| `MAIL_PROVIDER` | `brevo` |
+| `BREVO_API_KEY` | an API key from Brevo > SMTP & API > API keys |
+| `MAIL_FROM` | a sender verified in Brevo (Senders, domains & dedicated IPs), e.g. `Getmeds Alerts <ai2@getmeds.ph>` |
+| `ALERT_EMAIL_TO` | optional; who receives alerts, default `ai@getmeds.ph` |
+
+Settings > Runtime configuration shows whether alert emails are being sent.
+
 ### Approximate location
 
 `resolveGeo()` in `src/services/verification.js` currently reads the coarse geo

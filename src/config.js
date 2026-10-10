@@ -173,6 +173,26 @@ export const config = {
     },
   },
 
+  /*
+   * Alert emails to the security team. `console` (the default) writes each
+   * email to the log and sends nothing; `brevo` sends it through Brevo's
+   * transactional email API. For Brevo, set BREVO_API_KEY (Brevo > SMTP & API >
+   * API keys) and MAIL_FROM to a sender verified in Brevo (Senders, domains &
+   * dedicated IPs), e.g. "Getmeds Alerts <ai2@getmeds.ph>".
+   */
+  mail: {
+    provider: str('MAIL_PROVIDER', 'console'),
+    from: str('MAIL_FROM', ''),
+    // Who receives alert emails: one address, or several separated by commas.
+    alertTo: str('ALERT_EMAIL_TO', 'ai@getmeds.ph')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    brevo: {
+      apiKey: str('BREVO_API_KEY', ''),
+    },
+  },
+
   seed: {
     adminEmail: str('SEED_ADMIN_EMAIL', 'admin@qrshield.example'),
     adminPassword: str('SEED_ADMIN_PASSWORD', 'ChangeMe!2026'),

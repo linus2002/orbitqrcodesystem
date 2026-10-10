@@ -1180,6 +1180,10 @@ router.get('/settings', requirePermission('dashboard:view'), async (req, res) =>
       environment: config.env,
       publicBaseUrl: config.publicBaseUrl,
       smsProvider: config.sms.provider,
+      alertEmails:
+        config.mail.provider === 'brevo'
+          ? `sent by Brevo to ${config.mail.alertTo.join(', ') || '(ALERT_EMAIL_TO not set)'} from ${config.mail.from || '(MAIL_FROM not set)'}`
+          : `not sent yet (MAIL_PROVIDER=console); will go to ${config.mail.alertTo.join(', ')}`,
       rateLimits: config.rateLimit,
       sessionTtlHours: config.session.ttlHours,
     },

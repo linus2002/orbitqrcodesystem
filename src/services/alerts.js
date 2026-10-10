@@ -10,9 +10,13 @@
  * onto the existing open alert for that code and raise its severity as the
  * repeat count climbs.
  */
+import { waitUntil } from '@vercel/functions';
+
 import * as db from '../db/index.js';
+import { config } from '../config.js';
 import logger from '../lib/logger.js';
 import { PLACE_EXTRA } from './analytics.js';
+import * as mail from './mail.js';
 
 /** How an alert type maps to a starting severity and a human title. */
 const ALERT_SPEC = {
@@ -103,7 +107,11 @@ export async function raise({ type, context = {}, codeId = null, batchId = null,
     logger.info('alert folded', { id: existing.id, type, occurrences, severity });
     // Built rather than re-read: inside a transaction the write is not
     // visible yet.
-    return { ...existing, ...changes, updated_at: db.now() };
+    const folded = { ...existing, ...changes, updated_at: db.now() };
+    // A repeat that lifts the alert into high or critical is news to the team
+    // even though the alert itself is not new.
+    if (severity !== existing.severity) notify(folded, { escalatedFrom: existing.severity });
+    return folded;
   }
 
   const detail = { ...context, occurrences: 1, firstSeenAt: new Date().toISOString() };
@@ -121,21 +129,89 @@ export async function raise({ type, context = {}, codeId = null, batchId = null,
   });
 
   logger.warn('alert raised', { id: alert.id, type, severity: spec.severity });
-  notify(type, spec.severity, spec.title(context));
+  notify(alert);
   return alert;
 }
 
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+/** Severities worth interrupting someone for. Low and medium wait in the queue. */
+const URGENT = new Set(['high', 'critical']);
+
+const TYPE_LABEL = {
+  duplicate_scan: 'A pack was verified on more than one device',
+  unknown_code: 'A code that is not in the registry was checked',
+  recalled_scan: 'A pack from a recalled batch was checked',
+  expired_scan: 'An expired pack was checked',
+  guess_attack: 'Possible code-guessing from one source',
+  consumer_report: 'A patient reported a problem with a pack',
+  batch_anomaly: 'A code from an unreleased or withdrawn batch was checked',
+};
+
 /**
- * Alert dispatcher.
+ * Email a high or critical alert to the alert inbox (config.mail.alertTo,
+ * set by ALERT_EMAIL_TO; the IT department's address by default).
  *
- * INTEGRATION POINT: wire this to email / Slack / PagerDuty for the security
- * team. It is intentionally a single choke point so that adding a channel
- * never means touching the verification path.
+ * The single choke point for alert notifications, so adding a channel never
+ * means touching the verification path. Sending happens after the response:
+ * on Vercel, waitUntil keeps the function alive until it is done; elsewhere
+ * the promise simply runs on. Either way a slow or failing mail server never
+ * delays or breaks the check that raised the alert.
  */
-function notify(type, severity, title) {
-  if (severity === 'critical' || severity === 'high') {
-    logger.warn(`[NOTIFY security-team] ${severity.toUpperCase()} ${type}: ${title}`);
+function notify(alert, { escalatedFrom = null } = {}) {
+  if (!URGENT.has(alert.severity)) return;
+  const sending = deliver(alert, escalatedFrom).catch((err) =>
+    logger.error('alert email failed', { id: alert.id, error: err.message })
+  );
+  waitUntil(sending);
+}
+
+async function deliver(alert, escalatedFrom) {
+  const to = config.mail.alertTo;
+  if (!to.length) {
+    logger.warn('alert email skipped: ALERT_EMAIL_TO is empty', { id: alert.id });
+    return;
   }
+
+  const detail = alert.detail_json ? JSON.parse(alert.detail_json) : {};
+  const batch = alert.batch_id ? await db.get('batch', alert.batch_id) : null;
+  const product = batch?.product_id ? await db.get('product', batch.product_id) : null;
+  const severity = alert.severity.toUpperCase();
+  const when = new Date().toLocaleString('en-PH', {
+    timeZone: 'Asia/Manila',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+
+  const subject = escalatedFrom
+    ? `[Getmeds alert] Now ${severity}: ${alert.title}`
+    : `[Getmeds alert] ${severity}: ${alert.title}`;
+
+  const lines = [
+    escalatedFrom
+      ? `An alert has risen from ${escalatedFrom} to ${alert.severity} as it keeps recurring.`
+      : `A ${alert.severity} alert needs the security team's attention.`,
+    '',
+    `What happened: ${TYPE_LABEL[alert.type] ?? alert.type}`,
+    `Alert: ${alert.title}`,
+    detail.code ? `Code: ${detail.code}` : null,
+    product ? `Product: ${[product.name, product.strength].filter(Boolean).join(' ')}` : null,
+    batch ? `Batch: ${batch.batch_number}` : null,
+    `Occurrences: ${detail.occurrences ?? 1}`,
+    `Time: ${when} (Philippine time)`,
+    '',
+    `Review it in the dashboard: ${config.publicBaseUrl}/admin/alerts`,
+    '',
+    'Flagging never recalls a batch automatically; any recall is a decision for the team.',
+    'Sent automatically by the Getmeds QR system to its alert inbox.',
+  ].filter((l) => l !== null);
+
+  // Bcc, so when several addresses are set they are not shared with each
+  // other and a reply goes to the sending account rather than to everyone.
+  const result = await mail.send({ bcc: to, subject, text: lines.join('\n') });
+  if (result.ok) logger.info('alert email sent', { id: alert.id, recipients: to.length, provider: result.provider });
 }
 
 /**

@@ -35,6 +35,7 @@ export default function Settings() {
     ['Environment', rt.environment],
     ['Public base URL', rt.publicBaseUrl],
     ['SMS provider', rt.smsProvider],
+    ['Alert emails', rt.alertEmails],
     ['Session lifetime', `${rt.sessionTtlHours} hours`],
     [
       'Verification limit',
