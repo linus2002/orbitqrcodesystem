@@ -612,7 +612,7 @@ try {
     const res = await fetch('/api/admin/products/' + products.items[0].id + '/leaflets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ version: '9.9', reason: 'End-to-end viewer check', pdf: { fileId: begin.fileId } }) });
     // And a stored export, for the spreadsheet viewer.
     await fetch('/api/admin/export/products.xlsx');
-    return JSON.stringify({ published: res.status === 201, productId: products.items[0].id });
+    return JSON.stringify({ published: res.status === 201, productId: products.items[0].id, sku: products.items[0].sku });
   })()`, true);
   check('a leaflet PDF and an export are set up through the API', { published: pdfReady.published }, cdp);
 
@@ -685,6 +685,31 @@ try {
   );
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await sleep(300);
+
+  // What the leaflet QR opens: the PDF's pages drawn on the page itself, so a
+  // phone shows the leaflet instead of downloading a file.
+  await cdp.goto(`${APP}/leaflet/${pdfReady.sku}`, 1500);
+  let drawn = 0;
+  for (let i = 0; i < 20 && !drawn; i++) {
+    await sleep(500);
+    drawn = await cdp.json(`JSON.stringify(document.querySelectorAll('.pdf-page.is-drawn canvas').length)`);
+  }
+  await shot('leaflet-pdf');
+  check(
+    "the leaflet page shows the PDF's pages, with downloading as a choice",
+    await cdp.json(`(() => {
+      const c = document.querySelector('.pdf-page.is-drawn canvas');
+      const links = [...document.querySelectorAll('.leaflet-actions a')];
+      return JSON.stringify({
+        drawn: ${drawn},
+        sized: !!c && c.width > 0 && c.height > 0,
+        download: links.some(a => a.hasAttribute('download') && /leaflet\\.pdf/.test(a.getAttribute('href'))),
+        check: links.some(a => a.textContent.includes('genuine')),
+        notice: /does not confirm|not.*genuine/i.test(document.body.textContent),
+      });
+    })()`),
+    cdp
+  );
 
   const tabsAfter = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json())
     .filter((t) => t.type === 'page').length;

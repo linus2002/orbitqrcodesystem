@@ -15,12 +15,47 @@
  *    bundle is lazy-loaded (see client/src/App.jsx), and the manual chunk
  *    split below keeps React itself in a separate long-lived cache entry.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+/**
+ * PDF.js's support files - standard fonts, character maps, image decoders,
+ * colour profiles - at /pdfjs/, from this site: the CSP allows nothing from
+ * anywhere else. Copied into the build (so it works on any host that serves
+ * dist/, Vercel included) and served straight from node_modules in dev.
+ * See client/src/components/PdfPages.jsx.
+ */
+function pdfjsAssets() {
+  const src = path.resolve('node_modules/pdfjs-dist');
+  const dirs = ['standard_fonts', 'cmaps', 'wasm', 'iccs'];
+  const types = { '.wasm': 'application/wasm', '.js': 'text/javascript', '.bcmap': 'application/octet-stream' };
+  let outDir = 'dist';
+  return {
+    name: 'pdfjs-assets',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    configureServer(server) {
+      server.middlewares.use('/pdfjs', (req, res, next) => {
+        const rel = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\/+/, '');
+        const file = path.resolve(src, rel);
+        // Only the four folders, never a path that climbs out of them.
+        if (!dirs.some((d) => file.startsWith(path.join(src, d) + path.sep)) || !fs.existsSync(file)) return next();
+        res.setHeader('Content-Type', types[path.extname(file)] ?? 'application/octet-stream');
+        fs.createReadStream(file).pipe(res);
+      });
+    },
+    closeBundle() {
+      for (const d of dirs) fs.cpSync(path.join(src, d), path.join(outDir, 'pdfjs', d), { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
   root: 'client',
-  plugins: [react()],
+  plugins: [react(), pdfjsAssets()],
 
   build: {
     outDir: '../dist',

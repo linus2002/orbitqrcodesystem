@@ -262,12 +262,30 @@ export async function pdfFile(fileId) {
   return db.get('leafletFile', fileId);
 }
 
+/**
+ * The last few pieces read, by asset id. PDF.js reads a leaflet in many small
+ * ranges, and each range would otherwise fetch its whole 3 MB piece from the
+ * database again. Safe to keep: a piece's id is a digest of its bytes, so the
+ * same id never means different content. About 6 x 3 MB at most.
+ */
+const PIECE_CACHE_MAX = 6;
+const pieceCache = new Map();
+
 /** One stored piece of a file, as a Buffer. */
 export async function pdfPiece(file, seq) {
   const piece = file.pieces?.[seq];
   if (!piece) throw new Error(`leaflet file ${file.id} is missing piece ${seq}`);
+  const hit = pieceCache.get(piece.asset_id);
+  if (hit) {
+    // Most recently used goes to the back.
+    pieceCache.delete(piece.asset_id);
+    pieceCache.set(piece.asset_id, hit);
+    return hit;
+  }
   const bytes = await db.readFile(piece.asset_id);
   if (!bytes) throw new Error(`leaflet file ${file.id}: asset ${piece.asset_id} is gone`);
+  pieceCache.set(piece.asset_id, bytes);
+  if (pieceCache.size > PIECE_CACHE_MAX) pieceCache.delete(pieceCache.keys().next().value);
   return bytes;
 }
 

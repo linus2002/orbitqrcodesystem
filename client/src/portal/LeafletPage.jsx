@@ -19,9 +19,14 @@
  * A leaflet published as a PDF opens here too, not as the PDF. It used to
  * redirect straight to the document, which skipped the one thing this page
  * exists to say - that the leaflet QR proves nothing about the pack - along
- * with the way to the check that does. The PDF is a button on the page.
+ * with the way to the check that does.
+ *
+ * The PDF's pages are shown right here, below that notice (PdfPages), so
+ * someone who scans the QR reads the leaflet without downloading anything - a
+ * phone's browser cannot show a PDF inside a page by itself. Downloading it
+ * is still offered, for keeping or printing.
  */
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../lib/hooks.jsx';
@@ -29,6 +34,9 @@ import { fmtDate } from '../lib/format.js';
 import { Icon } from '../components/Icons.jsx';
 import { Logo } from '../components/Logo.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
+
+// Its own chunk, with PDF.js behind it: only a leaflet with a PDF loads it.
+const PdfPages = lazy(() => import('../components/PdfPages.jsx'));
 
 /**
  * The address of one version of a leaflet - or of the current one when no
@@ -171,26 +179,37 @@ function LeafletBody({ data, lang }) {
           </span>
         </div>
 
-        {/* The document itself, when this version has one - opened in a new
-            tab so a superseded version's warning stays behind it - and,
-            beside it, the check this page cannot do. The notice above links
-            to it too; a button is what someone who came here to act looks
-            for. */}
+        {/* The check this page cannot do, then the document itself when this
+            version has one - its pages, right here, below any superseded
+            warning. The notice above links to the check too; a button is
+            what someone who came here to act looks for. */}
         <div className="card-body">
           <div className="leaflet-actions">
-            {leaflet.pdf && (
-              <a className="btn btn-primary" href={leaflet.pdf.url} target="_blank" rel="noopener">
-                <Icon name="download" /> Open the leaflet (PDF)
-              </a>
-            )}
             <Link className="btn btn-primary" to="/">
               <Icon name="shield" /> Check if your pack is genuine
             </Link>
+            {leaflet.pdf && (
+              <a className="btn" href={leaflet.pdf.url} download={leaflet.pdf.filename ?? 'leaflet.pdf'}>
+                <Icon name="download" /> Download PDF
+              </a>
+            )}
           </div>
-          {leaflet.pdf && !leaflet.sections.length && (
-            <p className="text-sm text-muted mt-8">This version is provided as a PDF document.</p>
-          )}
         </div>
+
+        {leaflet.pdf && (
+          <div className="leaflet-pdf">
+            <Suspense
+              fallback={<p className="text-sm text-muted">Loading the leaflet...</p>}
+            >
+              <PdfPages
+                url={leaflet.pdf.url}
+                size={leaflet.pdf.size}
+                title={`${product.name} patient information leaflet, version ${leaflet.version}`}
+                downloadName={leaflet.pdf.filename ?? 'leaflet.pdf'}
+              />
+            </Suspense>
+          </div>
+        )}
 
         {leaflet.sections.map((section, i) => (
           <div className="leaflet-section" key={`${section.heading}-${i}`}>

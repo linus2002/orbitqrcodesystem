@@ -445,10 +445,6 @@ router.get('/product/:sku/leaflet.pdf', async (req, res) => {
   const file = await leafletService.pdfFile(wanted.file_id);
   if (!file || file.status !== 'ready') throw notFound('The leaflet document is missing.');
 
-  // Streamed a piece at a time with the total length up front: the phone's
-  // viewer can show progress, and no single response or query has to carry
-  // the whole document (see services/leaflets.js).
-  res.status(200);
   // The dashboard shows the PDF inside its own viewer, so this one response
   // may be framed - by this site only. Every other page keeps
   // frame-ancestors 'none' (middleware/security.js).
@@ -456,12 +452,62 @@ router.get('/product/:sku/leaflet.pdf', async (req, res) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${file.filename.replace(/"/g, '')}"`);
-  res.setHeader('Content-Length', String(file.size));
-  for (let seq = 0; seq < Number(file.chunks); seq++) {
-    res.write(await leafletService.pdfPiece(file, seq));
+  // Byte ranges: the leaflet page draws the PDF with PDF.js, which asks for
+  // the parts it needs - the index at the end, then page 1 - instead of
+  // waiting for the whole file. On a phone that is the difference between
+  // the first page in a second or two and the first page after the last byte.
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  const size = Number(file.size);
+  const range = parseRange(req.get('range'), size);
+  if (range === 'unsatisfiable') {
+    res.status(416).setHeader('Content-Range', `bytes */${size}`);
+    return res.end();
+  }
+  const { start, end } = range ?? { start: 0, end: size - 1 };
+  res.status(range ? 206 : 200);
+  if (range) res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+  res.setHeader('Content-Length', String(end - start + 1));
+  if (req.method === 'HEAD') return res.end();
+
+  // Streamed a piece at a time, each piece cut to the range: no single
+  // response or query has to carry the whole document (services/leaflets.js).
+  let offset = 0;
+  for (let seq = 0; seq < Number(file.chunks) && offset <= end; seq++) {
+    const pieceSize = Number(file.pieces[seq].size);
+    const pieceEnd = offset + pieceSize - 1;
+    if (pieceEnd >= start) {
+      const bytes = await leafletService.pdfPiece(file, seq);
+      res.write(bytes.subarray(Math.max(start - offset, 0), Math.min(end - offset, pieceSize - 1) + 1));
+    }
+    offset += pieceSize;
   }
   res.end();
 });
+
+/**
+ * One byte range from a Range header: { start, end } (inclusive), null for
+ * no range or one this does not serve (several ranges - answered with the
+ * whole file, which the standard allows), or 'unsatisfiable'.
+ */
+export function parseRange(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header ?? '').trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  let start;
+  let end;
+  if (m[1] === '') {
+    // The last N bytes.
+    const n = Number(m[2]);
+    if (n === 0) return 'unsatisfiable';
+    start = Math.max(size - n, 0);
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  if (start >= size || start > end) return 'unsatisfiable';
+  return { start, end };
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/product/:sku/image - the product's picture

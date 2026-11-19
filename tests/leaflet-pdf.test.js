@@ -142,6 +142,56 @@ test('a file sent in many pieces is reassembled exactly, in order', async () => 
   assert.ok(served.bytes.equals(bytes));
 });
 
+test('byte ranges are served exactly, across piece boundaries, for the page viewer', async () => {
+  const id = await product('TES12');
+  await client.login(ADMIN.email, ADMIN.password);
+  const body = Buffer.alloc(50 * 1024);
+  for (let i = 0; i < body.length; i++) body[i] = (i * 13 + (i >> 7)) & 0xff;
+  const bytes = Buffer.concat([Buffer.from('%PDF-1.4\n'), body]);
+  const fileId = await uploadPdf(bytes, { chunk: 7 * 1024 });
+  assert.equal((await publish(id, { pdf: { fileId } })).status, 201);
+  client.clearCookies();
+
+  const get = async (range) => {
+    const res = await fetch(`${client.base}/api/product/TES12/leaflet.pdf`, { headers: range ? { Range: range } : {} });
+    return { status: res.status, headers: res.headers, bytes: Buffer.from(await res.arrayBuffer()) };
+  };
+  const size = bytes.length;
+
+  const whole = await get();
+  assert.equal(whole.status, 200);
+  assert.equal(whole.headers.get('accept-ranges'), 'bytes');
+
+  // Starts in piece 0, ends in piece 2.
+  const mid = await get('bytes=7000-16000');
+  assert.equal(mid.status, 206);
+  assert.equal(mid.headers.get('content-range'), `bytes 7000-16000/${size}`);
+  assert.equal(mid.headers.get('content-length'), '9001');
+  assert.ok(mid.bytes.equals(bytes.subarray(7000, 16001)));
+
+  // Exactly one piece, on its boundaries.
+  const piece = await get(`bytes=${7 * 1024}-${14 * 1024 - 1}`);
+  assert.ok(piece.bytes.equals(bytes.subarray(7 * 1024, 14 * 1024)));
+
+  // The last 1024 bytes - how PDF.js reads the index at the end first.
+  const tail = await get('bytes=-1024');
+  assert.equal(tail.status, 206);
+  assert.ok(tail.bytes.equals(bytes.subarray(size - 1024)));
+
+  // Open-ended, and an end past the file, both run to the last byte.
+  assert.ok((await get(`bytes=${size - 10}-`)).bytes.equals(bytes.subarray(size - 10)));
+  assert.ok((await get(`bytes=${size - 10}-${size + 500}`)).bytes.equals(bytes.subarray(size - 10)));
+
+  const beyond = await get(`bytes=${size}-`);
+  assert.equal(beyond.status, 416);
+  assert.equal(beyond.headers.get('content-range'), `bytes */${size}`);
+
+  // Several ranges at once are answered with the whole file, as allowed.
+  const multi = await get('bytes=0-10,20-30');
+  assert.equal(multi.status, 200);
+  assert.ok(multi.bytes.equals(bytes));
+});
+
 test('a PDF and text sections can be published together', async () => {
   const id = await product('TES12');
   await client.login(ADMIN.email, ADMIN.password);
