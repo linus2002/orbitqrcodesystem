@@ -32,6 +32,7 @@ import {
 } from '../lib/errors.js';
 import * as audit from './audit.js';
 import logger from '../lib/logger.js';
+import * as files from './files.js';
 
 /*
  * Shipments are switched off. While this is false no role holds their
@@ -85,7 +86,9 @@ export function publicUser(row) {
     role: row.role,
     status: row.status,
     lastLoginAt: row.last_login_at,
-    avatar: row.avatar ?? null,
+    // A stored avatar is served by URL (GET /api/auth/avatar/:id); an older
+    // account may still carry its picture as a data URL, passed through as is.
+    avatar: files.avatarUrl(row.avatar),
     mustChangePassword: row.must_change_pw === 1,
     tourDone: Boolean(row.tour_done_at),
     createdAt: row.created_at,
@@ -269,18 +272,30 @@ export async function completeTour(userId) {
   return publicUser(await db.get('user', userId));
 }
 
+/**
+ * @param {object} patch
+ * @param {string} [patch.fullName]
+ * @param {Buffer|string|null} [patch.avatar] the image's bytes (stored as a
+ *   file), a data URL (kept inline - only where the store cannot hold files),
+ *   or null to remove it. Already checked by the route.
+ */
 export async function updateProfile(userId, { fullName, avatar }, { req } = {}) {
   const user = await db.get('user', userId);
   if (!user) throw notFound('Account not found');
 
   const changes = {};
   if (fullName !== undefined) changes.full_name = fullName;
-  // null clears it; anything else has already been validated by the route.
-  if (avatar !== undefined) changes.avatar = avatar;
+  if (avatar === null) changes.avatar = null;
+  else if (Buffer.isBuffer(avatar)) changes.avatar = await files.storeAvatar(userId, avatar);
+  else if (avatar !== undefined) changes.avatar = avatar;
 
   if (!Object.keys(changes).length) return publicUser(user);
 
   await db.update('user', user, changes);
+  // The picture it replaced, if that was a stored file.
+  if (changes.avatar !== undefined && files.refId(user.avatar) && user.avatar !== changes.avatar) {
+    await files.discard(files.refId(user.avatar));
+  }
 
   await audit.record({
     actor: user,

@@ -496,6 +496,7 @@ function NewBatchForm({ products, drawer, reload }) {
     mfgDate: today,
     expiryDate: inTwoYears,
     isTest: false,
+    sharedCode: false,
   });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -513,10 +514,11 @@ function NewBatchForm({ products, drawer, reload }) {
         body: {
           productId: Number(form.productId),
           batchNumber: form.batchNumber.trim(),
-          quantity: Number(form.quantity),
+          quantity: form.sharedCode ? 1 : Number(form.quantity),
           mfgDate: form.mfgDate,
           expiryDate: form.expiryDate,
           isTest: form.isTest,
+          sharedCode: form.sharedCode,
         },
       });
       // A pilot batch is left out of this list by default, so without this it
@@ -561,8 +563,13 @@ function NewBatchForm({ products, drawer, reload }) {
       <div className="field">
         <label className="label" htmlFor="bQty">Units in this run</label>
         <input className="input" id="bQty" type="number" min={1} max={500000}
-               value={form.quantity} onChange={set('quantity')} />
-        <p className="hint">The serial space is sized automatically to at least 100x this number.</p>
+               value={form.sharedCode ? 1 : form.quantity} onChange={set('quantity')}
+               disabled={form.sharedCode} />
+        <p className="hint">
+          {form.sharedCode
+            ? 'One shared QR: the batch has a single code, printed on every pack.'
+            : 'The serial space is sized automatically to at least 100x this number.'}
+        </p>
       </div>
       <div className="field">
         <label className="label" htmlFor="bMfg">Manufacturing date</label>
@@ -580,6 +587,16 @@ function NewBatchForm({ products, drawer, reload }) {
         <p className="hint">
           Once created, it is found under Batches &amp; codes with &quot;Include pilot batches&quot;
           ticked - it will not show in this list otherwise.
+        </p>
+      )}
+      <label className="row text-sm">
+        <input type="checkbox" checked={form.sharedCode} onChange={set('sharedCode')} /> One shared QR
+        for every pack
+      </label>
+      {form.sharedCode && (
+        <p className="hint">
+          Every pack carries the same QR, and the duplicate check is off for it. A copied QR then
+          verifies as genuine: only a unique QR per pack can catch copies.
         </p>
       )}
 

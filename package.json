@@ -26,6 +26,8 @@
     "test:e2e": "node tests/e2e.js",
     "test:all": "npm test && npm run build && npm run test:e2e",
     "db:import-sql": "node scripts/import-sql.js",
+    "db:sanity-to-postgres": "node scripts/sanity-to-postgres.js",
+    "test:postgres": "node scripts/test-postgres.js",
     "studio:schema": "node scripts/gen-studio-schema.js"
   },
   "dependencies": {
@@ -37,15 +39,17 @@
     "express": "^5.1.0",
     "groq-js": "^2.0.0",
     "jsqr": "^1.4.0",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@electric-sql/pglite-socket": "^0.2.19",
     "@libsql/client": "^0.18.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "pg": "^8.23.0",
     "vite": "^8.3.0"
   },
   "overrides": {

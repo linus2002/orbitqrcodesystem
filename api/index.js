@@ -24,7 +24,15 @@ import { createApp } from '../src/server.js';
 import { config } from '../src/config.js';
 import logger from '../src/lib/logger.js';
 
-if (!config.sanity.enabled) {
+if (config.postgres.enabled) {
+  // The Postgres backend loads every document into memory at start and is
+  // built for one long-running container (Coolify). A serverless function
+  // would repeat that load on every cold start.
+  logger.warn(
+    'DATABASE_URL is set on a serverless deployment. The Postgres store is meant for one ' +
+      'long-running container (see DEPLOY.md, Coolify); expect slow cold starts here.'
+  );
+} else if (!config.sanity.enabled) {
   // Without Sanity this would keep data in the function's ephemeral
   // filesystem: every write would be silently discarded on the next
   // invocation. Far better to fail loudly at cold start.

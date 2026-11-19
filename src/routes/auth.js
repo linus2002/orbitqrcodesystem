@@ -7,7 +7,9 @@ import * as authService from '../services/auth.js';
 import { validate } from '../lib/validate.js';
 import { createLimiter, rateLimit } from '../lib/ratelimit.js';
 import { requireAuth, requireCsrf } from '../middleware/auth.js';
-import { badRequest, validationFailed } from '../lib/errors.js';
+import { badRequest, notFound, validationFailed } from '../lib/errors.js';
+import * as db from '../db/index.js';
+import * as files from '../services/files.js';
 
 const router = Router();
 
@@ -140,7 +142,12 @@ function checkAvatar(value) {
   if (Buffer.byteLength(payload, 'base64') > MAX_AVATAR_BYTES) {
     throw badRequest('That picture is too large. Choose one under 200KB.');
   }
-  return value;
+  // The bytes must BE what the data URL claims: a label is only a label.
+  const bytes = Buffer.from(payload, 'base64');
+  files.checkImage(bytes, { limit: MAX_AVATAR_BYTES });
+  // Stored as a file where the store keeps files (Postgres, and the local
+  // store); kept inline as before only on Sanity, which cannot list them.
+  return db.filesIndexed() ? bytes : value;
 }
 
 router.patch('/profile', requireAuth, requireCsrf, async (req, res) => {
@@ -166,6 +173,24 @@ router.patch('/profile', requireAuth, requireCsrf, async (req, res) => {
 
   const user = await authService.updateProfile(req.user.id, patch, { req });
   res.json({ user });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/auth/avatar/:id - a staff member's picture
+// ---------------------------------------------------------------------------
+/**
+ * Staff only: a picture of a member of staff is not for the public. The id
+ * changes with every upload, so the response can be cached for good.
+ */
+router.get('/avatar/:id', requireAuth, async (req, res) => {
+  const info = await db.fileInfo(req.params.id);
+  if (!info || info.kind !== 'avatar') throw notFound('No such picture');
+  const bytes = await db.readFile(info.id);
+  if (!bytes) throw notFound('No such picture');
+  res.setHeader('Content-Type', info.contentType);
+  res.setHeader('Content-Length', String(bytes.length));
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  res.end(bytes);
 });
 
 // ---------------------------------------------------------------------------

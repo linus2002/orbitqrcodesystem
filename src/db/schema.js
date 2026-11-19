@@ -116,6 +116,8 @@ export const TYPES = {
       pack_size: { kind: 'string' },
       manufacturer: { kind: 'string', required: true },
       category: { kind: 'string' },
+      // The product's picture: a file of kind 'product_image' (services/files.js).
+      image_file_id: { kind: 'string' },
       status: { kind: 'string', required: true, enum: ['active', 'discontinued'], default: 'active' },
       created_at: { kind: 'datetime', required: true, ...NOW },
       updated_at: { kind: 'datetime', required: true, ...NOW },
@@ -159,6 +161,12 @@ export const TYPES = {
         default: 'planned',
       },
       is_test: { kind: 'bool01', required: true, default: 0 },
+      // One QR printed on every pack of the batch, instead of one per pack.
+      // The batch has a single code, and the duplicate rule is off for it:
+      // many people checking the same code is expected, not a sign of a copy.
+      // That also means a copied QR cannot be told from the real one - see
+      // services/verification.js.
+      shared_code: { kind: 'bool01', required: true, default: 0 },
       leaflet_id: { kind: 'int' },
       codes_issued_at: { kind: 'datetime' },
       printed_at: { kind: 'datetime' },

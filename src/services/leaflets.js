@@ -26,6 +26,7 @@ import crypto from 'node:crypto';
 
 import { notFound, badRequest } from '../lib/errors.js';
 import logger from '../lib/logger.js';
+import { cachedQr, cachedQrDataUrl } from './files.js';
 
 /**
  * The id of a product's current leaflet, or null if none is published.
@@ -91,20 +92,18 @@ export async function leafletQrSvg(sku, { lang = 'en', width = 240 } = {}) {
    * and on surfaces that scuff, and a leaflet QR that fails to scan at a
    * pharmacy counter is worse than no QR at all.
    */
-  return QRCode.toString(leafletUrl(product.sku, { lang }), {
-    type: 'svg',
-    errorCorrectionLevel: 'Q',
-    margin: 1,
-    width,
+  return cachedQr(leafletUrl(product.sku, { lang }), {
+    format: 'svg',
+    options: { errorCorrectionLevel: 'Q', margin: 1, width },
+    purpose: 'leaflet',
   });
 }
 
 /** One product's leaflet QR, as a PNG data URL (for the print sheet). */
 export async function leafletQrDataUrl(sku, { lang = 'en', width = 320 } = {}) {
-  return QRCode.toDataURL(leafletUrl(sku, { lang }), {
-    errorCorrectionLevel: 'Q',
-    margin: 1,
-    width,
+  return cachedQrDataUrl(leafletUrl(sku, { lang }), {
+    options: { errorCorrectionLevel: 'Q', margin: 1, width },
+    purpose: 'leaflet',
   });
 }
 
@@ -215,6 +214,8 @@ export async function addPdfChunk(fileId, seq, bytes) {
   const stored = await db.uploadFile(bytes, {
     filename: `${file.filename.replace(/\.pdf$/i, '')}.part${seq}.pdf`,
     contentType: 'application/pdf',
+    kind: 'leaflet',
+    meta: { leafletFileId: file.id, seq },
   });
   const piece = {
     asset_id: stored.assetId,

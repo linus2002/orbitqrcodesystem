@@ -62,7 +62,8 @@ Options:
   --password  required (at least ${config.auth.minPasswordLength} characters)
   --role      admin | security | regulator   (default: admin)
 
-Against the Sanity dataset, set SANITY_PROJECT_ID, SANITY_DATASET and SANITY_API_TOKEN first.
+Against the production database, set DATABASE_URL first (in Coolify, run this
+in the app's Terminal, where it is already set).
 `);
   process.exit(1);
 }

@@ -9,9 +9,10 @@ engine, a scan log, an alert queue, and an audit trail.
 Built as a working prototype from the *QR Shield Field Guide*, which remains
 the specification of record for the workflow and terminology used here.
 
-**Stack:** React 19 + Vite on the front, Express 5 on the back, and a
-**Sanity** dataset as the database. Without Sanity credentials it runs on a
-local file, so development and the tests need no account, network or server.
+**Stack:** React 19 + Vite on the front, Express 5 on the back, and
+**PostgreSQL** (on Coolify) as the database - for every record and every
+stored file. Without `DATABASE_URL` it runs on a local file, so development
+and the tests need no account, network or server.
 
 ---
 
@@ -68,9 +69,9 @@ local file, so development and the tests need no account, network or server.
 ## Quick start
 
 Requires **Node.js 22.5 or newer** (24 recommended). Nothing else is needed to
-start: with no Sanity credentials the app keeps its data in a local file
-(`data/qrshield.json`). See [Data: Sanity](#data-sanity) to use the real
-dataset.
+start: with no database configured the app keeps its data in a local file
+(`data/qrshield.json`). See [Data: PostgreSQL](#data-postgresql) for the real
+database.
 
 ```bash
 npm install
@@ -92,7 +93,23 @@ Then open the app on the port in your `.env` (`PORT`, default 3000).
 > `PUBLIC_BASE_URL` to match - that URL is what gets encoded into QR codes, so
 > a mismatch produces QR codes that point at the wrong host.
 
-### Data: Sanity
+### Data: PostgreSQL
+
+Production data lives in PostgreSQL - the `ea-bishnoi-one-database` resource
+on Coolify - selected by `DATABASE_URL`. Two tables in their own schema
+(`qrshield`): `documents`, every record as JSONB, and `files`, every stored
+file as bytes: leaflet PDFs, the original of each Excel/CSV import, a copy of
+each Excel export, rendered QR images, avatars and product pictures. File
+types are checked from their bytes, and each kind has its own size limit.
+Setup, the one-time copy from Sanity and backups are in
+[DEPLOY.md](DEPLOY.md#coolify-bishnoi-one---production).
+
+`npm run test:postgres` runs the whole suite on Postgres (PGlite, in-process).
+
+### Data: Sanity (previous)
+
+Kept until its data is copied into Postgres (`npm run db:sanity-to-postgres`);
+ignored whenever `DATABASE_URL` is set.
 
 All data - products, leaflets, batches, the code registry, scans, alerts,
 users, sessions, the audit log - lives in a Sanity dataset. The server talks
@@ -282,7 +299,8 @@ src/
   db/
     schema.js            Every document type: fields, enums, defaults, unique keys
     index.js             The store: validated writes, queries, transactions
-    sanity.js            Sanity backend (production)
+    postgres.js          PostgreSQL backend (production): documents + files tables
+    sanity.js            Sanity backend (previous; source of the one-time copy)
     memory.js            In-memory / local-file backend (tests, development)
   lib/
     codes.js             Code format: generation, permutation, checksum, parsing
@@ -302,6 +320,7 @@ src/
     auth.js              Login, sessions, the role matrix, user management
     analytics.js         Dashboard figures and the compliance report
     audit.js             Append-only audit trail
+    files.js             Stored files: kinds, byte-level type checks, QR cache
     sms.js               SMS fallback and provider adapters
   routes/
     public.js            /api/verify, /api/report, /api/portal/details - no sign-in, rate limited
@@ -332,7 +351,8 @@ client/                  React frontend (Vite). Built into dist/.
     styles/              Design tokens plus per-surface stylesheets
 
 scripts/                 setup, migrate (connection check), seed, reset, dev,
-                         import-sql (SQL -> Sanity), gen-studio-schema
+                         import-sql (SQL -> Sanity), sanity-to-postgres,
+                         test-postgres, gen-studio-schema
 studio/                  Read-only Sanity Studio
 tests/                   62 unit/integration tests + 24 browser tests
 docs/                    API reference, data model, security notes

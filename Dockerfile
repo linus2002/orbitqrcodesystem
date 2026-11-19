@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# Runs on any container host - Railway, Render, Fly.io, or a plain VPS. The
-# data lives in Sanity (set the SANITY_* variables); the /data volume is only
-# for the local-file fallback.
+# Production: Coolify on the Bishnoi One server (DEPLOY.md, "Coolify"). The
+# data and every stored file live in PostgreSQL - set DATABASE_URL to the
+# database's internal url. Run ONE replica. No volume is needed; /data is only
+# for the local-file fallback when no database is configured.
 #
 # Node 24 is what this project is developed against.
 
@@ -29,8 +30,8 @@ COPY --from=build /app/dist ./dist
 COPY src ./src
 COPY scripts ./scripts
 
-# The volume mounts at /data. Keeping the database off the image means a
-# redeploy replaces the code and leaves the codes, scans and alerts alone.
+# Used only when neither DATABASE_URL nor Sanity is configured - never in
+# production, where the data is in Postgres and the container keeps nothing.
 ENV DB_FILE=/data/qrshield.json
 RUN mkdir -p /data && chown -R node:node /data /app
 USER node
@@ -41,6 +42,7 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-# `npm start` runs scripts/migrate.js first via the prestart hook, so a fresh
-# volume gets its schema before the server binds. migrate is idempotent.
+# `npm start` runs scripts/migrate.js first via the prestart hook: against
+# Postgres it creates the schema and tables if missing (idempotent), then
+# proves the database answers before the server binds.
 CMD ["npm", "start"]

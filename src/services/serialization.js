@@ -21,6 +21,7 @@ import {
 } from '../lib/codes.js';
 import { conflict, notFound, badRequest } from '../lib/errors.js';
 import * as audit from './audit.js';
+import { cachedQr, cachedQrDataUrl } from './files.js';
 import logger from '../lib/logger.js';
 
 /** Upper bound per batch. Larger runs should be split, as they are physically. */
@@ -450,18 +451,18 @@ export async function listCodes(batchId, { page, pageSize, status, search } = {}
  */
 export async function qrSvg(code) {
   const payload = qrPayload(code, config.secrets.code, config.publicBaseUrl);
-  return QRCode.toString(payload, {
-    type: 'svg',
-    errorCorrectionLevel: 'Q',
-    margin: 1,
-    width: 240,
+  // Rendered once and kept in the files store (kind 'qr'); see services/files.js.
+  return cachedQr(payload, {
+    format: 'svg',
+    options: { errorCorrectionLevel: 'Q', margin: 1, width: 240 },
+    purpose: 'code',
   });
 }
 
 /** Render a code's QR as a PNG data URL (used by the print sheet). */
 export async function qrDataUrl(code) {
   const payload = qrPayload(code, config.secrets.code, config.publicBaseUrl);
-  return QRCode.toDataURL(payload, { errorCorrectionLevel: 'Q', margin: 1, width: 320 });
+  return cachedQrDataUrl(payload, { options: { errorCorrectionLevel: 'Q', margin: 1, width: 320 }, purpose: 'code' });
 }
 
 /**

@@ -87,13 +87,38 @@ export const config = {
   isProd,
   isTest: NODE_ENV === 'test',
   port: int('PORT', 3000),
+  // Proxies in front of the app in production, counted exactly (server.js).
+  trustProxyHops: Math.max(0, int('TRUST_PROXY_HOPS', 1)),
   publicBaseUrl,
 
   /** True when publicBaseUrl resolves only on this machine - see above. */
   publicBaseUrlIsLocal: isLocalBaseUrl(publicBaseUrl),
 
   /*
-   * The database is a Sanity dataset. All three values are server-side
+   * The production database: PostgreSQL (the Coolify "ea-bishnoi-one-database"
+   * resource). Selected whenever DATABASE_URL is set, ahead of Sanity, and it
+   * holds every document and every stored file - see src/db/postgres.js.
+   *
+   * On Coolify, use the database's INTERNAL url (Coolify > the database >
+   * "Postgres URL (internal)"), so traffic never leaves the server's private
+   * network and the database needs no public port. DATABASE_SSL stays
+   * `disable` for that; use `require` for a connection across the internet.
+   */
+  postgres: {
+    url: str('DATABASE_URL', ''),
+    schema: str('DATABASE_SCHEMA', 'qrshield'),
+    ssl: str('DATABASE_SSL', 'disable'),
+    poolMax: int('DATABASE_POOL_MAX', 10),
+    get enabled() {
+      return Boolean(this.url);
+    },
+  },
+
+  /*
+   * Sanity: the previous database, kept only so `npm run db:sanity-to-postgres`
+   * can copy it into Postgres, and as a fallback while DATABASE_URL is unset.
+   *
+   * The database was a Sanity dataset. All three values are server-side
    * secrets in practice: they are read here, in the Node process, and never
    * sent to the browser - nothing in this object is exposed by any endpoint,
    * and Vite only bundles variables prefixed VITE_. Keep them in .env locally
@@ -157,7 +182,8 @@ export const config = {
      */
     store: str(
       'RATELIMIT_STORE',
-      str('SANITY_PROJECT_ID', '') && str('SANITY_DATASET', '') && str('SANITY_API_TOKEN', '')
+      str('DATABASE_URL', '') ||
+        (str('SANITY_PROJECT_ID', '') && str('SANITY_DATASET', '') && str('SANITY_API_TOKEN', ''))
         ? 'db'
         : 'memory'
     ),

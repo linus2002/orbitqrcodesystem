@@ -21,6 +21,7 @@ import * as importer from '../services/importer.js';
 import * as leaflets from '../services/leaflets.js';
 import * as settingsService from '../services/settings.js';
 import * as verifierService from '../services/verifiers.js';
+import * as files from '../services/files.js';
 import { validate } from '../lib/validate.js';
 import { buildWorkbook, sendWorkbook, readSheet } from '../lib/spreadsheet.js';
 import { normalizeCode, qrPayload } from '../lib/codes.js';
@@ -78,8 +79,10 @@ const productsWithCounts = () =>
     },
   });
 
+const withImage = (p) => (p ? { ...p, image_url: files.productImageUrl(p) } : p);
+
 router.get('/products', requirePermission('products:read'), async (req, res) => {
-  const items = await productsWithCounts();
+  const items = (await productsWithCounts()).map(withImage);
   res.json({ items, total: items.length });
 });
 
@@ -126,7 +129,7 @@ router.get('/products/:id', requirePermission('products:read'), async (req, res)
   const product = await db.get('product', req.params.id);
   if (!product) throw notFound('Product not found');
   res.json({
-    ...product,
+    ...withImage(product),
     leaflets: await db.findMany('leaflet', { product_id: product.id }, {
       order: 'effective_from desc',
       fields: ['id', 'version', 'language', 'effective_from'],
@@ -172,7 +175,42 @@ router.patch('/products/:id', requirePermission('products:write'), async (req, r
   });
 
   await audit.record({ actor: req.user, req, action: 'product.update', entityType: 'product', entityId: product.id, detail: data });
-  res.json(await db.get('product', product.id));
+  res.json(withImage(await db.get('product', product.id)));
+});
+
+/**
+ * Set a product's picture. The body is the image itself (JPEG, PNG or WebP,
+ * up to 2 MB), checked by its bytes - see services/files.js. The previous
+ * picture is deleted once the new one is in place.
+ */
+router.put('/products/:id/image', requirePermission('products:write'), async (req, res) => {
+  const product = await db.get('product', req.params.id);
+  if (!product) throw notFound('Product not found');
+  if (!db.filesIndexed()) throw badRequest('Product pictures need the Postgres store (DATABASE_URL).');
+
+  const fileId = await files.storeProductImage(product.id, req.body, { actor: req.user });
+  await db.update('product', product, { image_file_id: fileId });
+  if (product.image_file_id && product.image_file_id !== fileId) await files.discard(product.image_file_id);
+
+  await audit.record({
+    actor: req.user, req, action: 'product.image', entityType: 'product', entityId: product.id,
+    detail: { image: 'replaced', bytes: req.body.length },
+  });
+  res.json(withImage(await db.get('product', product.id)));
+});
+
+router.delete('/products/:id/image', requirePermission('products:write'), async (req, res) => {
+  const product = await db.get('product', req.params.id);
+  if (!product) throw notFound('Product not found');
+  if (product.image_file_id) {
+    await db.update('product', product, { image_file_id: null });
+    await files.discard(product.image_file_id);
+    await audit.record({
+      actor: req.user, req, action: 'product.image', entityType: 'product', entityId: product.id,
+      detail: { image: 'removed' },
+    });
+  }
+  res.json(withImage(await db.get('product', product.id)));
 });
 
 /**
@@ -468,12 +506,17 @@ router.post('/batches', requirePermission('batches:write'), async (req, res) => 
     expiryDate: { type: 'date', required: true },
     quantity: { type: 'int', required: true, min: 1, max: serialization.MAX_BATCH_QUANTITY },
     isTest: { type: 'bool', default: false },
+    sharedCode: { type: 'bool', default: false },
     leafletId: { type: 'int', min: 1 },
     notes: { type: 'string', max: 500 },
   });
 
   const product = await db.get('product', data.productId);
   if (!product) throw badRequest('That product does not exist.');
+  // A shared batch has exactly one code: the one QR printed on every pack.
+  if (data.sharedCode && data.quantity !== 1) {
+    throw badRequest('A batch with one shared QR has a single code: set the quantity to 1.');
+  }
   if (new Date(data.expiryDate) <= new Date(data.mfgDate)) {
     throw badRequest('The expiry date must be after the manufacturing date.');
   }
@@ -494,12 +537,13 @@ router.post('/batches', requirePermission('batches:write'), async (req, res) => 
     expiry_date: data.expiryDate,
     quantity: data.quantity,
     is_test: data.isTest ? 1 : 0,
+    shared_code: data.sharedCode ? 1 : 0,
     leaflet_id: leafletId,
     notes: data.notes ?? null,
     created_by: req.user.id,
   });
 
-  await audit.record({ actor: req.user, req, action: 'batch.create', entityType: 'batch', entityId: batch.id, detail: { batchNumber: data.batchNumber, quantity: data.quantity, isTest: data.isTest } });
+  await audit.record({ actor: req.user, req, action: 'batch.create', entityType: 'batch', entityId: batch.id, detail: { batchNumber: data.batchNumber, quantity: data.quantity, isTest: data.isTest, sharedCode: data.sharedCode } });
   res.status(201).json(batch);
 });
 
@@ -1319,15 +1363,19 @@ router.get('/export/:entity.xlsx', async (req, res) => {
     { name: req.params.entity, columns: spec.columns, rows: items },
   ]);
 
+  const today = new Date().toISOString().slice(0, 10);
+  const filename = `${req.params.entity}-${today}.xlsx`;
+  // A copy of what left the building, and who took it.
+  const fileId = await files.archiveExport(buffer, { entity: req.params.entity, filename, actor: req.user, rows: items.length });
+
   await audit.record({
     actor: req.user,
     req,
     action: `${req.params.entity}.export`,
-    detail: { rows: items.length, format: 'xlsx' },
+    detail: { rows: items.length, format: 'xlsx', fileId: fileId ?? undefined },
   });
 
-  const today = new Date().toISOString().slice(0, 10);
-  sendWorkbook(res, `${req.params.entity}-${today}.xlsx`, buffer);
+  sendWorkbook(res, filename, buffer);
 });
 
 /**
@@ -1416,7 +1464,79 @@ router.post('/import/:entity', async (req, res) => {
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
   const result = await handler.run(sheet.rows, { actor: req.user, req, dryRun });
 
-  res.json({ entity, dryRun, ...result });
+  // Keep the original of every import that changed something - not of the
+  // dry run the screen sends first to preview the same file.
+  let fileId = null;
+  if (!dryRun) {
+    let filename = null;
+    try {
+      filename = decodeURIComponent(String(req.get('x-file-name') ?? ''));
+    } catch {
+      /* a malformed header just loses the name */
+    }
+    fileId = await files.archiveImport(req.body, { entity, filename, actor: req.user, result });
+  }
+
+  res.json({ entity, dryRun, ...result, fileId: fileId ?? undefined });
+});
+
+// ===========================================================================
+// Stored files - the copies kept of every import and export
+// ===========================================================================
+
+/** Which kinds the list offers, and the permission each needs. */
+const LISTED_KINDS = { import: 'audit:read', export: 'audit:read' };
+
+router.get('/files', async (req, res) => {
+  const kind = String(req.query.kind ?? '');
+  const permission = LISTED_KINDS[kind];
+  if (!permission) throw badRequest('Choose kind=import or kind=export.');
+  if (!authService.can(req.user.role, permission)) {
+    throw forbidden(`Your role (${req.user.role}) cannot see stored files.`);
+  }
+
+  const { limit, offset, page, pageSize } = db.paginate({ page: req.query.page, pageSize: req.query.pageSize, maxPageSize: 100 });
+  const { total, items } = await db.listFiles({ kind, limit, offset });
+
+  // Names, not ids, for who did it.
+  const userIds = [...new Set(items.map((f) => f.createdBy).filter(Number.isInteger))];
+  const users = userIds.length
+    ? await db.findMany('user', { id: { in: userIds } }, { fields: ['id', 'full_name'] })
+    : [];
+  const byId = new Map(users.map((u) => [u.id, u]));
+
+  res.json({
+    page,
+    pageSize,
+    total,
+    items: items.map((f) => ({
+      ...f,
+      createdByName: byId.get(f.createdBy)?.full_name ?? null,
+      downloadUrl: `/api/admin/files/${encodeURIComponent(f.id)}/download`,
+    })),
+  });
+});
+
+router.get('/files/:id/download', async (req, res) => {
+  const info = await db.fileInfo(req.params.id);
+  const permission = info && LISTED_KINDS[info.kind];
+  if (!permission) throw notFound('File not found');
+  if (!authService.can(req.user.role, permission)) {
+    throw forbidden(`Your role (${req.user.role}) cannot download stored files.`);
+  }
+
+  const bytes = await db.readFile(info.id);
+  if (!bytes) throw notFound('File not found');
+
+  await audit.record({
+    actor: req.user, req, action: 'file.download',
+    detail: { fileId: info.id, kind: info.kind, filename: info.filename },
+  });
+  res.setHeader('Content-Type', info.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${files.safeName(info.filename, info.id)}"`);
+  res.setHeader('Content-Length', String(bytes.length));
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(bytes);
 });
 
 export default router;
