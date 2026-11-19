@@ -585,6 +585,112 @@ try {
   );
 
   // =========================================================================
+  // File viewer: files open over the page, never in a new tab
+  // =========================================================================
+  console.log('\nFile viewer');
+
+  const shot = async (name) => {
+    if (!process.env.E2E_SHOTS) return;
+    const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(process.env.E2E_SHOTS, `${name}.png`), Buffer.from(data, 'base64'));
+  };
+  const tabsBefore = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json())
+    .filter((t) => t.type === 'page').length;
+
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await sleep(400);
+
+  // A product with a leaflet published as a PDF, made through the same API
+  // the dashboard uses: start an upload, send the one piece, publish.
+  const pdfReady = await cdp.json(`(async () => {
+    const csrf = (document.cookie.match(/qrs_csrf=([^;]+)/) || [])[1] ?? '';
+    const json = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body) }).then(r => r.json());
+    const pdf = new TextEncoder().encode('%PDF-1.4\\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\\ntrailer<</Root 1 0 R>>\\n%%EOF\\n');
+    const begin = await json('/api/admin/leaflet-files', { name: 'e2e-leaflet.pdf', size: pdf.length });
+    await fetch('/api/admin/leaflet-files/' + begin.fileId + '/chunks/0', { method: 'PUT', headers: { 'Content-Type': 'application/pdf', 'X-CSRF-Token': csrf }, body: pdf });
+    const products = await fetch('/api/admin/products').then(r => r.json());
+    const res = await fetch('/api/admin/products/' + products.items[0].id + '/leaflets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ version: '9.9', reason: 'End-to-end viewer check', pdf: { fileId: begin.fileId } }) });
+    // And a stored export, for the spreadsheet viewer.
+    await fetch('/api/admin/export/products.xlsx');
+    return JSON.stringify({ published: res.status === 201, productId: products.items[0].id });
+  })()`, true);
+  check('a leaflet PDF and an export are set up through the API', { published: pdfReady.published }, cdp);
+
+  await cdp.goto(`${APP}/admin/products`, 2600);
+  await cdp.json(`(()=>{[...document.querySelectorAll('table.data tbody tr')][0].click();return JSON.stringify(1)})()`);
+  await sleep(1800);
+  await cdp.json(`(()=>{[...document.querySelectorAll('.drawer.open button')].find(b=>b.textContent.includes('View codes'))?.click();return JSON.stringify(1)})()`);
+  await sleep(1600);
+  await cdp.json(`(()=>{document.querySelector('.drawer.open button[aria-label^="View the QR"]').click();return JSON.stringify(1)})()`);
+  await sleep(1400);
+  await shot('viewer-qr');
+  check(
+    "a pack code's QR opens in the viewer, over the product, with SVG and PNG downloads",
+    await cdp.json(`(() => {
+      const v = document.querySelector('.viewer');
+      const img = v?.querySelector('.viewer-qr img');
+      const labels = [...(v?.querySelectorAll('.viewer-actions button') ?? [])].map(b => b.textContent);
+      return JSON.stringify({
+        viewer: !!v,
+        qrLoaded: !!img && img.complete && img.naturalWidth > 0,
+        codeShown: !!v?.querySelector('.viewer-qr .mono')?.textContent,
+        svg: labels.some(t => t.includes('SVG')),
+        png: labels.some(t => t.includes('PNG')),
+        drawerStillOpen: !!document.querySelector('.drawer.open'),
+      });
+    })()`),
+    cdp
+  );
+
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await sleep(500);
+  check(
+    'Escape closes the viewer and leaves the product open',
+    await cdp.json(`JSON.stringify({ viewerGone: !document.querySelector('.viewer'), drawerOpen: !!document.querySelector('.drawer.open') })`),
+    cdp
+  );
+
+  await cdp.json(`(()=>{[...document.querySelectorAll('.drawer.open button')].find(b=>b.textContent.includes('View PDF'))?.click();return JSON.stringify(1)})()`);
+  await sleep(2500);
+  await shot('viewer-pdf');
+  const frames = (await cdp.send('Page.getFrameTree')).frameTree.childFrames ?? [];
+  const pdfFrame = frames.map((f) => f.frame).find((f) => f.url.includes('leaflet.pdf') || f.url.startsWith('chrome-error'));
+  check(
+    'a leaflet PDF opens inside the viewer, not blocked and not in a new tab',
+    {
+      viewer: await cdp.json(`JSON.stringify(!!document.querySelector('.viewer-pdf iframe'))`),
+      framed: !!pdfFrame && !pdfFrame.url.startsWith('chrome-error'),
+    },
+    cdp
+  );
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await sleep(300);
+
+  await cdp.goto(`${APP}/admin/audit`, 2600);
+  await cdp.json(`(()=>{[...document.querySelectorAll('button.btn-pill')].find(b=>b.textContent.includes('View'))?.click();return JSON.stringify(1)})()`);
+  await sleep(1800);
+  await shot('viewer-sheet');
+  check(
+    'a stored spreadsheet opens as a table in the viewer',
+    await cdp.json(`(() => {
+      const t = document.querySelector('.viewer .viewer-sheet table');
+      return JSON.stringify({
+        table: !!t,
+        headings: (t?.querySelectorAll('thead th').length ?? 0) > 2,
+        rows: t?.querySelectorAll('tbody tr').length ?? 0,
+        download: [...document.querySelectorAll('.viewer-actions button')].some(b => b.textContent.includes('Download')),
+      });
+    })()`),
+    cdp
+  );
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await sleep(300);
+
+  const tabsAfter = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json())
+    .filter((t) => t.type === 'page').length;
+  check('no file opened a new tab', { sameTabs: tabsAfter === tabsBefore }, cdp);
+
+  // =========================================================================
   // Role-based access, as the browser sees it
   // =========================================================================
   console.log('\nRole-based access');

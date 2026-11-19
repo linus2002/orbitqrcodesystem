@@ -6,11 +6,13 @@
  */
 import { useState } from 'react';
 
-import { api, upload } from '../../lib/api.js';
+import { api, upload, download } from '../../lib/api.js';
 import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
+import { useViewer } from '../components/FileViewer.jsx';
+import { QrZipButtons, openCodeQr } from '../components/CodeDownloads.jsx';
 import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
 import { Icon } from '../../components/Icons.jsx';
 import {
@@ -127,12 +129,7 @@ async function openProduct(id, drawer, reload, canWrite) {
         <div>
           <h3 className="mb-8">Leaflets</h3>
           {p.leaflets.length ? (
-            p.leaflets.map((l) => (
-              <div className="tl-body" key={l.id}>
-                v{l.version} ({l.language}){' '}
-                <span className="meta">from {fmtDate(l.effective_from)}</span>
-              </div>
-            ))
+            <LeafletVersions product={p} />
           ) : (
             <p className="text-muted text-sm">
               No leaflet published. Patients will see no dosing information on a genuine result.
@@ -179,6 +176,43 @@ async function openProduct(id, drawer, reload, canWrite) {
 }
 
 /**
+ * Every leaflet version, newest first; a version published as a PDF opens it
+ * in the file viewer, without leaving the product.
+ */
+function LeafletVersions({ product }) {
+  const viewer = useViewer();
+  return product.leaflets.map((l) => {
+    const q = new URLSearchParams({ version: l.version });
+    if (l.language !== 'en') q.set('lang', l.language);
+    const pdf = `/api/product/${encodeURIComponent(product.sku)}/leaflet.pdf?${q}`;
+    return (
+      <div className="tl-body row row-wrap" key={l.id}>
+        <span>
+          v{l.version} ({l.language}) <span className="meta">from {fmtDate(l.effective_from)}</span>
+        </span>
+        {l.file_id && (
+          <button
+            type="button"
+            className="btn btn-sm btn-quiet"
+            onClick={() =>
+              viewer.open({
+                kind: 'pdf',
+                title: `${product.name} leaflet v${l.version} (${l.language})`,
+                subtitle: product.sku,
+                src: pdf,
+                downloads: [{ label: 'PDF', url: pdf, filename: `${product.sku}-leaflet-v${l.version}.pdf` }],
+              })
+            }
+          >
+            <Icon name="eye" /> View PDF
+          </button>
+        )}
+      </div>
+    );
+  });
+}
+
+/**
  * The product's picture: shown, and for someone who may edit products,
  * replaced or removed. JPEG, PNG or WebP up to 2 MB; the server checks the
  * bytes, not just the type the browser reports.
@@ -188,6 +222,7 @@ function ProductImage({ product, canWrite, reload }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const toast = useToast();
+  const viewer = useViewer();
 
   async function choose(file) {
     if (!file) return;
@@ -230,11 +265,27 @@ function ProductImage({ product, canWrite, reload }) {
     <div>
       <h3 className="mb-8">Picture</h3>
       {url ? (
-        <img
-          src={url}
-          alt={product.name}
-          style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, objectFit: 'contain', display: 'block' }}
-        />
+        <button
+          type="button"
+          className="btn-reset"
+          style={{ cursor: 'zoom-in', padding: 0, border: 0, background: 'none' }}
+          onClick={() =>
+            viewer.open({
+              kind: 'image',
+              title: product.name,
+              subtitle: product.sku,
+              src: url,
+              downloads: [{ label: 'Download', url, filename: `${product.sku}-picture` }],
+            })
+          }
+          aria-label={`View the picture of ${product.name}`}
+        >
+          <img
+            src={url}
+            alt={product.name}
+            style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, objectFit: 'contain', display: 'block' }}
+          />
+        </button>
       ) : (
         <p className="text-muted text-sm">No picture yet.</p>
       )}
@@ -306,12 +357,15 @@ function ProductCodes({ product }) {
                   {open === b.id ? 'Hide codes' : 'View codes'}
                 </button>
                 {canExport && (
-                  <a className="btn btn-sm" href={`/api/admin/batches/${b.id}/codes.csv`} download>
-                    <Icon name="down" /> CSV
-                  </a>
+                  <>
+                    <a className="btn btn-sm" href={`/api/admin/batches/${b.id}/codes.csv`} download>
+                      <Icon name="down" /> CSV
+                    </a>
+                    <QrZipButtons batch={b} />
+                  </>
                 )}
               </div>
-              {open === b.id && <BatchCodeList batchId={b.id} />}
+              {open === b.id && <BatchCodeList batchId={b.id} batchNumber={b.batch_number} />}
             </div>
           ))}
           <p className="text-sm text-muted">
@@ -325,8 +379,9 @@ function ProductCodes({ product }) {
 }
 
 /** One batch's codes, paged, with a QR for each and a copy button. */
-function BatchCodeList({ batchId }) {
+function BatchCodeList({ batchId, batchNumber }) {
   const toast = useToast();
+  const viewer = useViewer();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const term = useDebounced(search, 300);
@@ -395,15 +450,40 @@ function BatchCodeList({ batchId }) {
           {
             label: 'QR',
             render: (c) => (
-              <a
-                className="code-qr"
-                href={`/api/admin/codes/${c.id}/qr.svg`}
-                target="_blank"
-                rel="noopener"
-                aria-label={`Open the QR for ${c.code}`}
-              >
-                <Icon name="qr" />
-              </a>
+              <span className="row">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-quiet"
+                  onClick={() => openCodeQr(viewer, c, { batchNumber })}
+                  aria-label={`View the QR for ${c.code}`}
+                >
+                  <Icon name="qr" /> View
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-quiet"
+                  onClick={() =>
+                    download(`/api/admin/codes/${c.id}/qr.svg?download=1`, { filename: `${c.code}.svg` }).catch(
+                      (err) => toast(err.message, 'error')
+                    )
+                  }
+                  aria-label={`Download the QR for ${c.code} as SVG`}
+                >
+                  <Icon name="download" /> SVG
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-quiet"
+                  onClick={() =>
+                    download(`/api/admin/codes/${c.id}/qr.png?download=1`, { filename: `${c.code}.png` }).catch(
+                      (err) => toast(err.message, 'error')
+                    )
+                  }
+                  aria-label={`Download the QR for ${c.code} as PNG`}
+                >
+                  <Icon name="download" /> PNG
+                </button>
+              </span>
             ),
           },
         ]}
@@ -891,6 +971,7 @@ const sameMedicine = (a, b) => a.name.trim().toLowerCase() === b.name.trim().toL
 
 function UseLeafletForm({ product, drawer, reload }) {
   const toast = useToast();
+  const viewer = useViewer();
   const [fromId, setFromId] = useState('');
   const [language, setLanguage] = useState('en');
   const [reason, setReason] = useState('');
@@ -1047,15 +1128,31 @@ function UseLeafletForm({ product, drawer, reload }) {
                   ],
                 ]}
               />
-              <p className="text-sm">
+              <p className="text-sm row row-wrap">
+                {shown.pdf && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() =>
+                      viewer.open({
+                        kind: 'pdf',
+                        title: `${source.name} leaflet v${shown.version} (${shown.language})`,
+                        subtitle: source.sku,
+                        src: shown.pdf.url,
+                        downloads: [{ label: 'PDF', url: shown.pdf.url, filename: shown.pdf.filename ?? 'leaflet.pdf' }],
+                      })
+                    }
+                  >
+                    <Icon name="eye" /> View the PDF
+                  </button>
+                )}
                 <a
                   href={`/leaflet/${encodeURIComponent(source.sku)}${lang !== 'en' ? `?lang=${encodeURIComponent(lang)}` : ''}`}
                   target="_blank"
                   rel="noopener"
                 >
                   Open it as patients see it
-                </a>{' '}
-                (new tab).
+                </a>
               </p>
 
               <div className="alert alert-info">

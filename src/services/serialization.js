@@ -459,6 +459,28 @@ export async function qrSvg(code) {
   });
 }
 
+/** The URL a code's QR carries: the public address, the code and its signature. */
+export function qrText(code) {
+  return qrPayload(code, config.secrets.code, config.publicBaseUrl);
+}
+
+/**
+ * A code's QR as a print file: SVG (a string) or PNG (a Buffer).
+ *
+ * A 4-module quiet zone, the print standard, rather than the 1 the screen
+ * uses: a label gets trimmed, and a QR printed tight to the edge of a carton
+ * panel scans badly. Rendered fresh by default; `cache: true` keeps it in the
+ * files store, which a single download wants and a batch ZIP of thousands of
+ * codes does not.
+ */
+export async function qrFile(code, { format = 'svg', width = 1024, cache = false } = {}) {
+  const options = { errorCorrectionLevel: 'Q', margin: 4, width };
+  if (cache) return cachedQr(qrText(code), { format, options, purpose: 'code-download' });
+  return format === 'svg'
+    ? QRCode.toString(qrText(code), { ...options, type: 'svg' })
+    : QRCode.toBuffer(qrText(code), { ...options, type: 'png' });
+}
+
 /** Render a code's QR as a PNG data URL (used by the print sheet). */
 export async function qrDataUrl(code) {
   const payload = qrPayload(code, config.secrets.code, config.publicBaseUrl);
@@ -531,6 +553,8 @@ export default {
   listCodes,
   qrSvg,
   qrDataUrl,
+  qrText,
+  qrFile,
   exportCsv,
   assertTransition,
   MAX_BATCH_QUANTITY,

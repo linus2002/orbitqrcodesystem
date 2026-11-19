@@ -17,6 +17,7 @@ import { useHeader } from '../components/PageHeader.jsx';
 import { useDrawer } from '../components/Drawer.jsx';
 import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
 import { Icon } from '../../components/Icons.jsx';
+import { QrZipButtons } from '../components/CodeDownloads.jsx';
 import {
   TableCard, Table, Pager, Toolbar, Spacer, Select, KV, StatusBadge, ErrorNote,
 } from '../components/ui.jsx';
@@ -300,9 +301,11 @@ function BatchDetail({ batch, drawer, reload, canWrite }) {
               <a className="btn btn-sm" href={`/api/admin/batches/${batch.id}/codes.csv`} download>
                 <Icon name="down" /> Code list (CSV)
               </a>
+              <QrZipButtons batch={batch} />
             </div>
             <p className="text-sm text-muted mt-8">
-              The CSV is the hand-off file for the packaging line&apos;s printer.
+              The CSV is the hand-off file for the packaging line&apos;s printer. The QR downloads
+              are one print-ready image per code, in packing order (up to 10,000 codes).
             </p>
           </>
         )}

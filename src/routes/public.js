@@ -449,6 +449,11 @@ router.get('/product/:sku/leaflet.pdf', async (req, res) => {
   // viewer can show progress, and no single response or query has to carry
   // the whole document (see services/leaflets.js).
   res.status(200);
+  // The dashboard shows the PDF inside its own viewer, so this one response
+  // may be framed - by this site only. Every other page keeps
+  // frame-ancestors 'none' (middleware/security.js).
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${file.filename.replace(/"/g, '')}"`);
   res.setHeader('Content-Length', String(file.size));

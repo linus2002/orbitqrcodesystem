@@ -17,6 +17,7 @@ import { Logo } from '../components/Logo.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
 import Clock from './components/Clock.jsx';
 import { DrawerProvider, useDrawer } from './components/Drawer.jsx';
+import { ViewerProvider } from './components/FileViewer.jsx';
 import { HeaderProvider, PageHeader, useHeader } from './components/PageHeader.jsx';
 import { NavContext } from './components/Legend.jsx';
 import GuidedTour, { TourContext } from './components/GuidedTour.jsx';
@@ -133,6 +134,8 @@ export default function AdminApp() {
       {/* The legend lists the sidebar's icons from this, so it shows exactly
           the entries this person sees. */}
       <NavContext.Provider value={allowed}>
+        {/* Outside the drawer, so a file opened from inside a drawer reaches it. */}
+        <ViewerProvider>
         <DrawerProvider>
           <div className="admin-shell">
             <Sidebar open={navOpen} routes={allowed} session={session} />
@@ -167,6 +170,7 @@ export default function AdminApp() {
             </div>
           </div>
         </DrawerProvider>
+        </ViewerProvider>
       </NavContext.Provider>
     </HeaderProvider>
     {touring && <GuidedTour steps={tourSteps(session.user, allowed)} onClose={endTour} />}

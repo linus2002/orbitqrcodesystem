@@ -23,7 +23,8 @@ import * as settingsService from '../services/settings.js';
 import * as verifierService from '../services/verifiers.js';
 import * as files from '../services/files.js';
 import { validate } from '../lib/validate.js';
-import { buildWorkbook, sendWorkbook, readSheet } from '../lib/spreadsheet.js';
+import { buildWorkbook, sendWorkbook, readSheet, previewSheet } from '../lib/spreadsheet.js';
+import archiver from 'archiver';
 import { normalizeCode, qrPayload } from '../lib/codes.js';
 import { notFound, badRequest, conflict, forbidden } from '../lib/errors.js';
 import { requireAuth, requirePermission, requireCsrf } from '../middleware/auth.js';
@@ -132,7 +133,7 @@ router.get('/products/:id', requirePermission('products:read'), async (req, res)
     ...withImage(product),
     leaflets: await db.findMany('leaflet', { product_id: product.id }, {
       order: 'effective_from desc',
-      fields: ['id', 'version', 'language', 'effective_from'],
+      fields: ['id', 'version', 'language', 'effective_from', 'file_id'],
     }),
     batches: await db.findMany('batch', { product_id: product.id }, {
       order: 'created_at desc',
@@ -668,6 +669,64 @@ router.get('/batches/:id/codes.csv', requirePermission('codes:export'), async (r
   sendCsv(res, filename, csv);
 });
 
+/** The most codes one ZIP carries. Past this the CSV is the printer's file. */
+export const QR_ZIP_MAX = 10_000;
+
+/**
+ * Every QR of a batch, as one ZIP of print files - one per code, named
+ * `<unit>-<code>.svg|png` so they sort in packing order - plus codes.csv
+ * listing each file with its code and the URL it opens.
+ *
+ * Streamed: files are rendered and written one at a time, so a ten-thousand
+ * code batch never sits in memory whole. Not cached in the files store - a
+ * whole batch of print files belongs on the printer, not in the database.
+ */
+router.get('/batches/:id/qr.zip', requirePermission('codes:export'), async (req, res) => {
+  const batch = await batchWithProduct(req.params.id);
+  if (!batch) throw notFound('Batch not found');
+  const format = req.query.format === 'png' ? 'png' : 'svg';
+  const width = Math.min(Math.max(Number(req.query.width) || 1024, 128), 4096);
+
+  const total = await db.count('code', { batch_id: batch.id });
+  if (!total) throw badRequest('This batch has no codes yet. Issue its codes first.');
+  if (total > QR_ZIP_MAX) {
+    throw badRequest(
+      `This batch has ${total.toLocaleString()} codes; a QR download holds at most ` +
+        `${QR_ZIP_MAX.toLocaleString()}. Use the code list (CSV) for the packaging line's printer.`
+    );
+  }
+
+  await audit.record({
+    actor: req.user, req, action: 'codes.export', entityType: 'batch', entityId: batch.id,
+    detail: { batchNumber: batch.batch_number, codes: total, format: `qr-zip-${format}` },
+  });
+
+  const name = `${batch.batch_number}-qr-${format}`;
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${name}.zip"`);
+
+  const zip = archiver('zip', { zlib: { level: format === 'png' ? 0 : 6 } });
+  zip.on('warning', (err) => console.warn(`[qr.zip] ${err.message}`));
+  zip.on('error', (err) => res.destroy(err));
+  zip.pipe(res);
+
+  const pad = String(total).length;
+  const lines = ['unit,code,file,url'];
+  for (let from = 0; from < total; from += 500) {
+    const codes = await db.findMany('code', { batch_id: batch.id }, {
+      order: 'unit_index asc', limit: 500, offset: from, fields: ['code', 'unit_index'],
+    });
+    for (const c of codes) {
+      const file = `${String(c.unit_index + 1).padStart(pad, '0')}-${c.code}.${format}`;
+      const image = await serialization.qrFile(c.code, { format, width });
+      zip.append(format === 'svg' ? Buffer.from(image, 'utf8') : image, { name: `${name}/${file}` });
+      lines.push([c.unit_index + 1, c.code, file, serialization.qrText(c.code)].join(','));
+    }
+  }
+  zip.append(`${lines.join('\n')}\n`, { name: `${name}/codes.csv` });
+  await zip.finalize();
+});
+
 /**
  * Printable label sheet data: codes plus their rendered QR images.
  *
@@ -759,11 +818,33 @@ router.post('/codes/:id/void', requirePermission('batches:write'), async (req, r
   res.json({ ok: true, code: await db.getCode(code.code) });
 });
 
-/** QR image for a single code, as SVG. */
-router.get('/codes/:id/qr.svg', requirePermission('codes:read'), async (req, res) => {
+/**
+ * QR image for a single code, as SVG or PNG.
+ *
+ * Without ?download=1 it is the small on-screen image (and the SVG is the one
+ * the label sheet uses). With it, a print file: a 4-module quiet zone, PNG at
+ * ?width= pixels (default 1024), sent as an attachment named after the code.
+ */
+router.get(['/codes/:id/qr.svg', '/codes/:id/qr.png'], requirePermission('codes:read'), async (req, res) => {
   const code = await db.get('code', req.params.id);
   if (!code) throw notFound('Code not found');
-  res.type('image/svg+xml').send(await serialization.qrSvg(code.code));
+  const format = req.path.endsWith('.png') ? 'png' : 'svg';
+  const download = req.query.download === '1';
+  const width = Math.min(Math.max(Number(req.query.width) || (download ? 1024 : 240), 80), 4096);
+
+  const image = download || format === 'png' || req.query.width
+    ? await serialization.qrFile(code.code, { format, width, cache: true })
+    : await serialization.qrSvg(code.code);
+
+  if (download) {
+    await audit.record({
+      actor: req.user, req, action: 'codes.qr_download', entityType: 'code', entityId: code.id,
+      detail: { format, width },
+    });
+    res.setHeader('Content-Disposition', `attachment; filename="${code.code}.${format}"`);
+  }
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.type(format === 'svg' ? 'image/svg+xml' : 'image/png').send(image);
 });
 
 // ===========================================================================
@@ -1537,6 +1618,29 @@ router.get('/files/:id/download', async (req, res) => {
   res.setHeader('Content-Length', String(bytes.length));
   res.setHeader('Cache-Control', 'private, no-store');
   res.end(bytes);
+});
+
+/**
+ * A stored spreadsheet's first rows, for the in-app viewer: read on the
+ * server, so the screen shows a table instead of a file to download.
+ */
+router.get('/files/:id/preview', async (req, res) => {
+  const info = await db.fileInfo(req.params.id);
+  const permission = info && LISTED_KINDS[info.kind];
+  if (!permission) throw notFound('File not found');
+  if (!authService.can(req.user.role, permission)) {
+    throw forbidden(`Your role (${req.user.role}) cannot see stored files.`);
+  }
+  const bytes = await db.readFile(info.id);
+  if (!bytes) throw notFound('File not found');
+
+  let preview;
+  try {
+    preview = await previewSheet(bytes, { limit: 200 });
+  } catch {
+    throw badRequest('That file could not be read as a spreadsheet.');
+  }
+  res.json({ file: { ...info, downloadUrl: `/api/admin/files/${encodeURIComponent(info.id)}/download` }, ...preview });
 });
 
 export default router;

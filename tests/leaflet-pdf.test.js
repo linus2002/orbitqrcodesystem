@@ -75,6 +75,8 @@ async function fetchPdf(path) {
     type: res.headers.get('content-type'),
     length: res.headers.get('content-length'),
     disposition: res.headers.get('content-disposition'),
+    csp: res.headers.get('content-security-policy'),
+    frameOptions: res.headers.get('x-frame-options'),
     bytes: Buffer.from(await res.arrayBuffer()),
   };
 }
@@ -116,6 +118,9 @@ test('a leaflet can be published as a PDF alone, and the public page then points
   assert.equal(served.length, String(pdfBytes().length), 'the total length is announced up front');
   assert.match(served.disposition, /^inline; filename="Testamol-leaflet\.pdf"/);
   assert.ok(served.bytes.equals(pdfBytes()), 'the bytes come back exactly as uploaded');
+  // The dashboard's viewer shows it in a frame: allowed for this site only.
+  assert.equal(served.csp, "frame-ancestors 'self'");
+  assert.equal(served.frameOptions, 'SAMEORIGIN');
 });
 
 test('a file sent in many pieces is reassembled exactly, in order', async () => {

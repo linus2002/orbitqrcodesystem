@@ -10,6 +10,8 @@ import { download } from '../../lib/api.js';
 import { useApi, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
+import { useViewer } from '../components/FileViewer.jsx';
+import { Icon } from '../../components/Icons.jsx';
 import { TableCard, Table, Pager, Toolbar, Spacer, Select, ErrorNote } from '../components/ui.jsx';
 
 /** Group the dotted action names into readable filter options. */
@@ -116,6 +118,17 @@ function StoredSpreadsheets() {
   const [kind, setKind] = useState('export');
   const [page, setPage] = useState(1);
   const toast = useToast();
+  const viewer = useViewer();
+
+  function view(f) {
+    viewer.open({
+      kind: 'sheet',
+      title: f.filename,
+      subtitle: `${kind === 'import' ? 'Imported' : 'Exported'} by ${f.createdByName ?? 'unknown'} · ${fmtDate(f.createdAt, { withTime: true })}`,
+      previewUrl: `/api/admin/files/${encodeURIComponent(f.id)}/preview`,
+      downloads: [{ label: 'Download', url: f.downloadUrl, filename: f.filename }],
+    });
+  }
   const { data, error, loading } = useApi('/api/admin/files', { query: { kind, page, pageSize: 20 } }, [kind, page]);
 
   async function save(f) {
@@ -159,7 +172,15 @@ function StoredSpreadsheets() {
           columns={[
             { label: 'When', render: (f) => fmtDate(f.createdAt, { withTime: true }) },
             { label: 'Who', render: (f) => f.createdByName ?? '-' },
-            { label: 'File', className: 'td-wrap', render: (f) => f.filename },
+            {
+              label: 'File',
+              className: 'td-wrap',
+              render: (f) => (
+                <button type="button" className="link-button" onClick={() => view(f)}>
+                  {f.filename}
+                </button>
+              ),
+            },
             {
               label: kind === 'import' ? 'Result' : 'Rows',
               render: (f) =>
@@ -171,9 +192,14 @@ function StoredSpreadsheets() {
             {
               label: '',
               render: (f) => (
-                <button type="button" className="btn-pill" onClick={() => save(f)}>
-                  Download
-                </button>
+                <span className="row">
+                  <button type="button" className="btn-pill" onClick={() => view(f)}>
+                    <Icon name="eye" /> View
+                  </button>
+                  <button type="button" className="btn-pill" onClick={() => save(f)}>
+                    Download
+                  </button>
+                </span>
               ),
             },
           ]}

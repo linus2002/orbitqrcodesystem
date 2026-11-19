@@ -1143,3 +1143,80 @@
 @media (prefers-reduced-motion: reduce) {
   .tour-spot { transition: none; }
 }
+
+/* --- File viewer ------------------------------------------------------------
+ * One window over the page for every file: a QR, a PDF, a picture, a stored
+ * spreadsheet. Above the drawer (100) - it opens from inside one - and below
+ * the toasts (300), so a download's message is still seen.
+ */
+.viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+}
+.viewer {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+}
+.viewer-pdf, .viewer-sheet-kind, .viewer.viewer-sheet { width: min(1100px, 100%); height: calc(100vh - 40px); }
+.viewer-image { width: min(900px, 100%); }
+.viewer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.viewer-titles { min-width: 0; }
+.viewer-titles h3 { font-size: 1rem; margin: 0; word-break: break-word; }
+.viewer-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.viewer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+.viewer-qr { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.viewer-qr img { width: min(320px, 100%); height: auto; max-height: 55vh; object-fit: contain; background: #fff; padding: 8px; border-radius: var(--r); }
+img.viewer-image { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
+.viewer-frame { flex: 1; width: 100%; min-height: 60vh; border: 1px solid var(--line); border-radius: var(--r); background: #fff; }
+.viewer-fallback { margin: 8px 0 0; }
+.viewer-sheet { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
+.viewer-sheet table { min-width: 100%; }
+.viewer-sheet th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; }
+.viewer-sheet td, .viewer-sheet th { white-space: nowrap; }
+.viewer-note { padding: 0 16px 14px; margin: 0; }
+@media (max-width: 640px) {
+  .viewer-backdrop { padding: 0; }
+  .viewer, .viewer.viewer-pdf, .viewer.viewer-sheet { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+}
+
+/* A button that reads as a link: a filename that opens the viewer. */
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--brand, #1d4ed8);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-button:hover { text-decoration-thickness: 2px; }

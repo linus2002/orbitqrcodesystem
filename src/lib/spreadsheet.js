@@ -140,6 +140,45 @@ export async function readSheet(buffer, { sheetName } = {}) {
 }
 
 /**
+ * The first rows of a workbook or CSV, as text, for showing on screen.
+ *
+ * Unlike readSheet() the headings are kept as written and every cell is
+ * already text: this is for a person to look at, not for an import to read.
+ * Returns { sheet, columns, rows, total, truncated }.
+ */
+export async function previewSheet(buffer, { limit = 200 } = {}) {
+  const wb = new ExcelJS.Workbook();
+  const isZip = buffer.length > 1 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+  if (isZip) {
+    await wb.xlsx.load(buffer);
+  } else {
+    const { Readable } = await import('node:stream');
+    await wb.csv.read(Readable.from(buffer.toString('utf8')));
+  }
+  const ws = wb.worksheets[0];
+  if (!ws) return { sheet: null, columns: [], rows: [], total: 0, truncated: false };
+
+  const columns = [];
+  ws.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => {
+    columns[col - 1] = cellText(cell.value) || `Column ${col}`;
+  });
+  const width = columns.length;
+
+  const rows = [];
+  let total = 0;
+  ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    total += 1;
+    if (rows.length >= limit) return;
+    const cells = [];
+    for (let i = 1; i <= Math.max(width, row.cellCount); i++) cells.push(cellText(row.getCell(i).value));
+    rows.push(cells);
+  });
+  for (let i = 0; i < columns.length; i++) columns[i] ??= `Column ${i + 1}`;
+  return { sheet: ws.name, columns, rows, total, truncated: total > rows.length };
+}
+
+/**
  * Build a workbook from one or more sheet definitions.
  *
  * @param {Array<{name: string, columns: Array<{header: string, key: string, width?: number}>, rows: object[], note?: string}>} sheets
@@ -186,4 +225,4 @@ export function sendWorkbook(res, filename, buffer) {
   res.send(buffer);
 }
 
-export default { cellText, cellDate, cellInt, cellBool, readSheet, buildWorkbook, sendWorkbook };
+export default { cellText, cellDate, cellInt, cellBool, readSheet, previewSheet, buildWorkbook, sendWorkbook };
