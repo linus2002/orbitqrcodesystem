@@ -33,6 +33,19 @@ export class MutationError extends Error {
   }
 }
 
+/** A file's details as callers see them - never the bytes. */
+const describeAsset = (id, a) => ({
+  id,
+  kind: a.kind,
+  filename: a.filename,
+  contentType: a.contentType,
+  size: a.bytes.length,
+  sha256: a.sha256,
+  meta: a.meta ?? {},
+  createdBy: a.createdBy ?? null,
+  createdAt: a.createdAt,
+});
+
 const clone = (v) => (v === undefined ? undefined : structuredClone(v));
 const rev = () => crypto.randomBytes(9).toString('base64url');
 
@@ -70,7 +83,7 @@ export class MemoryBackend {
   constructor(file) {
     this.file = file && file !== ':memory:' ? file : null;
     this.docs = new Map();
-    // File assets: id -> { filename, contentType, bytes }. Kept apart from
+    // File assets: id -> { filename, contentType, kind, meta, bytes, ... }. Kept apart from
     // the documents so no GROQ query ever walks over megabytes of PDF.
     this.assets = new Map();
     this.parsed = new Map();
@@ -91,18 +104,43 @@ export class MemoryBackend {
       for (const d of list) this.docs.set(d._id, d);
       const assets = Array.isArray(stored) ? {} : stored.assets ?? {};
       for (const [id, a] of Object.entries(assets)) {
-        this.assets.set(id, { filename: a.filename, contentType: a.contentType, bytes: Buffer.from(a.data, 'base64') });
+        const bytes = Buffer.from(a.data, 'base64');
+        this.assets.set(id, {
+          filename: a.filename ?? null,
+          contentType: a.contentType ?? 'application/octet-stream',
+          kind: a.kind ?? 'leaflet',
+          meta: a.meta ?? {},
+          createdBy: a.createdBy ?? null,
+          createdAt: a.createdAt ?? new Date(0).toISOString(),
+          sha256: a.sha256 ?? crypto.createHash('sha256').update(bytes).digest('hex'),
+          bytes,
+        });
       }
     }
   }
 
-  /** Content-addressed, as Sanity's are: the same bytes give the same id. */
-  async uploadFile(bytes, { filename, contentType } = {}) {
+  /**
+   * Store a file. Content-addressed by default, as Sanity's assets are: the
+   * same bytes give the same id. Pass `id` to choose one (a cache entry, a
+   * per-person file that must not be shared with anyone else's).
+   */
+  async uploadFile(bytes, { filename, contentType, kind = 'leaflet', id, meta, createdBy } = {}) {
     const ext = String(filename ?? '').split('.').pop()?.toLowerCase() || 'bin';
-    const id = `file-${crypto.createHash('sha1').update(bytes).digest('hex')}-${ext}`;
-    this.assets.set(id, { filename, contentType, bytes: Buffer.from(bytes) });
-    this.schedulePersist();
-    return { assetId: id, url: `memory://${id}`, size: bytes.length };
+    const assetId = id ?? `file-${crypto.createHash('sha1').update(bytes).digest('hex')}-${ext}`;
+    if (!this.assets.has(assetId)) {
+      this.assets.set(assetId, {
+        filename: filename ?? null,
+        contentType: contentType ?? 'application/octet-stream',
+        kind,
+        meta: meta ?? {},
+        createdBy: createdBy ?? null,
+        createdAt: new Date().toISOString(),
+        sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+        bytes: Buffer.from(bytes),
+      });
+      this.schedulePersist();
+    }
+    return { assetId, url: `memory://${assetId}`, size: bytes.length };
   }
 
   async readFile(assetId) {
@@ -112,6 +150,21 @@ export class MemoryBackend {
   async deleteFile(assetId) {
     this.assets.delete(assetId);
     this.schedulePersist();
+  }
+
+  /** A stored file's details, without its bytes. */
+  async fileInfo(assetId) {
+    const a = this.assets.get(assetId);
+    return a ? describeAsset(assetId, a) : undefined;
+  }
+
+  /** Stored files of one kind, newest first, without their bytes. */
+  async listFiles({ kind, limit = 50, offset = 0 } = {}) {
+    const all = [...this.assets.entries()]
+      .filter(([, a]) => !kind || a.kind === kind)
+      .map(([id, a]) => describeAsset(id, a))
+      .sort((x, y) => (x.createdAt < y.createdAt ? 1 : x.createdAt > y.createdAt ? -1 : 0));
+    return { total: all.length, items: all.slice(offset, offset + limit) };
   }
 
   get name() {
@@ -171,6 +224,22 @@ export class MemoryBackend {
 
   /** Apply mutations atomically. Returns the resulting document per mutation. */
   async mutate(mutations) {
+    const { staged, out } = this.stage(mutations);
+    this.publish(staged);
+    this.schedulePersist();
+    return out.map(clone);
+  }
+
+  /**
+   * Work out what a mutation list does, without changing anything.
+   *
+   * Returns the staged state of every document touched (null for a delete)
+   * and the resulting document per mutation. Throws MutationError - with
+   * nothing changed - if any one mutation cannot apply. Split from publish()
+   * so the Postgres backend can write the staged state to the database first
+   * and only publish it once that has committed.
+   */
+  stage(mutations) {
     const staged = new Map();
     const read = (id) => (staged.has(id) ? staged.get(id) : this.docs.get(id) ?? null);
     const stamp = (doc, prev) => {
@@ -228,14 +297,15 @@ export class MemoryBackend {
           throw new MutationError(`memory store: unsupported mutation "${op}"`, 400);
       }
     }
+    return { staged, out };
+  }
 
-    // Every mutation succeeded: publish the staged state in one step.
+  /** Make a staged state live, in one step. */
+  publish(staged) {
     for (const [id, doc] of staged) {
       if (doc === null) this.docs.delete(id);
       else this.docs.set(id, doc);
     }
-    this.schedulePersist();
-    return out.map(clone);
   }
 
   schedulePersist() {
@@ -254,7 +324,8 @@ export class MemoryBackend {
     const tmp = `${this.file}.tmp`;
     const assets = {};
     for (const [id, a] of this.assets) {
-      assets[id] = { filename: a.filename, contentType: a.contentType, data: a.bytes.toString('base64') };
+      const { bytes, ...rest } = a;
+      assets[id] = { ...rest, data: bytes.toString('base64') };
     }
     fs.writeFileSync(tmp, JSON.stringify({ docs: [...this.docs.values()], assets }));
     fs.renameSync(tmp, this.file);

@@ -50,6 +50,7 @@ const PERSONAL_CHECK_LIMIT = 2;
 export const REASONS = {
   OK: 'ok',
   OK_REPEAT_SAME_SOURCE: 'ok_repeat_same_source',
+  OK_SHARED: 'ok_shared',
   CHECK_LIMIT: 'check_limit',
   EMPTY: 'empty',
   MALFORMED: 'malformed',
@@ -66,6 +67,9 @@ export const REASONS = {
 const MESSAGES = {
   [REASONS.OK]: 'This pack is genuine. It has been verified for the first time.',
   [REASONS.OK_REPEAT_SAME_SOURCE]: 'This pack is genuine. You have checked it before.',
+  // A batch-wide QR: every pack carries the same code, so how often it has
+  // been checked says nothing about this pack and is not mentioned.
+  [REASONS.OK_SHARED]: 'This is a genuine product.',
   [REASONS.EMPTY]: 'Please enter the code printed on the pack.',
   [REASONS.MALFORMED]:
     'That code is not in the expected format. It should look like AMX25-7KQ2M9-K7 (older packs: AMX25-260921-00483-K7).',
@@ -324,6 +328,15 @@ export async function verify(rawCode, ctx = {}) {
   } else if (daysUntil(row.expiry_date) < 0) {
     result = 'flagged';
     reason = REASONS.EXPIRED;
+  } else if (row.shared_code === 1) {
+    /*
+     * One QR printed on every pack of the batch: everyone checking it is
+     * expected, so the duplicate rule - the only thing that can tell a copied
+     * QR from the real one - does not apply. Recall, withdrawal, expiry and
+     * release are still checked above.
+     */
+    result = 'genuine';
+    reason = REASONS.OK_SHARED;
   } else if (verifierId) {
     // Someone who gave their details: their checks are theirs, whatever
     // network or device they come from.
@@ -442,8 +455,9 @@ export async function verify(rawCode, ctx = {}) {
     reason,
     scanId,
     code,
-    // Past the limit this is not a check, so it has no number.
-    scanNumber: limited ? undefined : scanNumber,
+    // Past the limit this is not a check, so it has no number; nor is a count
+    // of checks of a batch-wide QR about this pack.
+    scanNumber: limited || row.shared_code === 1 ? undefined : scanNumber,
     ...(limited ? { message: LIMIT_MESSAGES[result] } : {}),
     isTest,
     product: {
@@ -530,7 +544,7 @@ async function lookup(code) {
     `*[_id == $id && _type == "code"][0]{
        ...,
        "b": *[_type == "batch" && id == ^.batch_id][0]{
-         batch_number, mfg_date, expiry_date, status, is_test, leaflet_id, product_id, recall_reason
+         batch_number, mfg_date, expiry_date, status, is_test, shared_code, leaflet_id, product_id, recall_reason
        },
        "p": *[_type == "product" && id == ^.product_id][0]{
          sku, name, generic_name, strength, dosage_form, pack_size, manufacturer
@@ -547,6 +561,7 @@ async function lookup(code) {
     expiry_date: b.expiry_date,
     batch_status: b.status,
     is_test: b.is_test ?? 0,
+    shared_code: b.shared_code ?? 0,
     leaflet_id: b.leaflet_id ?? null,
     batch_product_id: b.product_id,
     recall_reason: b.recall_reason ?? null,

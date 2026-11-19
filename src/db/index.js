@@ -1,14 +1,19 @@
 /**
  * Data store.
  *
- * Every piece of application data lives in Sanity. Two backends sit behind
- * this one interface, chosen by configuration:
+ * Three backends sit behind this one interface, chosen by configuration:
  *
+ *   Postgres when DATABASE_URL is set - the production database (Coolify).
+ *            Documents and files both live there; see postgres.js
  *   Sanity   when SANITY_PROJECT_ID, SANITY_DATASET and SANITY_API_TOKEN are
- *            all set - the production database
- *   memory   otherwise: an in-memory Content Lake stand-in (memory.js) for
- *            tests, persisted to a JSON file for local development, so
- *            neither needs network access or credentials
+ *            all set and DATABASE_URL is not - the previous database, kept
+ *            until its data is copied over (scripts/sanity-to-postgres.js)
+ *   memory   otherwise: an in-memory document store (memory.js) for tests,
+ *            persisted to a JSON file for local development, so neither
+ *            needs network access or credentials
+ *
+ * All three speak the same two operations - a GROQ query and an atomic list
+ * of mutations - so every service runs identical code against each.
  *
  * Nothing above this layer talks to a backend directly. Services use the
  * table-shaped helpers below - insert, get, findMany, count, update, tx - and
@@ -32,23 +37,35 @@ import { config } from '../config.js';
 import { conflict } from '../lib/errors.js';
 import { MemoryBackend } from './memory.js';
 import { SanityBackend } from './sanity.js';
+import { PostgresBackend } from './postgres.js';
 import { TYPES, ALL_TYPES, spec, now } from './schema.js';
 
 let handle = null;
 
-/** Is the configured target the hosted Sanity dataset? */
-export const usingSanity = () => Boolean(config.sanity.enabled);
+/** Is the configured target the Postgres database? */
+export const usingPostgres = () => Boolean(config.postgres.enabled);
+
+/** Is the configured target the hosted Sanity dataset? Postgres wins when both are set. */
+export const usingSanity = () => Boolean(config.sanity.enabled) && !usingPostgres();
+
+/** Is the store a hosted, shared one (not this process's memory or a local file)? */
+export const usingHosted = () => usingPostgres() || usingSanity();
 
 /**
  * Open (or reuse) the backend.
  *
- * @param {string} [file] override: ':memory:' for tests, or a JSON file path.
- *   An override always selects the memory backend - a test can never reach
- *   the hosted dataset by accident.
+ * @param {string|object} [file] override: ':memory:' for tests, or a JSON file
+ *   path. An override always selects the memory backend - a test can never
+ *   reach the hosted database by accident. A backend instance is used as is
+ *   (the tests' throwaway Postgres).
  */
 export function open(file) {
   if (handle) return handle;
-  if (file === undefined && usingSanity()) {
+  if (file && typeof file === 'object') {
+    handle = file;
+  } else if (file === undefined && usingPostgres()) {
+    handle = new PostgresBackend(config.postgres);
+  } else if (file === undefined && usingSanity()) {
     handle = new SanityBackend(config.sanity);
   } else {
     handle = new MemoryBackend(file ?? config.db.file);
@@ -76,25 +93,50 @@ export async function close() {
 // ---------------------------------------------------------------------------
 // Files
 //
-// Binary content is never kept in a document. Sanity holds it as file assets;
-// the memory backend keeps the bytes in a map of its own (and in its JSON
-// file), so tests and local development need no network. The leaflet PDF is
-// the one user of these.
+// Binary content is never kept in a document. Postgres holds the bytes in its
+// files table; the memory backend keeps them in a map of its own (and in its
+// JSON file), so tests and local development need no network; Sanity holds
+// them as file assets. See services/files.js for what each kind may contain.
 // ---------------------------------------------------------------------------
 
-/** Store bytes as a file asset. Returns { assetId, url, size }. */
-export async function uploadFile(bytes, { filename, contentType = 'application/octet-stream' } = {}) {
-  return backend().uploadFile(bytes, { filename, contentType });
+/**
+ * Store bytes as a file. Returns { assetId, url, size }.
+ *
+ * @param {object} opts
+ * @param {string} opts.filename
+ * @param {string} [opts.contentType]
+ * @param {string} [opts.kind]      leaflet | import | export | qr | avatar | product_image
+ * @param {string} [opts.id]        a chosen id; default is content-addressed
+ * @param {object} [opts.meta]      small JSON details (who, what, row counts)
+ * @param {number} [opts.createdBy] user id
+ */
+export async function uploadFile(bytes, { filename, contentType = 'application/octet-stream', kind, id, meta, createdBy } = {}) {
+  return backend().uploadFile(bytes, { filename, contentType, kind, id, meta, createdBy });
 }
 
-/** The bytes of a stored file asset, as a Buffer, or undefined. */
+/** The bytes of a stored file, as a Buffer, or undefined. */
 export async function readFile(assetId) {
   return backend().readFile(assetId);
 }
 
-/** Delete a file asset. A missing one is not an error. */
+/** Delete a stored file. A missing one is not an error. */
 export async function deleteFile(assetId) {
   return backend().deleteFile(assetId);
+}
+
+/** Can this backend list files and store them under a chosen id? (Not Sanity.) */
+export const filesIndexed = () => typeof backend().listFiles === 'function';
+
+/** A stored file's details, never its bytes; undefined when missing. */
+export async function fileInfo(assetId) {
+  if (!filesIndexed()) return undefined;
+  return backend().fileInfo(assetId);
+}
+
+/** Stored files of one kind, newest first: { total, items }. */
+export async function listFiles({ kind, limit = 50, offset = 0 } = {}) {
+  if (!filesIndexed()) return { total: 0, items: [] };
+  return backend().listFiles({ kind, limit, offset });
 }
 
 /**
@@ -646,10 +688,11 @@ export async function tx(fn) {
  * and one stray command would orphan every printed pack.
  */
 export async function resetAll(types = ALL_TYPES) {
-  if (backend() instanceof SanityBackend && process.env.ALLOW_DESTRUCTIVE_RESET !== '1') {
+  const hosted = backend() instanceof SanityBackend || backend() instanceof PostgresBackend;
+  if (hosted && process.env.ALLOW_DESTRUCTIVE_RESET !== '1') {
     throw new Error(
-      'Refusing to wipe the Sanity dataset. This deletes every product, batch and code. ' +
-        'Set ALLOW_DESTRUCTIVE_RESET=1 only if the dataset is a throwaway one.'
+      `Refusing to wipe ${describe()}. This deletes every product, batch and code. ` +
+        'Set ALLOW_DESTRUCTIVE_RESET=1 only if the database is a throwaway one.'
     );
   }
   const appTypes = types.filter((t) => TYPES[t]);
@@ -687,9 +730,9 @@ export function paginate({ page = 1, pageSize = 25, maxPageSize = 200 } = {}) {
 export { now };
 
 export default {
-  open, backend, describe, close, migrate, usingSanity,
+  open, backend, describe, close, migrate, usingSanity, usingPostgres, usingHosted,
   insert, insertMany, update, updateWhere, removeWhere, nextIds,
   get, getCode, findOne, findMany, count, query, compile, toRow, docIdOf,
-  uploadFile, readFile, deleteFile,
+  uploadFile, readFile, deleteFile, fileInfo, listFiles, filesIndexed,
   tx, resetAll, stats, paginate, now,
 };

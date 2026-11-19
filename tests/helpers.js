@@ -22,19 +22,53 @@ import * as serialization from '../src/services/serialization.js';
  */
 after(async () => {
   await db.close();
+  // The throwaway Postgres, if this file started one (TEST_BACKEND=postgres).
+  if (pgServer) {
+    await pgServer.server.stop();
+    await pgServer.pglite.close();
+    pgServer = null;
+  }
 });
 
 /**
  * A clean store for one test: a brand new in-memory one.
  *
  * Always in memory - db.open(':memory:') selects the memory backend whatever
- * the environment says, so no test can ever write to the Sanity dataset.
+ * the environment says, so no test can ever write to a real database.
+ *
+ * With TEST_BACKEND=postgres, a brand new schema in a throwaway Postgres
+ * instead: PGlite (Postgres compiled to WebAssembly) running in this process,
+ * so the whole suite exercises the Postgres backend with no server to
+ * install - and still never touches DATABASE_URL.
  */
 export async function freshDb() {
   await db.close();
-  db.open(':memory:');
+  if (process.env.TEST_BACKEND === 'postgres') {
+    db.open(await throwawayPostgres());
+  } else {
+    db.open(':memory:');
+  }
   await db.migrate({ silent: true });
   return db;
+}
+
+let pgServer = null;
+let pgSchemas = 0;
+
+/** A PostgresBackend on a fresh schema of an in-process PGlite server. */
+export async function throwawayPostgres() {
+  if (!pgServer) {
+    const { PGlite } = await import('@electric-sql/pglite');
+    const { PGLiteSocketServer } = await import('@electric-sql/pglite-socket');
+    const pglite = await PGlite.create();
+    const server = new PGLiteSocketServer({ db: pglite, port: 0, host: '127.0.0.1', maxConnections: 4 });
+    await server.start();
+    pgServer = { pglite, server, url: `postgres://postgres@127.0.0.1:${server.server.address().port}/postgres` };
+  }
+  const { PostgresBackend } = await import('../src/db/postgres.js');
+  // One connection, no LISTEN: PGlite multiplexes every client over a single
+  // session, so two connections could interleave each other's transactions.
+  return new PostgresBackend({ url: pgServer.url, schema: `t${process.pid}_${++pgSchemas}`, poolMax: 1, listen: false });
 }
 
 /** One leaflet section list, in the shape the store keeps. */
@@ -149,8 +183,8 @@ export async function startServer() {
     patch: (p, body, o) => client.request(p, { ...o, method: 'PATCH', body }),
 
     /** Send a binary body (a PDF chunk), with the session cookies and CSRF token. */
-    async raw(path, { method = 'PUT', body, contentType = 'application/octet-stream' } = {}) {
-      const h = { 'Content-Type': contentType };
+    async raw(path, { method = 'PUT', body, contentType = 'application/octet-stream', headers = {} } = {}) {
+      const h = { ...headers, 'Content-Type': contentType };
       if (cookies.size) h.Cookie = cookieHeader();
       if (csrf) h['X-CSRF-Token'] = csrf;
       const res = await fetch(`${base}${path}`, { method, headers: h, body });
@@ -158,6 +192,14 @@ export async function startServer() {
       const type = res.headers.get('content-type') ?? '';
       const payload = type.includes('application/json') ? await res.json() : await res.text();
       return { status: res.status, body: payload, headers: res.headers };
+    },
+
+    /** GET a binary response (a stored file), with the session cookies: { status, bytes, headers }. */
+    async bytes(path) {
+      const h = {};
+      if (cookies.size) h.Cookie = cookieHeader();
+      const res = await fetch(`${base}${path}`, { headers: h });
+      return { status: res.status, bytes: Buffer.from(await res.arrayBuffer()), headers: res.headers };
     },
 
     /**

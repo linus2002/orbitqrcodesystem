@@ -48,17 +48,32 @@ PUBLIC_BASE_URL=http://localhost:3000
 SESSION_SECRET=${s()}
 CODE_SECRET=${s()}
 
-# --- Database: Sanity ------------------------------------------------------
-# All data lives in a Sanity dataset. These are read by the server only and
-# are never sent to the browser. Keep the dataset PRIVATE.
-#   SANITY_API_TOKEN: sanity.io/manage -> your project -> API -> Tokens ->
-#   Add API token, with Editor permissions. Treat it like a password.
-# Leave any of them empty to run on the local file below instead.
+# --- Database: PostgreSQL (Coolify) ---------------------------------------
+# The production database: every record AND every stored file (leaflet PDFs,
+# Excel imports/exports, QR images, avatars, product pictures).
+# Selected whenever DATABASE_URL is set - ahead of Sanity and the local file.
+#
+# On Coolify use the INTERNAL url of the database resource (Coolify > Bishnoi
+# One > production > the database > "Postgres URL (internal)"), with the
+# qrshield role and database (DEPLOY.md, "Coolify"). The database is then
+# reachable only from inside the server, and DATABASE_SSL stays disable.
+#
+# Locally it is unreachable unless you open a tunnel first, e.g.
+#   ssh -N -L 55432:<postgres-container-ip>:5432 root@<bishnoi-one-server>
+# and point DATABASE_URL at localhost:55432. While it is set, every local
+# command - npm run dev included - talks to that database, not ./data.
+#DATABASE_URL=postgres://qrshield:<password>@<internal-host>:5432/qrshield
+DATABASE_SCHEMA=qrshield
+DATABASE_SSL=disable
+
+# --- Database: Sanity (retired) ---------------------------------------------
+# The previous database. Needed only to copy it into Postgres once
+# (npm run db:sanity-to-postgres); ignored while DATABASE_URL is set.
 SANITY_PROJECT_ID=
 SANITY_DATASET=production
 SANITY_API_TOKEN=
 
-# Local fallback store, used when Sanity is not configured.
+# Local store for development, used when neither database is configured.
 DB_FILE=./data/qrshield.json
 
 # --- Sessions --------------------------------------------------------------

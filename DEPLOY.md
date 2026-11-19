@@ -1,21 +1,148 @@
 # Deploying Orbit QR Counterfeit System
 
-The data lives in a **Sanity** dataset, whichever host serves the app. That
-makes every host the same shape:
+**Production runs on [Coolify](#coolify-bishnoi-one---production), on the
+Bishnoi One server, with its data in PostgreSQL** - the
+`ea-bishnoi-one-database` resource. Every record and every stored file
+lives there.
 
-| | Vercel | Railway / Render / Fly |
+| | Coolify (production) | Vercel / Railway / Render / Fly (previous) |
 |---|---|---|
-| Data | Sanity | Sanity |
-| Instances | many, serverless | as many as you like |
-| Rate limiting | shared, in Sanity | shared, in Sanity |
-| Config | `SANITY_*` variables | `SANITY_*` variables |
+| Data | PostgreSQL (`DATABASE_URL`) | Sanity (`SANITY_*`) |
+| Files | PostgreSQL `files` table | Sanity assets (leaflet PDFs only) |
+| Instances | **one** container | many |
+| Config | `DATABASE_URL` + secrets | `SANITY_*` + secrets |
 
-**[Vercel](#vercel) is the quickest to stand up** and needs no container. A
-`Dockerfile` is included for the three container hosts.
+The store is chosen by configuration: `DATABASE_URL` set means Postgres;
+otherwise the three `SANITY_*` variables mean Sanity; with neither, the app
+keeps its data in a local file (`DB_FILE`), which is for development only.
 
-Without the Sanity variables the app falls back to a local file
-(`DB_FILE`). That is for development, or a single container with a volume -
-never Vercel, whose disk is discarded after each request.
+---
+
+## Coolify (Bishnoi One) - production
+
+### What is stored where
+
+Two tables, in their own schema (`qrshield` by default, `DATABASE_SCHEMA`),
+created automatically on every start by `scripts/migrate.js`:
+
+| Table | Holds |
+|---|---|
+| `qrshield.documents` | every record - products, batches, codes, scans, users, alerts, settings... - one JSONB row each |
+| `qrshield.files` | every file, bytes in a `bytea` column, tagged with its `kind` |
+
+| File `kind` | What | Accepted | Limit |
+|---|---|---|---|
+| `leaflet` | leaflet PDFs, stored in 3 MB pieces | PDF | 25 MB per file |
+| `import` | the original of every Excel/CSV import | XLSX, CSV | 8 MB |
+| `export` | a copy of every Excel export, with who took it | XLSX (ours) | - |
+| `qr` | each rendered QR, kept so it is drawn once | SVG, PNG (ours) | - |
+| `avatar` | staff pictures | JPEG, PNG, WebP | 200 KB |
+| `product_image` | product pictures | JPEG, PNG, WebP | 2 MB |
+
+A file's type is checked from its bytes, never from its name or the type the
+browser claims; uploaded SVG is always refused. Stored imports and exports are
+listed, with download links, under **Audit log > Stored spreadsheets**.
+
+The app keeps a copy of every document in memory and answers reads from it;
+Postgres is the durable store, and every write commits there before the
+copy changes (see [src/db/postgres.js](src/db/postgres.js)). So run **one**
+replica. A rolling deploy that briefly overlaps two is safe; scaling out is
+not what this is built for.
+
+### 1. A database and role of its own
+
+`ea-bishnoi-one-database` also serves the `ea-bishnoi-one` app. Give QR Shield
+its own role and database on that server, so neither app can touch the
+other's data. In Coolify open the database > **Terminal**, run `psql -U postgres`
+(or whatever the database's "Postgres User" is), then:
+
+```sql
+CREATE ROLE qrshield LOGIN PASSWORD '<a long random password>';
+CREATE DATABASE qrshield OWNER qrshield;
+```
+
+Generate the password with
+`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+(hex, so it needs no URL-escaping).
+
+### 2. The connection string
+
+From the database's page copy **Postgres URL (internal)**. Keep its host and
+port, but use the new role and database:
+
+```
+DATABASE_URL=postgres://qrshield:<password>@<internal-host>:5432/qrshield
+DATABASE_SSL=disable
+```
+
+The internal url only works from containers on the same server, which is the
+point: leave **Make it publicly available** OFF. Without a public port there
+is nothing on the internet to attack. `DATABASE_SSL=disable` is correct for
+that private network; set `require` only if you ever connect across the
+internet.
+
+### 3. The application
+
+In Bishnoi One > production: **New Resource > Public/Private Repository**, this
+repository, branch `main`, **Build Pack: Dockerfile**. Then:
+
+- **Domains**: `https://verify.getmeds.ph` (and move that DNS record from
+  Vercel to the Bishnoi One server).
+- **Ports Exposes**: `3000`.
+- **Environment Variables**: open `.env.coolify` (gitignored, on the machine
+  that prepared the cut-over), switch Coolify's editor to **Developer view**
+  and paste it in. Fill in `DATABASE_URL` from step 2. Keep `CODE_SECRET`
+  exactly as it is: it signs every code already printed.
+- **Healthcheck**: path `/api/health`. The Dockerfile has one too.
+- **Replicas**: 1.
+
+No volume is needed: nothing is kept on the container's disk.
+
+### 4. Move the data from Sanity - once
+
+With the app NOT yet serving traffic (so Sanity takes no more writes), open
+the app's **Terminal** in Coolify, which has both the Sanity variables and
+`DATABASE_URL`, and run:
+
+```bash
+npm run db:sanity-to-postgres -- --dry-run   # counts only
+npm run db:sanity-to-postgres                # copies; prints Sanity vs Postgres counts
+```
+
+It copies every document with the same ids, every leaflet PDF byte for byte
+(checked against Sanity's SHA-1), and turns inline avatars into stored files.
+It refuses a database that already has documents, so it can never roll
+newer Postgres data back to Sanity's; `--overwrite` exists only for a retry
+after a failed first run.
+
+Then restart the app, sign in, open a product with a leaflet PDF, and verify a
+real pack. When all is well: delete the three `SANITY_*` variables from
+Coolify and revoke that token at sanity.io/manage.
+
+### 5. Backups
+
+The code registry is the system of record: losing it orphans every pack in
+circulation. In Coolify, open the database > **Backups**, add a daily
+schedule, and send it to S3-compatible storage off this server - a backup
+on the same disk dies with the disk. A dump covers both tables, files
+included. To take one by hand:
+
+```bash
+pg_dump --format=custom --dbname "$DATABASE_URL" --file qrshield-$(date +%F).dump
+```
+
+It contains password hashes and every stored file; keep it as carefully as the
+database password.
+
+### Running the tests against Postgres
+
+```bash
+npm run test:postgres
+```
+
+runs the whole suite on Postgres - PGlite, real Postgres compiled to
+WebAssembly, started inside the test process, so no server is needed and
+`DATABASE_URL` is never touched.
 
 ---
 
@@ -192,8 +319,8 @@ Then sign in at `/login` and confirm the dashboard loads.
 
 ## Backups
 
-The code registry is the system of record; losing it orphans every pack in
-circulation. Export the dataset on a schedule:
+On Coolify, see [Backups](#5-backups) above. While data is still on Sanity,
+export the dataset on a schedule:
 
 ```bash
 cd studio && npx sanity dataset export production backup-$(date +%F).tar.gz

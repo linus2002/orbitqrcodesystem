@@ -6,7 +6,8 @@
  */
 import { useState } from 'react';
 
-import { useApi } from '../../lib/hooks.jsx';
+import { download } from '../../lib/api.js';
+import { useApi, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { TableCard, Table, Pager, Toolbar, Spacer, Select, ErrorNote } from '../components/ui.jsx';
@@ -95,6 +96,85 @@ export default function Audit() {
                 r.detail ? (
                   <span className="text-sm text-muted">{summarise(r.detail)}</span>
                 ) : null,
+            },
+          ]}
+        />
+      </TableCard>
+
+      <StoredSpreadsheets />
+    </>
+  );
+}
+
+const KIND_LABELS = { import: 'Imports', export: 'Exports' };
+
+/**
+ * A copy of every spreadsheet imported or exported, kept in the database with
+ * who did it - so "what exactly was in that file?" has an answer later.
+ */
+function StoredSpreadsheets() {
+  const [kind, setKind] = useState('export');
+  const [page, setPage] = useState(1);
+  const toast = useToast();
+  const { data, error, loading } = useApi('/api/admin/files', { query: { kind, page, pageSize: 20 } }, [kind, page]);
+
+  async function save(f) {
+    try {
+      await download(f.downloadUrl, { filename: f.filename });
+    } catch (err) {
+      toast(err.message ?? 'Could not download that file.', 'error');
+    }
+  }
+
+  return (
+    <>
+      <Toolbar>
+        {Object.entries(KIND_LABELS).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            className={`btn btn-sm${kind === value ? ' btn-primary' : ''}`}
+            onClick={() => {
+              setKind(value);
+              setPage(1);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+        <Spacer />
+        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} files</span>
+      </Toolbar>
+      <ErrorNote error={error} />
+      <TableCard
+        title="Stored spreadsheets"
+        footer={
+          data && <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
+        }
+      >
+        <Table
+          loading={loading}
+          rows={data?.items}
+          empty={kind === 'import' ? 'No imports kept yet.' : 'No exports kept yet.'}
+          columns={[
+            { label: 'When', render: (f) => fmtDate(f.createdAt, { withTime: true }) },
+            { label: 'Who', render: (f) => f.createdByName ?? '-' },
+            { label: 'File', className: 'td-wrap', render: (f) => f.filename },
+            {
+              label: kind === 'import' ? 'Result' : 'Rows',
+              render: (f) =>
+                kind === 'import'
+                  ? `${fmtNumber(f.meta?.created ?? 0)} new, ${fmtNumber(f.meta?.updated ?? 0)} updated`
+                  : fmtNumber(f.meta?.rows ?? 0),
+            },
+            { label: 'Size', className: 'num', render: (f) => `${Math.max(1, Math.round(f.size / 1024))} KB` },
+            {
+              label: '',
+              render: (f) => (
+                <button type="button" className="btn-pill" onClick={() => save(f)}>
+                  Download
+                </button>
+              ),
             },
           ]}
         />

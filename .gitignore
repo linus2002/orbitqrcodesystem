@@ -4,6 +4,9 @@ data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 .env
+# Per-environment variants (.env.coolify holds the production values to paste
+# into Coolify). Every one holds secrets.
+.env.*
 *.log
 .DS_Store
 Thumbs.db

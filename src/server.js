@@ -37,8 +37,10 @@ export function createApp() {
   // Behind a load balancer this must be set so req.ip is the real client and
   // `secure` cookies are recognised. '1' = trust exactly one proxy hop; set it
   // to the real hop count rather than `true`, which would let a client spoof
-  // X-Forwarded-For and defeat rate limiting.
-  app.set('trust proxy', config.isProd ? 1 : 'loopback');
+  // X-Forwarded-For and defeat rate limiting. On Coolify behind a Cloudflare
+  // Tunnel there are two (cloudflared, then Coolify's proxy): TRUST_PROXY_HOPS=2.
+  // Too few and every visitor shares the tunnel's address - and one rate limit.
+  app.set('trust proxy', config.isProd ? config.trustProxyHops : 'loopback');
   app.disable('x-powered-by');
   app.set('etag', false);
 
@@ -95,6 +97,16 @@ export function createApp() {
   app.use(
     '/api/admin/leaflet-files',
     express.raw({ type: ['application/pdf', 'application/octet-stream'], limit: '3mb' })
+  );
+
+  /*
+   * A product picture arrives as the raw image on its one path. Scoped by
+   * content type as well, so the product JSON routes beside it are untouched.
+   * The route checks the bytes themselves (services/files.js).
+   */
+  app.use(
+    /^\/api\/admin\/products\/[^/]+\/image$/,
+    express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '2mb' })
   );
 
   app.use(express.json({ limit: '64kb' }));
@@ -169,6 +181,12 @@ export async function start({ port = config.port } = {}) {
       // The backend's name only - never the project id or token.
       store: db.describe(),
     });
+    if (config.isProd && !db.usingHosted()) {
+      logger.error(
+        'NODE_ENV=production but no database is configured: data is going to a local file ' +
+          'inside the container and is lost on the next deploy. Set DATABASE_URL (DEPLOY.md, "Coolify").'
+      );
+    }
     // Said once at boot as well as at each export, so it is visible to whoever
     // started the server and not only to whoever clicks a download.
     if (config.publicBaseUrlIsLocal) {

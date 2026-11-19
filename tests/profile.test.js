@@ -63,14 +63,48 @@ test('leaving the name out still lets the picture be changed on its own', async 
   assert.equal((await db.findOne('user')).full_name, before);
 });
 
-test('an avatar is stored and can be cleared again', async () => {
+test('an avatar is stored as a file, served to staff, and can be cleared again', async () => {
   const set = await client.patch('/api/auth/profile', { avatar: TINY_PNG });
   assert.equal(set.status, 200);
-  assert.equal(set.body.user.avatar, TINY_PNG);
+  // A URL to the stored picture, not the data URL itself.
+  assert.match(set.body.user.avatar, /^\/api\/auth\/avatar\/avatar-\d+-/);
+  const stored = (await db.findOne('user')).avatar;
+  assert.match(stored, /^file:avatar-/);
+
+  const served = await client.bytes(set.body.user.avatar);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'image/png');
+  assert.deepEqual(served.bytes, Buffer.from(TINY_PNG.split(',')[1], 'base64'));
+  const info = await db.fileInfo(stored.slice('file:'.length));
+  assert.equal(info.kind, 'avatar');
 
   const cleared = await client.patch('/api/auth/profile', { avatar: null });
   assert.equal(cleared.body.user.avatar, null);
   assert.equal((await db.findOne('user')).avatar, null);
+  // The replaced picture is gone from the store too.
+  assert.equal(await db.fileInfo(info.id), undefined);
+});
+
+test('an avatar is only for signed-in staff', async () => {
+  const set = await client.patch('/api/auth/profile', { avatar: TINY_PNG });
+  const url = set.body.user.avatar;
+  client.clearCookies();
+  assert.equal((await client.bytes(url)).status, 401);
+});
+
+test('an avatar whose bytes are not the image it claims to be is refused', async () => {
+  // Labelled PNG; actually an HTML page.
+  const fake = `data:image/png;base64,${Buffer.from('<html><script>alert(1)</script></html>').toString('base64')}`;
+  const res = await client.patch('/api/auth/profile', { avatar: fake });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error.message, /JPEG, PNG or WebP/);
+  assert.equal((await db.findOne('user')).avatar, null);
+});
+
+test('an older account whose avatar is still a data URL keeps showing it', async () => {
+  await db.update('user', await db.findOne('user'), { avatar: TINY_PNG });
+  const me = await client.get('/api/auth/me');
+  assert.equal(me.body.user.avatar, TINY_PNG);
 });
 
 test('an SVG avatar is refused', async () => {

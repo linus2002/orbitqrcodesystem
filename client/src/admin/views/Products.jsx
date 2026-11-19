@@ -122,6 +122,8 @@ async function openProduct(id, drawer, reload, canWrite) {
           ]}
         />
 
+        <ProductImage product={p} canWrite={canWrite} reload={reload} />
+
         <div>
           <h3 className="mb-8">Leaflets</h3>
           {p.leaflets.length ? (
@@ -174,6 +176,93 @@ async function openProduct(id, drawer, reload, canWrite) {
       </>
     ),
   });
+}
+
+/**
+ * The product's picture: shown, and for someone who may edit products,
+ * replaced or removed. JPEG, PNG or WebP up to 2 MB; the server checks the
+ * bytes, not just the type the browser reports.
+ */
+function ProductImage({ product, canWrite, reload }) {
+  const [url, setUrl] = useState(product.image_url ?? null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const toast = useToast();
+
+  async function choose(file) {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setError(new Error('That image is too large. Choose one under 2 MB.'));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await upload(`/api/admin/products/${product.id}/image`, file, { method: 'PUT' });
+      setUrl(updated.image_url);
+      toast('Picture saved.', 'success');
+      reload();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/admin/products/${product.id}/image`, { method: 'DELETE' });
+      setUrl(null);
+      toast('Picture removed.', 'success');
+      reload();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!url && !canWrite) return null;
+
+  return (
+    <div>
+      <h3 className="mb-8">Picture</h3>
+      {url ? (
+        <img
+          src={url}
+          alt={product.name}
+          style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, objectFit: 'contain', display: 'block' }}
+        />
+      ) : (
+        <p className="text-muted text-sm">No picture yet.</p>
+      )}
+      <ErrorNote error={error} />
+      {canWrite && (
+        <div className="row row-wrap mt-8">
+          <label className={`btn btn-sm${busy ? ' disabled' : ''}`}>
+            {busy ? 'Saving...' : url ? 'Replace picture' : 'Add picture'}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              hidden
+              disabled={busy}
+              onChange={(e) => {
+                choose(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          {url && (
+            <button type="button" className="btn btn-sm" disabled={busy} onClick={remove}>
+              Remove picture
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**

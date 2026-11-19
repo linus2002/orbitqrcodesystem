@@ -458,4 +458,24 @@ router.get('/product/:sku/leaflet.pdf', async (req, res) => {
   res.end();
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/product/:sku/image - the product's picture
+// ---------------------------------------------------------------------------
+/**
+ * Public, like the rest of a product's details. The picture's URL carries its
+ * file id (?v=), so a new picture is a new URL and this one can be cached.
+ */
+router.get('/product/:sku/image', async (req, res) => {
+  const product = await db.findOne('product', { sku: String(req.params.sku).toUpperCase() }, { fields: ['image_file_id'] });
+  const info = product?.image_file_id ? await db.fileInfo(product.image_file_id) : undefined;
+  if (!info || info.kind !== 'product_image') throw notFound('This product has no picture.');
+  const bytes = await db.readFile(info.id);
+  if (!bytes) throw notFound('This product has no picture.');
+
+  res.setHeader('Content-Type', info.contentType);
+  res.setHeader('Content-Length', String(bytes.length));
+  res.setHeader('Cache-Control', req.query.v === info.id ? 'public, max-age=31536000, immutable' : 'public, max-age=300');
+  res.end(bytes);
+});
+
 export default router;

@@ -157,6 +157,9 @@ export async function upload(path, file, { query, method = 'POST' } = {}) {
       Accept: 'application/json',
       'Content-Type': file.type || 'application/octet-stream',
       'X-CSRF-Token': csrfToken() ?? '',
+      // The original name, so the server can keep the file under it.
+      // Encoded: a header must be ASCII and a filename need not be.
+      ...(file.name ? { 'X-File-Name': encodeURIComponent(file.name) } : {}),
     },
     credentials: 'same-origin',
     body: file,

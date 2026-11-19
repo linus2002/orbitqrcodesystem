@@ -4,11 +4,12 @@
  *
  *   npm run db:migrate
  *
- * A Sanity dataset has no schema to apply - the document types are enforced
- * by the application (src/db/schema.js) on every write - so there is nothing
- * to migrate in the SQL sense. What this still does is the part a deploy
- * relied on: prove the store is reachable with the configured credentials
- * before anything is served from it, and print a document count per type.
+ * Against PostgreSQL (DATABASE_URL) this creates the schema and its two
+ * tables - documents and files - if they are missing; it is idempotent and
+ * runs before every `npm start`. The document types themselves are enforced
+ * by the application (src/db/schema.js) on every write. It then proves the
+ * store is reachable and prints a document count per type, and the stored
+ * files per kind.
  *
  * Against Sanity it also checks that the dataset is PRIVATE, by querying it
  * with no token at all. A public dataset would let anyone who learns the
@@ -29,11 +30,12 @@
 const hostedOnly = process.argv.includes('--hosted-only');
 
 if (hostedOnly) {
-  const hosted = ['SANITY_PROJECT_ID', 'SANITY_DATASET', 'SANITY_API_TOKEN'].every(
+  const sanity = ['SANITY_PROJECT_ID', 'SANITY_DATASET', 'SANITY_API_TOKEN'].every(
     (key) => (process.env[key] ?? '') !== ''
   );
+  const hosted = sanity || (process.env.DATABASE_URL ?? '') !== '';
   if (!hosted) {
-    console.log('[db] Sanity is not configured (SANITY_PROJECT_ID / SANITY_DATASET / SANITY_API_TOKEN); skipping check');
+    console.log('[db] no hosted database is configured (DATABASE_URL, or the SANITY_* variables); skipping check');
     process.exit(0);
   }
 }
@@ -75,5 +77,13 @@ const counts = await db.stats();
 console.log(`\nStore    : ${db.describe()}`);
 for (const [type, n] of Object.entries(counts)) {
   console.log(`  ${type.padEnd(20)} ${String(n).padStart(8)} documents`);
+}
+if (typeof db.backend().fileStats === 'function') {
+  const files = await db.backend().fileStats();
+  console.log('\nFiles');
+  if (!files.length) console.log('  (none yet)');
+  for (const f of files) {
+    console.log(`  ${f.kind.padEnd(20)} ${String(f.files).padStart(8)} files  ${(f.bytes / 1048576).toFixed(1).padStart(8)} MB`);
+  }
 }
 await db.close();
