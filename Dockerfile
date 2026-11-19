@@ -13,7 +13,10 @@ WORKDIR /app
 
 # Dependencies first, so a source-only change does not reinstall them.
 COPY package.json package-lock.json ./
-RUN npm ci
+# --include=dev: the build needs Vite, a devDependency. Hosts like Coolify pass
+# NODE_ENV=production into the build, which makes a plain `npm ci` skip it
+# ("vite: not found"). The runtime stage below still installs no dev packages.
+RUN npm ci --include=dev
 
 COPY . .
 RUN npm run build
