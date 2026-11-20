@@ -25,6 +25,20 @@ import BrandLoader from '../components/BrandLoader.jsx';
 import Scanner from './Scanner.jsx';
 import ResultCard from './ResultCard.jsx';
 import DetailsForm from './DetailsForm.jsx';
+import CheckSheet from './CheckSheet.jsx';
+import Steps from './Steps.jsx';
+
+// The shortest time the scanner's "QR code read" check stays on screen.
+const SCAN_CHECK_MS = 700;
+// The shortest time the "Checking your pack..." sheet stays up: a fast answer
+// still reads as a check that happened, not a flicker.
+const MIN_CHECKING_MS = 900;
+
+/** A buzz with the answer on phones that can: three for "do not use", one otherwise. */
+function buzz(result) {
+  if (!navigator.userActivation?.hasBeenActive) return; // browsers block it otherwise
+  navigator.vibrate?.(result.result === 'flagged' ? [80, 60, 80, 60, 80] : 40);
+}
 
 export default function PortalPage() {
   const { code: deepLinkCode } = useParams();
@@ -65,48 +79,88 @@ export default function PortalPage() {
   const resultRef = useRef(null);
   const inputRef = useRef(null);
 
-  /** Run a verification and render the outcome. */
-  const runVerify = useCallback(async (raw, signature = null) => {
+  // The check sheet (see CheckSheet): null, checking, an answer, or an error.
+  const [sheet, setSheet] = useState(null);
+
+  /**
+   * Run a verification and show the outcome in the sheet; the full result
+   * card renders on the page behind it.
+   *
+   * @param {object} [opts]
+   * @param {boolean} [opts.fromScan] the scanner is on screen showing its own
+   *   "QR code read, checking" state, so the sheet skips "checking" and comes
+   *   up with the answer - after `beforeAnswer` has closed the scanner.
+   * @param {() => void} [opts.beforeAnswer]
+   */
+  const runVerify = useCallback(async (raw, signature = null, opts = {}) => {
     if (!raw?.trim()) {
       setFieldError('Please enter the code printed on the pack.');
       inputRef.current?.focus();
       return;
     }
 
+    const started = Date.now();
+    const retry = { code: raw.trim(), signature };
     setBusy(true);
     setNotice(null);
     setFieldError(null);
+    // The keyboard goes down: the sheet is what to look at now.
+    inputRef.current?.blur();
+    if (!opts.fromScan) setSheet({ phase: 'checking' });
 
+    let next = null;
+    let payload = null;
     try {
-      const payload = await api('/api/verify', {
-        method: 'POST',
-        body: { code: raw.trim(), signature },
-      });
-      setResult(payload);
+      payload = await api('/api/verify', { method: 'POST', body: { code: raw.trim(), signature } });
+      next = { phase: 'result', result: payload };
     } catch (err) {
       if (err instanceof ApiError && err.code === 'details_required') {
         // The server asks first. Keep the check; it runs once the form is done.
         setPending({ code: raw.trim(), signature });
         setPortal((p) => ({ ...(p ?? {}), detailsRequired: true, checker: null }));
       } else if (err instanceof ApiError && err.status === 429) {
-        setNotice({
-          kind: 'warn',
-          text: 'Too many checks from this device in a short time. Please wait a minute and try again.',
-        });
+        next = {
+          phase: 'error',
+          title: 'Please wait a minute',
+          text: 'There were many checks from this phone in a short time. Wait a minute, then try again.',
+        };
       } else if (err instanceof ApiError && err.status === 0) {
-        setNotice({
-          kind: 'warn',
-          text: 'You appear to be offline. You can still check this pack by texting the code - see "No internet?" below.',
-        });
+        next = {
+          phase: 'error',
+          title: 'No connection',
+          text: 'Your phone could not reach us. Check your mobile data or Wi-Fi, then try again.',
+          retry,
+        };
+      } else if (err instanceof ApiError && err.status >= 500) {
+        // Our fault, never the pack's: say so plainly - a bare "502" reads
+        // like a verdict to someone holding a medicine they are unsure of.
+        next = {
+          phase: 'error',
+          title: 'We could not check your pack just now',
+          text:
+            'Our checking service is not answering. This is a problem on our side, not with ' +
+            'your pack. Please try again in a minute.',
+          retry,
+        };
       } else {
-        setNotice({
-          kind: 'error',
-          text: err.message || 'Could not check that code. Please try again.',
-        });
+        next = {
+          phase: 'error',
+          title: 'We could not check that code',
+          text: err.message || 'Please try again.',
+          retry,
+        };
       }
-    } finally {
-      setBusy(false);
     }
+
+    // Pace it: "checking" stays long enough to be read rather than flash,
+    // and after a scan the scanner's check gets its moment first.
+    const shownFor = opts.fromScan ? SCAN_CHECK_MS : MIN_CHECKING_MS;
+    await new Promise((r) => setTimeout(r, Math.max(0, started + shownFor - Date.now())));
+    opts.beforeAnswer?.();
+    setBusy(false);
+    if (payload) setResult(payload);
+    setSheet(next);
+    if (next?.phase === 'result') buzz(next.result);
   }, []);
 
   // Deep link: /v/CODE?s=SIGNATURE - what a printed QR actually points at.
@@ -140,21 +194,20 @@ export default function PortalPage() {
     setPortal((p) => ({ ...p, detailsRequired: true, checker: null }));
   };
 
-  // Bring the answer into view once it renders.
-  useEffect(() => {
-    if (result) resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [result]);
-
-  /** A QR decoded: stop the camera and verify what it carried. */
+  /**
+   * A QR decoded: verify what it carried. The scanner stays up meanwhile,
+   * showing its "QR code read" check, and closes as the answer comes up -
+   * but not before the check has been on screen long enough to be seen.
+   */
   const handleScanned = useCallback(
-    (text) => {
-      setScanning(false);
-
+    async (text) => {
       const scanned = readScannedQr(text);
 
       // The carton's leaflet QR, not the pack's own: say so, and offer the
       // leaflet, rather than check it as a code and call it malformed.
       if (scanned.kind === 'leaflet') {
+        await new Promise((r) => setTimeout(r, SCAN_CHECK_MS));
+        setScanning(false);
         setResult(null);
         setNotice({
           kind: 'info',
@@ -168,17 +221,38 @@ export default function PortalPage() {
       }
 
       setCode(scanned.code);
-      runVerify(scanned.code, scanned.signature);
+      await runVerify(scanned.code, scanned.signature, {
+        fromScan: true,
+        beforeAnswer: () => setScanning(false),
+      });
     },
     [runVerify]
   );
 
   const reset = () => {
+    setSheet(null);
     setResult(null);
     setCode('');
     setNotice(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     inputRef.current?.focus();
+  };
+
+  /** The sheet's main button on an answer: close it and land on the details. */
+  const sheetDone = () => {
+    const wasInvalid = sheet?.result?.result === 'invalid';
+    setSheet(null);
+    if (wasInvalid) {
+      // "Type the code again": back at the field, its text selected to retype.
+      inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      inputRef.current?.focus();
+      inputRef.current?.select();
+      return;
+    }
+    // After the sheet's scroll lock lets go.
+    requestAnimationFrame(() =>
+      resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    );
   };
 
   return (
@@ -205,11 +279,9 @@ export default function PortalPage() {
 
           <section className="hero">
             <h1>Is your medicine genuine?</h1>
-            <p>
-              Scan the QR code on the pack, or type the code from under the scratch panel. It takes
-              a few seconds. We ask who you are once, so we can reach you if a pack turns out to be
-              unsafe.
-            </p>
+            {/* One sentence: the task, not an explanation of it. Why we ask
+                for details is said where they are asked for. */}
+            <p>Scan the QR code on the pack, or type the code from under the scratch panel.</p>
             <div className="trust-row">
               <span>
                 <Icon name="check" /> No app needed
@@ -223,32 +295,10 @@ export default function PortalPage() {
             </div>
           </section>
 
-          {/* Staff-set notice, e.g. a recall. Plain text only - rendered as a
-              text node, never as markup. */}
-          {portal?.banner && (
-            <div className="alert alert-info mb-16" role="status">
-              <Icon name="alert" />
-              <span>{portal.banner}</span>
-            </div>
-          )}
-
-          {notice && (
-            <div className={`alert alert-${notice.kind} mb-16`} role="status">
-              <Icon name={notice.kind === 'error' ? 'alert' : 'help'} />
-              <span>
-                {notice.text}
-                {notice.link && (
-                  <>
-                    {' '}
-                    <Link to={notice.link.to}>{notice.link.label}</Link>.
-                  </>
-                )}
-              </span>
-            </div>
-          )}
-
           <div className="portal-layout">
             <div className="portal-primary">
+              {portal?.detailsRequired && <Steps current={needDetails ? 0 : result ? 2 : 1} />}
+
               {!portal && (
                 <section className="card check-card" aria-busy="true">
                   <BrandLoader message="One moment..." />
@@ -281,6 +331,42 @@ export default function PortalPage() {
                   Check a pack
                 </h2>
 
+                {/* Staff-set notice, e.g. a recall. Inside the card, set like
+                    the card's own content: a coloured box at the top of a page
+                    is the first thing people learn to skip (banner blindness).
+                    Plain text only - a text node, never markup. */}
+                {portal.banner && (
+                  <div className="check-banner" role="note">
+                    <Icon name="alert" />
+                    <p>
+                      <strong>Notice from Getmeds</strong>
+                      {portal.banner}
+                    </p>
+                  </div>
+                )}
+
+                {/* About the last try - the camera would not open, or that
+                    was the leaflet's QR - inside the card, right above the
+                    buttons just pressed. (A check's own answer, or its
+                    failure, is the sheet.) */}
+                {notice && !scanning && (
+                  <div className={`alert alert-${notice.kind} check-notice`} role="status">
+                    <Icon name={notice.kind === 'info' ? 'help' : 'alert'} />
+                    <div className="check-notice-body">
+                      {notice.title && <strong>{notice.title}</strong>}
+                      <span>
+                        {notice.text}
+                        {notice.link && (
+                          <>
+                            {' '}
+                            <Link to={notice.link.to}>{notice.link.label}</Link>.
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {scanning ? (
                   <Scanner
                     onScan={handleScanned}
@@ -297,6 +383,7 @@ export default function PortalPage() {
                       type="button"
                       onClick={() => {
                         setNotice(null);
+                        setResult(null);
                         setScanning(true);
                       }}
                     >
@@ -329,6 +416,7 @@ export default function PortalPage() {
                           placeholder="AMX25-7KQ2M9-K7"
                           autoComplete="off"
                           autoCapitalize="characters"
+                          enterKeyHint="go"
                           spellCheck="false"
                           maxLength={40}
                           aria-describedby="codeHint"
@@ -401,6 +489,14 @@ export default function PortalPage() {
           </div>
         </div>
       </main>
+
+      <CheckSheet
+        sheet={sheet}
+        onDone={sheetDone}
+        onClose={() => (sheet?.phase === 'result' ? sheetDone() : setSheet(null))}
+        onRetry={() => runVerify(sheet.retry.code, sheet.retry.signature)}
+        onCheckAnother={reset}
+      />
 
       <footer className="portal-footer">
         <div className="wrap portal-wrap">

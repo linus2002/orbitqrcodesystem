@@ -720,15 +720,29 @@ table.data .badge {
   content: "";
   position: fixed; inset: 0; z-index: -1;
   background-color: #ffffff;
-  /* Darkened on the left, where the white hero text sits, fading out before
-     the subject on the right. */
+  /* Darkened evenly: the content is one centred column that crosses the
+     whole photo, so all of it sits back (figure-ground) and the white text
+     holds its contrast wherever it lands. */
   background-image:
-    linear-gradient(90deg, rgba(8, 30, 52, 0.66) 0%, rgba(8, 30, 52, 0.5) 38%, rgba(8, 30, 52, 0) 62%),
+    linear-gradient(rgba(8, 30, 52, 0.62), rgba(8, 30, 52, 0.62)),
     url("/img/contactushero.png");
   background-size: cover;
   background-position: right center;
   background-repeat: no-repeat;
   pointer-events: none;
+}
+/* A wide screen shows all of the photo, its "Contact Us" sign included,
+   right behind the centred heading: blurred and dimmed further, it becomes
+   a backdrop, not a second thing to read. (Inset past the edges so the blur
+   does not fade them.) */
+@media (min-width: 901px) {
+  .page-white::before {
+    inset: -24px;
+    filter: blur(7px);
+    background-image:
+      linear-gradient(rgba(8, 30, 52, 0.68), rgba(8, 30, 52, 0.68)),
+      url("/img/contactushero.png");
+  }
 }
 /* A phone shows a narrow slice of the photo: keep it to the open side, so
    the words at the top are not laid over the subject's face. */

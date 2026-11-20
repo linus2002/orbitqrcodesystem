@@ -74,7 +74,7 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
         />
       )}
 
-      {genuine && result.leaflet && <Leaflet leaflet={result.leaflet} />}
+      {genuine && result.leaflet && <Leaflet leaflet={result.leaflet} sku={result.product?.sku} />}
 
       {asksWhere && genuine && (
         <WhereBought
@@ -94,24 +94,16 @@ export default function ResultCard({ result, onCheckAnother, supportPhone, check
             carries earlier versions, and is where a reader who wants them
             goes. Linked rather than repeated here - the result card is
             already the longest thing on a phone screen. */}
-        {genuine && result.leaflet && result.product?.sku && (
+        {/* Only where the leaflet has no PDF: one with a PDF already has
+            its button above, to the same page - two ways to one place is
+            one choice too many. */}
+        {genuine && result.leaflet && !result.leaflet.pdf && result.product?.sku && (
           <p className="text-sm text-muted">
             <Link to={`/leaflet/${encodeURIComponent(result.product.sku)}`}>
               Read the full leaflet
             </Link>
             , including any earlier versions.
           </p>
-        )}
-
-        {genuine && result.batch?.expiringSoon && (
-          <div className="alert alert-warn mt-16">
-            <Icon name="alert" />
-            <span>
-              This pack expires on <strong>{fmtDate(result.batch.expiryDate)}</strong> - in{' '}
-              {result.batch.daysToExpiry} days. Check with your pharmacist before starting a long
-              course.
-            </span>
-          </div>
         )}
 
         {!genuine && (
@@ -173,6 +165,14 @@ function Details({ result }) {
       <>
         {fmtDate(batch.expiryDate)}
         {batch.isExpired && <strong> (expired)</strong>}
+        {/* Expiring soon: said here, on the date it is about, rather than in
+            a yellow box further down - boxes like that get skipped. */}
+        {result.result === 'genuine' && batch.expiringSoon && !batch.isExpired && (
+          <span className="detail-warn">
+            <Icon name="alert" /> In {batch.daysToExpiry} days. Ask your pharmacist before starting a
+            long course.
+          </span>
+        )}
       </>,
     ],
     result.code && ['Code', <span className="mono">{result.code}</span>],
@@ -202,7 +202,7 @@ function Details({ result }) {
 }
 
 /** The patient information leaflet, collapsed by section. */
-function Leaflet({ leaflet }) {
+function Leaflet({ leaflet, sku }) {
   const [open, setOpen] = useState(0);
 
   const sections = leaflet?.sections ?? [];
@@ -217,11 +217,13 @@ function Leaflet({ leaflet }) {
       {/* The document, when the leaflet was published as one. The sections
           below, if any, are the same content in the form a screen reader
           can use. */}
-      {leaflet.pdf && (
+      {/* To the leaflet page, which shows the PDF's pages in place - a
+          phone handed the PDF itself only downloads it. */}
+      {leaflet.pdf && sku && (
         <div className="card-body">
-          <a className="btn btn-primary btn-block" href={leaflet.pdf.url} target="_blank" rel="noopener">
-            <Icon name="download" /> Open the patient leaflet (PDF)
-          </a>
+          <Link className="btn btn-primary btn-block" to={`/leaflet/${encodeURIComponent(sku)}`}>
+            <Icon name="log" /> Read the patient leaflet
+          </Link>
         </div>
       )}
       {sections.map((section, i) => (

@@ -88,10 +88,11 @@ in production.
 
 Then open the app on the port in your `.env` (`PORT`, default 3000).
 
-> This checkout is configured for **port 4000**, because port 3000 was already
-> in use on the machine it was built on. If you change `PORT`, change
-> `PUBLIC_BASE_URL` to match - that URL is what gets encoded into QR codes, so
-> a mismatch produces QR codes that point at the wrong host.
+> The Vite dev server forwards `/api` to `http://localhost:$PORT`, reading
+> `PORT` from the same `.env` (set `API_TARGET` to point it elsewhere). If you
+> change `PORT`, change `PUBLIC_BASE_URL` to match - that URL is what gets
+> encoded into QR codes, so a mismatch produces QR codes that point at the
+> wrong host.
 
 ### Data: PostgreSQL
 

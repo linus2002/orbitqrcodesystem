@@ -15,7 +15,11 @@ export class ApiError extends Error {
   constructor(status, body) {
     const message =
       body?.error?.message ??
-      (status === 0 ? 'Cannot reach the server.' : `Request failed (${status})`);
+      (status === 0
+        ? 'Cannot reach the server. Check your connection and try again.'
+        : status >= 500
+          ? `The server is not answering right now. Please try again in a minute. (Error ${status})`
+          : `Something went wrong. Please try again. (Error ${status})`);
     super(message);
     this.name = 'ApiError';
     this.status = status;

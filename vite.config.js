@@ -17,7 +17,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 /**
@@ -53,6 +53,12 @@ function pdfjsAssets() {
   };
 }
 
+// The API's port, from the same .env the server reads, so the dev proxy
+// always points at where the API actually listens (a fixed port here once
+// sent every /api call to nothing, and the portal showed a bare 502).
+const env = loadEnv('development', process.cwd(), '');
+const API_TARGET = env.API_TARGET || `http://localhost:${env.PORT || 3000}`;
+
 export default defineConfig({
   root: 'client',
   plugins: [react(), pdfjsAssets()],
@@ -86,7 +92,7 @@ export default defineConfig({
     // exactly as they do in production.
     proxy: {
       '/api': {
-        target: process.env.API_TARGET ?? 'http://localhost:4000',
+        target: API_TARGET,
         changeOrigin: false,
       },
     },

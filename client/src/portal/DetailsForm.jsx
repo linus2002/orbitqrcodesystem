@@ -18,12 +18,14 @@ import PrivacyPolicy, { POLICY_VERSION } from './PrivacyPolicy.jsx';
 /** Marks a field the form will not send without. */
 const Required = () => <span className="text-muted">(required)</span>;
 
+// Short enough to sit two to a row as tap targets: one tap, where a dropdown
+// took three (open, scroll, pick) - Parkinson's law, shrink the task.
 export const ROLE_OPTIONS = [
-  ['patient', 'I am the patient'],
-  ['caregiver', 'I care for the patient (family, carer)'],
+  ['patient', 'Patient'],
+  ['caregiver', 'Family or carer'],
   ['pharmacist', 'Pharmacist'],
-  ['health_worker', 'Doctor, nurse or health worker'],
-  ['retailer', 'Retailer or distributor'],
+  ['health_worker', 'Doctor or nurse'],
+  ['retailer', 'Retailer'],
   ['other', 'Other'],
 ];
 
@@ -199,31 +201,30 @@ export default function DetailsForm({ pendingCode, onDone, supportPhone }) {
           </div>
         </div>
 
-        <div className="field">
-          <label className="label" htmlFor="dRole">
+        <fieldset className="field role-field" aria-describedby={errors.role ? 'dRoleErr' : undefined}>
+          <legend className="label">
             Which of these are you? <Required />
-          </label>
-          <select
-            className="select"
-            id="dRole"
-            value={fields.role}
-            onChange={set('role')}
-            aria-invalid={invalid('role')}
-            aria-describedby={errors.role ? 'dRoleErr' : undefined}
-          >
-            <option value="">Choose one</option>
+          </legend>
+          <div className="role-options" role="radiogroup" aria-invalid={invalid('role')}>
             {ROLE_OPTIONS.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
+              <label key={value} className={`role-option${fields.role === value ? ' is-on' : ''}`}>
+                <input
+                  type="radio"
+                  name="role"
+                  value={value}
+                  checked={fields.role === value}
+                  onChange={set('role')}
+                />
+                <span>{label}</span>
+              </label>
             ))}
-          </select>
+          </div>
           {errors.role && (
             <p className="field-error" id="dRoleErr" role="alert">
               {errors.role}
             </p>
           )}
-        </div>
+        </fieldset>
 
         <div className="field">
           <label className="label" htmlFor="dCity">

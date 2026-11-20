@@ -1,6 +1,32 @@
 /**
  * Camera QR scanner.
  *
+ * Layout, top to bottom: a status circle (turning while the camera starts and
+ * scans, a check once the code is read), the live camera inside a bracketed
+ * box, what is happening in words, and one way out.
+ *
+ * Five UX laws shape it:
+ *
+ *   - Jakob's law: it looks like the scanner people already know from their
+ *     phone's camera and from GCash - live picture, corner brackets, a moving
+ *     scan line - so nobody has to learn it.
+ *   - Doherty threshold (answer within 0.4 s): every state shows at once. The
+ *     status changes the moment the camera starts and the moment a code is
+ *     read; the scan line shows it is working even before anything is found.
+ *   - Hick's law: while scanning there is exactly one other choice - type the
+ *     code instead. No torch, no settings, no gallery.
+ *   - Fitts's law: that choice is a full-width button directly under the box,
+ *     where the thumb already is.
+ *   - Peak-end rule: the moment that is remembered is the code being read, so
+ *     it gets a clear check and a short vibration, and the check stays on
+ *     screen, over the frozen picture, until the answer is ready (the parent
+ *     unmounts the scanner then - see PortalPage). The check starts at once,
+ *     so that wait costs nothing.
+ *
+ * The check means "the code was read", not "the pack is genuine" - the
+ * verdict comes from the server, after. So it is drawn in the brand blue, and
+ * green stays reserved for the Genuine result.
+ *
  * jsQR is bundled rather than loaded from a CDN, which is what lets the app
  * keep `script-src 'self'` with no CDN allowance in its Content-Security-Policy.
  *
@@ -9,7 +35,22 @@
  * leaked camera stream leaves the phone's camera light on, which is alarming
  * on a page about trust.
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { Icon } from '../components/Icons.jsx';
+
+// No code read after this long: the advice changes to what usually helps.
+const SLOW_MS = 9000;
+
+const STATUS = {
+  starting: { title: 'Starting the camera...', hint: 'Allow the camera if your phone asks.' },
+  scanning: { title: 'Scanning...', hint: 'Fit the QR code on the pack inside the box.' },
+  slow: {
+    title: 'Still looking...',
+    hint: 'Hold steady, a hand away from the pack, in good light.',
+  },
+  found: { title: 'QR code read', hint: 'Checking the pack...' },
+};
 
 export default function Scanner({ onScan, onCancel, onError }) {
   const videoRef = useRef(null);
@@ -19,6 +60,13 @@ export default function Scanner({ onScan, onCancel, onError }) {
   // Guards against firing onScan twice if a frame decodes while we are
   // already tearing down.
   const doneRef = useRef(false);
+  // The latest handlers, read when they are called. The camera effect below
+  // runs once: if it depended on the handlers, every redraw of the page that
+  // passes new ones would stop and restart the camera.
+  const on = useRef({});
+  on.current = { scan: onScan, cancel: onCancel, error: onError };
+  const [phase, setPhase] = useState('starting');
+  const [still, setStill] = useState(null);
 
   const stop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -30,10 +78,11 @@ export default function Scanner({ onScan, onCancel, onError }) {
 
   useEffect(() => {
     let cancelled = false;
+    let slowTimer = null;
 
     async function start() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        onError('This browser cannot open the camera. Please type the code instead.');
+        on.current.error('This browser cannot open the camera. Please type the code instead.');
         return;
       }
 
@@ -56,7 +105,7 @@ export default function Scanner({ onScan, onCancel, onError }) {
           audio: false,
         });
       } catch (err) {
-        onError(
+        on.current.error(
           err.name === 'NotAllowedError'
             ? 'Camera access was blocked. Allow it in your browser settings, or type the code instead.'
             : err.name === 'NotFoundError'
@@ -80,6 +129,9 @@ export default function Scanner({ onScan, onCancel, onError }) {
       } catch {
         /* autoplay can reject if the element unmounted mid-start */
       }
+      if (cancelled) return;
+      setPhase('scanning');
+      slowTimer = setTimeout(() => !cancelled && !doneRef.current && setPhase('slow'), SLOW_MS);
 
       const canvas = (canvasRef.current ??= document.createElement('canvas'));
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -95,7 +147,7 @@ export default function Scanner({ onScan, onCancel, onError }) {
           canvas.width = size;
           canvas.height = size;
 
-          // Centre-crop the square the reticle shows, so what the patient aims
+          // Centre-crop the square the box shows, so what the patient aims
           // at is what actually gets decoded.
           const vw = video.videoWidth;
           const vh = video.videoHeight;
@@ -109,8 +161,16 @@ export default function Scanner({ onScan, onCancel, onError }) {
 
             if (found?.data) {
               doneRef.current = true;
+              clearTimeout(slowTimer);
+              // The camera goes off now, but the box keeps the picture it
+              // read (the square just decoded), under the check - it does
+              // not go black at the moment of success.
+              setStill(canvas.toDataURL('image/jpeg', 0.8));
               stop();
-              onScan(found.data);
+              setPhase('found');
+              // Only after a real tap; browsers block (and log) it otherwise.
+              if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(60);
+              on.current.scan(found.data);
               return;
             }
           }
@@ -126,31 +186,66 @@ export default function Scanner({ onScan, onCancel, onError }) {
     // Releasing the camera when the tab is hidden is both polite and
     // battery-safe.
     const onVisibility = () => {
-      if (document.hidden) {
+      if (document.hidden && !doneRef.current) {
         stop();
-        onCancel();
+        on.current.cancel();
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       cancelled = true;
+      clearTimeout(slowTimer);
       document.removeEventListener('visibilitychange', onVisibility);
       stop();
     };
-  }, [onScan, onError, onCancel, stop]);
+  }, [stop]);
+
+  const status = STATUS[phase];
+  const found = phase === 'found';
 
   return (
-    <div className="scanner active">
+    <div className={`scanner active is-${phase}`}>
+      {/* On top, the circle: turning while it works, a check once read. */}
+      <div className="scan-badge" aria-hidden="true">
+        {found ? (
+          <svg viewBox="0 0 52 52" className="scan-check">
+            <circle cx="26" cy="26" r="23" />
+            <path d="M15 27l7 7 15-16" />
+          </svg>
+        ) : (
+          <span className="scan-ring" />
+        )}
+      </div>
+
       <div className="scanner-frame">
         <video ref={videoRef} playsInline muted aria-label="Camera view for scanning a QR code" />
-        <div className="reticle">
-          <div className="reticle-box" />
+        {still && <img className="scanner-still" src={still} alt="" />}
+        <div className="reticle" aria-hidden="true">
+          <div className="reticle-box">
+            <i className="corner tl" />
+            <i className="corner tr" />
+            <i className="corner bl" />
+            <i className="corner br" />
+            {!found && phase !== 'starting' && <i className="scan-line" />}
+          </div>
         </div>
-        <p className="scanner-hint">Point the camera at the QR code on the pack</p>
       </div>
-      <button className="btn btn-block mt-12" type="button" onClick={onCancel}>
-        Cancel scanning
+
+      {/* Under the box, where the eye goes next: what is happening, in words. */}
+      <p className="scan-status" role="status" aria-live="polite">
+        <strong>{status.title}</strong>
+        <span>{status.hint}</span>
+      </p>
+
+      <button
+        className="btn btn-lg btn-block mt-12"
+        type="button"
+        onClick={onCancel}
+        disabled={found}
+      >
+        <Icon name="keyboard" />
+        Type the code instead
       </button>
     </div>
   );

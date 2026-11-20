@@ -143,6 +143,13 @@ export function IconSprite() {
         <circle cx="11" cy="11" r="6.5" />
         <path d="M16 16l4.5 4.5" />
       </symbol>
+      <symbol id="i-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5.5 12.5l4.2 4.2L18.5 7.8" />
+      </symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.5" y="6" width="19" height="12" rx="2.5" />
+        <path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14h8" />
+      </symbol>
     </svg>
   );
 }

@@ -67,41 +67,122 @@
 }
 
 /* --- Camera scanner ------------------------------------------------------ */
+/* Status circle on top, live camera in a bracketed box, status in words
+   below it, then one way out.
+   See Scanner.jsx for the UX laws behind it. */
 
 .scanner { display: none; }
 .scanner.active { display: block; }
 
+/* On top: the circle. Turning while it works, a check once the code is read. */
+.scan-badge {
+  width: 64px; height: 64px;
+  margin: 2px auto 14px;
+  display: grid; place-items: center;
+}
+.scan-ring {
+  width: 56px; height: 56px; border-radius: 50%;
+  border: 4px solid var(--brand-tint);
+  border-top-color: var(--brand);
+  animation: scan-spin 0.9s linear infinite;
+}
+/* Read: the circle closes, then the tick is drawn. */
+.scan-check { width: 64px; height: 64px; }
+.scan-check circle, .scan-check path {
+  fill: none; stroke: var(--brand); stroke-width: 3.5;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.scan-check circle {
+  stroke-dasharray: 145; stroke-dashoffset: 145;
+  animation: scan-draw 0.32s ease-out forwards;
+}
+.scan-check path {
+  stroke-dasharray: 40; stroke-dashoffset: 40;
+  animation: scan-draw 0.24s 0.26s ease-out forwards;
+}
+.is-found .scan-badge { animation: scan-pop 0.36s ease-out; }
+
+/* Under the box: what is happening, in words. */
+.scan-status {
+  display: grid; gap: 2px;
+  margin-top: 14px;
+  text-align: center;
+}
+.scan-status strong { font-size: 1.05rem; color: var(--ink); }
+.scan-status span { font-size: 0.9rem; color: var(--ink-2); line-height: 1.45; }
+.is-found .scan-status strong { color: var(--brand-ink); }
+
 .scanner-frame {
   position: relative;
-  width: 100%;
+  /* Square, as the decoded area is: capped by width, not height, so it
+     stays square on a wide screen. */
+  width: min(100%, 420px);
   aspect-ratio: 1 / 1;
-  max-height: 420px;
-  background: #000;
+  margin-inline: auto;
+  background: #0b0f14;
   border-radius: var(--r-lg);
   overflow: hidden;
+}
+/* The picture that was read, held under the check once the camera is off. */
+.scanner-still {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
 }
 .scanner-frame video {
   width: 100%; height: 100%;
   object-fit: cover;
   display: block;
 }
-/* Reticle: a viewfinder that tells the patient where to aim. */
+/* The box to aim at: the camera stays bright inside it, dimmed outside, and
+   only this square is decoded (see the centre-crop in Scanner.jsx). */
 .reticle {
   position: absolute; inset: 0;
   display: grid; place-items: center;
   pointer-events: none;
 }
 .reticle-box {
-  width: 62%; aspect-ratio: 1;
-  border-radius: 16px;
-  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
-  border: 2px solid rgba(255, 255, 255, 0.85);
+  position: relative;
+  width: 64%; aspect-ratio: 1;
+  border-radius: 8px;
+  box-shadow: 0 0 0 100vmax rgba(5, 10, 18, 0.62);
+  transition: box-shadow 0.25s ease;
 }
-.scanner-hint {
-  position: absolute; left: 0; right: 0; bottom: 12px;
-  text-align: center; color: #fff; font-size: 0.86rem;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
-  padding-inline: 16px;
+.corner {
+  position: absolute; width: 30px; height: 30px;
+  border: 4px solid #fff;
+  transition: border-color 0.2s ease, transform 0.25s ease;
+}
+.corner.tl { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 8px; }
+.corner.tr { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 8px; }
+.corner.bl { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 8px; }
+.corner.br { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 8px; }
+/* Working: a line sweeps the box. */
+.scan-line {
+  position: absolute; left: 8%; right: 8%; top: 6%;
+  height: 2px; border-radius: 2px;
+  background: var(--logo-blue);
+  box-shadow: 0 0 12px 2px rgba(30, 160, 218, 0.7);
+  animation: scan-sweep 2.2s ease-in-out infinite alternate;
+}
+/* Read: the corners turn blue and close in on the code. */
+.is-found .corner { border-color: var(--logo-blue); }
+.is-found .corner.tl { transform: translate(6px, 6px); }
+.is-found .corner.tr { transform: translate(-6px, 6px); }
+.is-found .corner.bl { transform: translate(6px, -6px); }
+.is-found .corner.br { transform: translate(-6px, -6px); }
+.is-found .reticle-box { box-shadow: 0 0 0 100vmax rgba(5, 10, 18, 0.72); }
+
+@keyframes scan-spin { to { transform: rotate(360deg); } }
+@keyframes scan-draw { to { stroke-dashoffset: 0; } }
+@keyframes scan-sweep { to { top: 93%; } }
+@keyframes scan-pop { 50% { transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) {
+  .scan-ring { animation-duration: 2.4s; }
+  .scan-line { animation: none; top: 50%; opacity: 0.7; }
+  .scan-check circle, .scan-check path { animation: none; stroke-dashoffset: 0; }
+  .corner { transition: none; }
+  .is-found .scan-badge { animation: none; }
 }
 
 /* --- Result -------------------------------------------------------------- */
@@ -396,3 +477,215 @@
 @media (prefers-reduced-motion: reduce) {
   .pdf-page:not(.is-drawn), .pdf-spinner { animation: none; }
 }
+
+/* --- A notice about the last try (camera, leaflet QR), inside the card --- */
+.check-notice { margin-bottom: 16px; }
+.check-notice-body { display: grid; gap: 4px; justify-items: start; min-width: 0; }
+.check-notice-body strong { font-size: 0.98rem; }
+
+/* --- The check sheet (CheckSheet.jsx) ------------------------------------ */
+/* Phones: a sheet up from the bottom edge, its button in thumb reach. Wide
+   screens: the same card, centred. */
+
+.sheet-backdrop {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: flex-end; justify-content: center;
+  /* Figure-ground: the page behind is dimmed hard and softened, so the sheet
+     is the one thing to look at - but still there, which the sheet's
+     partial height leans on. */
+  background: rgba(8, 14, 24, 0.7);
+  backdrop-filter: blur(2px);
+  animation: sheet-fade 0.2s ease-out;
+}
+.sheet {
+  position: relative;
+  width: 100%; max-width: 520px;
+  max-height: 88dvh; overflow-y: auto;
+  padding: 14px 24px calc(24px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 14px 14px 0 0;
+  touch-action: none;
+  box-shadow: 0 -10px 40px rgba(8, 14, 24, 0.25);
+  text-align: center;
+  animation: sheet-up 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.sheet-grip {
+  display: block; width: 44px; height: 5px; margin: 0 auto 22px;
+  border-radius: 3px; background: var(--line-strong);
+}
+.sheet-title {
+  font-size: 1.35rem; letter-spacing: -0.02em; line-height: 1.25;
+  margin-top: 18px;
+}
+.sheet-product { margin-top: 6px; font-weight: 600; color: var(--ink-2); }
+.sheet-text {
+  margin: 8px auto 0; max-width: 34ch;
+  font-size: 0.95rem; line-height: 1.55; color: var(--ink-2);
+}
+.sheet-actions { display: grid; gap: 6px; margin-top: 24px; }
+.sheet-checking { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+
+/* The verdict badge: a scalloped seal, in the verdict's colour. */
+.sheet-badge { width: 104px; height: 104px; margin: 4px auto 0; animation: badge-pop 0.42s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.sheet-badge svg { width: 100%; height: 100%; overflow: visible; }
+.sheet-badge .seal { fill: var(--tone); filter: drop-shadow(0 6px 14px var(--tone-glow)); }
+.sheet-badge .mark {
+  fill: none; stroke: #fff; stroke-width: 7;
+  stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 60; stroke-dashoffset: 60;
+  animation: badge-draw 0.3s 0.22s ease-out forwards;
+}
+.sheet-badge .mark.dot { stroke-width: 8.5; stroke-dasharray: none; stroke-dashoffset: 0; animation: none; }
+.seal-genuine { --tone: var(--good); --tone-glow: rgba(12, 163, 12, 0.35); }
+.seal-flagged { --tone: var(--danger); --tone-glow: rgba(208, 59, 59, 0.35); }
+.seal-invalid, .seal-warn { --tone: var(--warn); --tone-glow: rgba(240, 165, 0, 0.35); }
+.seal-info { --tone: var(--info); --tone-glow: rgba(42, 120, 214, 0.35); }
+.sheet-genuine .sheet-title { color: var(--good-ink); }
+.sheet-flagged .sheet-title { color: var(--danger-ink); }
+
+/* While checking: the shield, a scan bar sweeping it. */
+.sheet-art { width: 112px; height: 112px; margin: 8px auto 0; }
+.sheet-art svg { width: 100%; height: 100%; overflow: hidden; }
+.sheet-art .shield { fill: var(--brand-tint); stroke: var(--logo-blue); stroke-width: 4; stroke-linejoin: round; }
+.sheet-art .shield-mark {
+  fill: none; stroke: var(--logo-blue); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
+  opacity: 0.35; animation: art-mark 1.6s ease-in-out infinite;
+}
+.sheet-art .scanbar {
+  fill: var(--logo-blue); opacity: 0.85;
+  animation: art-scan 1.6s ease-in-out infinite;
+}
+
+@keyframes sheet-fade { from { opacity: 0; } }
+@keyframes sheet-up { from { transform: translateY(100%); } }
+@keyframes badge-pop { 0% { transform: scale(0.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes badge-draw { to { stroke-dashoffset: 0; } }
+@keyframes art-scan { 0% { transform: translateY(8px); } 50% { transform: translateY(84px); } 100% { transform: translateY(8px); } }
+@keyframes art-mark { 50% { opacity: 0.9; } }
+
+@media (min-width: 720px) {
+  .sheet-backdrop { align-items: center; padding: 24px; }
+  .sheet {
+    border-radius: 12px;
+    padding: 18px 32px 32px;
+    box-shadow: 0 24px 60px rgba(8, 14, 24, 0.3);
+    animation-name: sheet-rise;
+  }
+  .sheet-grip { display: none; }
+  .sheet-checking { padding-bottom: 40px; }
+}
+@keyframes sheet-rise { from { transform: translateY(24px); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .sheet-backdrop, .sheet-badge { animation: none; }
+  .sheet-badge .mark { animation: none; stroke-dashoffset: 0; }
+  .sheet-art .scanbar { animation: none; transform: translateY(46px); }
+  .sheet-art .shield-mark { animation: none; opacity: 0.6; }
+}
+
+/* ==========================================================================
+   Squarer, centred (the customer pages - body.page-white)
+   ========================================================================== */
+
+/* Corners: small and even. Pill buttons and 22px cards read as a toy on a
+   page about medicine safety; 6-10px reads as an institution. Scoped to the
+   customer pages - the dashboard keeps its own. */
+.page-white {
+  --r-sm: 6px;
+  --r: 8px;
+  --r-lg: 10px;
+  --r-xl: 12px;
+}
+.page-white .btn { border-radius: 8px; }
+.page-white .input,
+.page-white .select,
+.page-white .textarea,
+.page-white .input-code { border-radius: 8px; }
+.page-white .alert { border-radius: 8px; }
+.page-white .badge { border-radius: 6px; }
+.page-white .checker-line button { border-radius: 6px; }
+
+/* One centred column: logo, heading, the card, the footer lines. The photo
+   behind is dimmed evenly (app.css), since the column now crosses it. */
+.page-white .portal-wrap { max-width: 560px; margin-inline: auto; }
+.page-white .portal-brand { display: flex; justify-content: center; }
+.page-white .hero { text-align: center; }
+.page-white .hero p { margin-inline: auto; }
+.page-white .trust-row { justify-content: center; }
+.page-white .checker-line { justify-content: center; }
+.page-white .portal-footer { text-align: center; }
+/* The card's own words, centred with it; the fields stay full width. */
+.check-card .divider { text-align: center; }
+.check-card .hint { text-align: center; }
+.details-card > h2, .details-card > p { text-align: center; }
+
+/* --- Steps (Steps.jsx): three dots on one line, one journey --------------- */
+.steps {
+  list-style: none; margin: 0 0 14px; padding: 0;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  counter-reset: none;
+}
+.step {
+  position: relative;
+  display: grid; justify-items: center; gap: 6px;
+  font-size: 0.76rem; font-weight: 600; color: rgba(255, 255, 255, 0.72);
+  text-align: center;
+}
+/* The line: from this dot to the next, behind both. */
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute; top: 13px; left: calc(50% + 16px); right: calc(-50% + 16px);
+  height: 2px; background: rgba(255, 255, 255, 0.35);
+}
+.step-done:not(:last-child)::after { background: #fff; }
+.step-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 0.8rem; font-weight: 700;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(8, 30, 52, 0.35);
+}
+.step-dot svg { width: 15px; height: 15px; }
+.step-now .step-dot { border-color: #fff; background: #fff; color: var(--brand-ink); }
+.step-done .step-dot { border-color: #fff; background: #fff; color: var(--good-ink); }
+.step-now, .step-done { color: #fff; }
+
+/* --- The staff notice, as the card's own content -------------------------- */
+.check-banner {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 0 0 14px; margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.check-banner svg { width: 18px; height: 18px; flex: none; margin-top: 2px; color: var(--warn-ink); }
+.check-banner p { margin: 0; font-size: 0.9rem; line-height: 1.5; color: var(--ink-2); }
+.check-banner strong { display: block; color: var(--ink); font-size: 0.92rem; }
+
+/* --- Role: six choices, two to a row, one tap ----------------------------- */
+.role-field { border: 0; margin: 0; padding: 0; min-width: 0; }
+.role-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+@media (min-width: 640px) { .role-options { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.role-option {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 46px; padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--ink-muted) 70%, var(--surface));
+  border-radius: 8px;
+  font-size: 0.88rem; font-weight: 500; color: var(--ink); text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.role-option input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.role-option:hover { border-color: var(--ink-muted); }
+.role-option.is-on { border-color: var(--brand); background: var(--brand-tint); color: var(--brand-ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--brand); }
+.role-option:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* --- "Expires: in 20 days" on the date row -------------------------------- */
+.detail-warn {
+  display: flex; gap: 6px; align-items: flex-start;
+  margin-top: 4px;
+  font-size: 0.84rem; font-weight: 500; color: var(--warn-ink);
+}
+.detail-warn svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }

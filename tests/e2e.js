@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import QRCode from 'qrcode';
 
 // fileURLToPath, not URL.pathname: the pathname keeps spaces as %20, so a
 // checkout under a folder with a space in its name was never found.
@@ -57,6 +58,38 @@ function findChrome() {
 // ---------------------------------------------------------------------------
 
 const sleep = async (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * A short Y4M video (what Chrome's fake camera plays) of `text` as a QR code,
+ * dark on white, centred in a 640x480 frame.
+ */
+function writeQrVideo(file, text) {
+  const { modules } = QRCode.create(text, { errorCorrectionLevel: 'M' });
+  const W = 640;
+  const H = 480;
+  const quiet = 4;
+  const scale = Math.floor(300 / (modules.size + quiet * 2));
+  const side = (modules.size + quiet * 2) * scale;
+  const ox = Math.floor((W - side) / 2);
+  const oy = Math.floor((H - side) / 2);
+  const y = Buffer.alloc(W * H, 235);
+  for (let r = 0; r < modules.size; r++) {
+    for (let c = 0; c < modules.size; c++) {
+      if (!modules.get(r, c)) continue;
+      for (let dy = 0; dy < scale; dy++) {
+        const row = (oy + (r + quiet) * scale + dy) * W + ox + (c + quiet) * scale;
+        y.fill(16, row, row + scale);
+      }
+    }
+  }
+  const uv = Buffer.alloc((W / 2) * (H / 2), 128);
+  const frame = Buffer.concat([Buffer.from('FRAME\n'), y, uv, uv]);
+  // Two seconds of a blank card first, as when the pack is not yet in view,
+  // so the "Scanning..." state is on screen long enough to be checked.
+  const blank = Buffer.concat([Buffer.from('FRAME\n'), Buffer.alloc(W * H, 200), uv, uv]);
+  const head = Buffer.from(`YUV4MPEG2 W${W} H${H} F10:1 Ip A1:1 C420jpeg\n`);
+  fs.writeFileSync(file, Buffer.concat([head, ...Array(20).fill(blank), ...Array(30).fill(frame)]));
+}
 
 class Cdp {
   constructor(ws) {
@@ -204,6 +237,23 @@ console.log(`API on ${APP}`);
 
 // --- Launch Chrome ---------------------------------------------------------
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'qrshield-chrome-'));
+
+// The camera Chrome is given: a video of one real pack's QR code, so the
+// scanner can be driven end to end - camera, decode, check, verdict.
+const cameraCode = await (async () => {
+  const db = await import('../src/db/index.js');
+  db.open();
+  const today = new Date().toISOString().slice(0, 10);
+  const live = await db.findMany('batch', { status: 'distributed', is_test: 0, expiry_date: { gt: today } }, { fields: ['id'] });
+  const rows = await db.findMany('code', { scan_count: 0, batch_id: { in: live.map((b) => b.id) } }, { limit: 50 });
+  return rows[rows.length - 1].code; // not the one pickCode() takes first
+})();
+const cameraFile = path.join(profile, 'camera.y4m');
+{
+  const { qrPayload } = await import('../src/lib/codes.js');
+  const { config } = await import('../src/config.js');
+  writeQrVideo(cameraFile, qrPayload(cameraCode, config.secrets.code, APP));
+}
 const debugPort = 9400 + Math.floor(Math.random() * 400);
 const chrome = spawn(
   chromePath,
@@ -213,6 +263,9 @@ const chrome = spawn(
     '--no-sandbox',
     '--no-first-run',
     '--disable-extensions',
+    '--use-fake-ui-for-media-stream',
+    '--use-fake-device-for-media-stream',
+    `--use-file-for-fake-video-capture=${cameraFile}`,
     `--remote-debugging-port=${debugPort}`,
     `--user-data-dir=${profile}`,
     'about:blank',
@@ -287,7 +340,7 @@ try {
     set('dName', 'Maria Santos');
     set('dPhone', '0917 123 4567');
     set('dEmail', 'maria@gmail.com');
-    set('dRole', 'patient');
+    document.querySelector('input[name=role][value=patient]').click();
     set('dCity', 'Quezon City');
     document.getElementById('dConsent').click();
     document.querySelector('.details-form button[type=submit]').click();
@@ -305,9 +358,106 @@ try {
     cdp
   );
 
+  // The camera: scanning -> the check -> the verdict.
+  await cdp.json(`(() => {
+    [...document.querySelectorAll('button')].find(b=>b.textContent.includes('Scan the QR code')).click();
+    return '"ok"';
+  })()`);
+  const seen = await cdp.json(
+    `new Promise((resolve) => {
+      const seen = { scanning: false, statusText: '', boxed: false, typeInstead: false, check: false, readText: '', genuine: false, cameraOff: false, closed: false };
+      const started = Date.now();
+      const t = setInterval(() => {
+        const sc = document.querySelector('.scanner');
+        if (sc?.classList.contains('is-scanning') || sc?.classList.contains('is-slow')) {
+          seen.scanning = true;
+          seen.statusText = sc.querySelector('.scan-status strong')?.textContent ?? '';
+          seen.boxed = sc.querySelectorAll('.reticle-box .corner').length === 4 && !!sc.querySelector('.scan-line');
+          seen.typeInstead = [...sc.querySelectorAll('button')].some(b=>b.textContent.includes('Type the code instead'));
+        }
+        if (sc?.classList.contains('is-found')) {
+          seen.check = !!sc.querySelector('.scan-check');
+          seen.readText = sc.querySelector('.scan-status strong')?.textContent ?? '';
+          // The camera is off from the moment the code is read.
+          seen.cameraOff = !sc.querySelector('video')?.srcObject;
+        }
+        if (document.querySelector('.banner-genuine')) seen.genuine = true;
+        // The scanner stays up with its check until the answer is in, then goes.
+        const closed = seen.genuine && !sc;
+        if (closed || Date.now() - started > 15000) { seen.closed = closed; clearInterval(t); resolve(JSON.stringify(seen)); }
+      }, 50);
+    })`,
+    true
+  );
+  check(
+    'the camera scanner shows the live box, then a check once the QR is read, then the verdict',
+    {
+      scanning: seen.scanning,
+      statusSaysScanning: seen.statusText === 'Scanning...' || seen.statusText === 'Still looking...',
+      boxWithCornersAndLine: seen.boxed,
+      typeInsteadButton: seen.typeInstead,
+      checkShown: seen.check,
+      checkSaysRead: seen.readText === 'QR code read',
+      genuine: seen.genuine,
+      cameraOffOnceRead: seen.cameraOff,
+      scannerClosedAfterAnswer: seen.closed,
+    },
+    cdp
+  );
+
+
   const sample = await pickCode(APP);
 
-  await cdp.goto(`${APP}/v/${encodeURIComponent(sample.genuine)}`, 2600);
+  // What a phone's camera app opens: the check runs in a sheet - "checking",
+  // then the verdict with one button - and that button lands on the details.
+  await cdp.goto(`${APP}/v/${encodeURIComponent(sample.genuine)}`, 200);
+  const sheetSeen = await cdp.json(
+    `new Promise((resolve) => {
+      const seen = { checking: false, checkingText: '', verdict: false, title: '', action: '', product: '' };
+      const started = Date.now();
+      const t = setInterval(() => {
+        if (document.querySelector('.sheet-checking')) {
+          seen.checking = true;
+          seen.checkingText = document.querySelector('.sheet-title')?.textContent ?? '';
+        }
+        const v = document.querySelector('.sheet-genuine');
+        if (v) {
+          Object.assign(seen, {
+            verdict: !!v.querySelector('.sheet-badge'),
+            title: v.querySelector('.sheet-title')?.textContent ?? '',
+            product: v.querySelector('.sheet-product')?.textContent ?? '',
+            action: v.querySelector('.sheet-cta')?.textContent ?? '',
+            focused: document.activeElement === v.querySelector('.sheet-cta'),
+            modal: v.getAttribute('role') === 'dialog' && v.getAttribute('aria-modal') === 'true',
+          });
+          clearInterval(t); resolve(JSON.stringify(seen));
+        }
+        if (Date.now() - started > 10000) { clearInterval(t); resolve(JSON.stringify(seen)); }
+      }, 40);
+    })`,
+    true
+  );
+  await cdp.json(`(document.querySelector('.sheet-cta').click(), '"ok"')`);
+  await sleep(500);
+  const afterSheet = await cdp.json(`JSON.stringify({
+    sheetClosed: !document.querySelector('.sheet'),
+    pageScrolls: document.body.style.overflow !== 'hidden',
+  })`);
+  check(
+    'a check runs in a sheet: "checking", then the verdict, whose button lands on the details',
+    {
+      checkingShown: sheetSeen.checking && sheetSeen.checkingText === 'Checking your pack...',
+      verdictBadge: sheetSeen.verdict,
+      saysGenuine: sheetSeen.title === 'Genuine',
+      namesTheProduct: sheetSeen.product.length > 0,
+      oneButton: sheetSeen.action === 'See the details',
+      buttonFocused: sheetSeen.focused,
+      isAModal: sheetSeen.modal,
+      ...afterSheet,
+    },
+    cdp
+  );
+
   check(
     'genuine result shows the leaflet and batch detail',
     await cdp.json(`(() => {
