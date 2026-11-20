@@ -72,7 +72,7 @@
 .nav a {
   display: flex; align-items: center; gap: 12px;
   padding: 9px 14px;
-  border-radius: 999px;
+  border-radius: 8px;
   color: var(--ink-2);
   text-decoration: none;
   font-size: 0.875rem;
@@ -97,7 +97,7 @@
 .sidebar-foot { padding: 12px; margin: 0 12px; border-top: 1px solid var(--line); }
 .user-chip {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px; border-radius: 999px;
+  padding: 8px; border-radius: 8px;
   width: 100%; border: 0; background: none; cursor: pointer; text-align: left;
   color: var(--ink);
 }
@@ -250,7 +250,7 @@
   gap: 3px;
   height: 24px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: 6px;
   font: 500 0.72rem/1 var(--sans);
   white-space: nowrap;
   background: var(--surface-3);
@@ -294,7 +294,7 @@
   pointer-events: none;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 8px;
   box-shadow: var(--shadow);
   padding: 10px 12px;
   font-size: 0.82rem;
@@ -332,7 +332,7 @@
 
 .drawer-backdrop {
   position: fixed; inset: 0; z-index: 90;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(15, 23, 42, 0.68);
   opacity: 0; visibility: hidden;
   transition: opacity 0.22s ease, visibility 0s linear 0.22s;
 }
@@ -504,7 +504,7 @@
   padding: 14px 12px 16px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 10px;
   box-shadow: 0 18px 40px -18px rgba(15, 23, 42, 0.35), var(--shadow-sm);
   overflow: hidden;
   pointer-events: auto;
@@ -517,7 +517,7 @@
 .toast-icon {
   flex: none;
   display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 12px;
+  width: 36px; height: 36px; border-radius: 8px;
   color: var(--toast-accent);
   background: var(--toast-tint);
 }
@@ -706,7 +706,7 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(15, 23, 42, 0.68);
   backdrop-filter: blur(2px);
 }
 .import-review-panel {
@@ -755,7 +755,7 @@
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--surface);
 }
 .view-toggle-option {
@@ -765,7 +765,7 @@
   width: 34px;
   height: 34px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 6px;
   background: none;
   color: var(--ink-2);
   cursor: pointer;
@@ -932,7 +932,7 @@
 .user-card-role {
   display: inline-flex; align-items: center;
   padding: 4px 11px;
-  border-radius: 999px;
+  border-radius: 6px;
   font: 600 0.7rem/1 var(--sans);
   text-transform: capitalize;
   color: #fff;
@@ -964,7 +964,7 @@
 .user-card-tags li {
   font: 500 0.68rem/1 var(--sans);
   padding: 6px 9px;
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--surface-3);
   color: var(--ink-2);
   border: 1px solid var(--line);
@@ -1050,7 +1050,7 @@
    colour - shown on the same blue here, so they read as they do there. */
 .legend-key-tile {
   display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-  padding: 3px 8px; border-radius: 999px;
+  padding: 3px 8px; border-radius: 6px;
   font: 600 0.7rem/1 var(--sans); white-space: nowrap;
   color: #fff; background: var(--series-genuine);
 }
@@ -1071,19 +1071,19 @@
 /* The lit target: a ring, and a shadow so wide it dims the rest of the page. */
 .tour-spot {
   position: fixed;
-  border-radius: 16px;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 0 0 9999px rgba(15, 23, 42, 0.55);
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 0 0 9999px rgba(15, 23, 42, 0.7);
   transition: left 0.3s ease, top 0.3s ease, width 0.3s ease, height 0.3s ease;
   pointer-events: none;
 }
-.tour-dim { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); }
+.tour-dim { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); }
 
 .tour-card {
   position: fixed;
   width: min(340px, calc(100vw - 24px));
   padding: 20px 20px 16px;
   background: var(--surface);
-  border-radius: 20px;
+  border-radius: 10px;
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.25);
   animation: tour-in 0.25s ease;
 }
@@ -1107,19 +1107,15 @@
 .tour-above::before { bottom: -6px; left: calc(var(--tour-arrow) - 7px); }
 
 .tour-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 16px; }
-/* The dots get a row of their own: an administrator's tour has a dozen steps,
-   and sharing a row with the buttons pushed Next out of the card. */
-.tour-dots { display: flex; align-items: center; gap: 5px; flex-basis: 100%; margin-bottom: 8px; }
+/* Progress gets a row of its own, above the buttons: "Step 3 of 13" and one
+   line that fills. */
+.tour-progress { display: grid; gap: 6px; flex-basis: 100%; margin-bottom: 8px; }
+.tour-count { font-size: 0.74rem; font-weight: 600; color: var(--ink-muted); }
+.tour-bar { display: block; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.tour-bar i { display: block; height: 100%; background: var(--logo-blue); border-radius: 2px; transition: width 0.25s ease; }
 .tour-skip { margin-right: auto; margin-left: -14px; }
 .tour-back { margin-left: auto; }
 .tour-skip + .tour-back { margin-left: 0; }
-.tour-dots span {
-  width: 6px; height: 6px; border-radius: 999px;
-  background: var(--line-strong);
-  transition: width 0.25s ease, background 0.25s ease;
-}
-.tour-dots span.done { background: color-mix(in srgb, var(--logo-blue) 45%, var(--line-strong)); }
-.tour-dots span.on { width: 20px; background: var(--logo-blue); }
 
 .tour-skip,
 .tour-back,
@@ -1127,7 +1123,7 @@
   border: 0; cursor: pointer;
   font: 600 0.85rem/1 var(--sans);
   height: 38px; padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 8px;
 }
 .tour-skip, .tour-back { background: none; color: var(--ink-2); }
 .tour-skip:hover, .tour-back:hover { background: var(--surface-3); color: var(--ink); }
@@ -1157,7 +1153,7 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(15, 23, 42, 0.7);
   backdrop-filter: blur(2px);
 }
 .viewer {
@@ -1220,3 +1216,21 @@ img.viewer-image { display: block; max-width: 100%; max-height: 70vh; margin: 0 
   text-underline-offset: 2px;
 }
 .link-button:hover { text-decoration-thickness: 2px; }
+
+/* --------------------------------------------------------------------------
+   One filled button per place (choice overload)
+   A plain .btn used to be filled blue too, so a toolbar showed Export,
+   Import and New batch as three equal answers. The action a screen is for
+   is marked .btn-primary (or .btn-danger); every other plain .btn on the
+   staff side is outlined, so the eye finds the one that matters first.
+   The customer pages (body.page-white) style their own buttons.
+   -------------------------------------------------------------------------- */
+body:not(.page-white) .btn:not(.btn-primary):not(.btn-danger):not(.btn-quiet):not(.btn-ghost):not(.btn-soft) {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+body:not(.page-white) .btn:not(.btn-primary):not(.btn-danger):not(.btn-quiet):not(.btn-ghost):not(.btn-soft):hover:not(:disabled) {
+  background: var(--surface-3);
+  filter: none;
+}

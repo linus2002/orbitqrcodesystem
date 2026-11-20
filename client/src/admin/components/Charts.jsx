@@ -20,14 +20,17 @@ import { fmtNumber } from '../../lib/format.js';
 function useThemeColor(name, fallback) {
   const [color, setColor] = useState(fallback);
   useEffect(() => {
+    // From <body>: the dashboard's theme sets its colours there (body.admin-body,
+    // see admin-studio.css), and anything unset there is inherited from :root.
     const read = () =>
-      setColor(
-        getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
-      );
+      setColor(getComputedStyle(document.body).getPropertyValue(name).trim() || fallback);
     read();
-    // Re-read when the theme attribute flips or the OS preference changes.
+    // Re-read when the theme attribute flips, the body's class arrives (a
+    // child's effect runs before the dashboard's own adds it), or the OS
+    // preference changes.
     const observer = new MutationObserver(read);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', read);
     return () => {
@@ -132,7 +135,7 @@ export function TrendChart({ series }) {
                     width={barW}
                     height={Math.max(1, hGen)}
                     fill={colGenuine}
-                    rx={d.flagged > 0 ? 0 : 3}
+                    rx={d.flagged > 0 ? 0 : 4}
                   />
                 )}
                 {d.flagged > 0 && (
@@ -145,7 +148,7 @@ export function TrendChart({ series }) {
                     width={barW}
                     height={Math.max(1, hFlag - 2)}
                     fill={colFlagged}
-                    rx="3"
+                    rx="4"
                   />
                 )}
               </g>
@@ -266,7 +269,9 @@ function Tooltip({ hover, colGenuine, colFlagged }) {
  * @param {{rows: Array<{label,total,flagged}>}} props
  */
 export function BarList({ rows }) {
-  const colGenuine = useThemeColor('--series-genuine', '#2a78d6');
+  // The bar is a light fill with the place written on it (the flagged share
+  // in red at its end), so the name and its size are read as one thing.
+  const colGenuine = useThemeColor('--bar-fill', '#ebebeb');
   const colFlagged = useThemeColor('--series-flagged', '#d03b3b');
 
   if (!rows?.length) {
@@ -287,6 +292,7 @@ export function BarList({ rows }) {
           <div className="bl-track">
             <Segment width={((r.total - r.flagged) / max) * 100} color={colGenuine} />
             <Segment width={(r.flagged / max) * 100} color={colFlagged} />
+            <span className="bl-name">{r.label}</span>
           </div>
           <div className="bl-value">
             {fmtNumber(r.total)}

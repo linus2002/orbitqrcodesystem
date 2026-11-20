@@ -519,8 +519,8 @@ try {
     { allowStatuses: [401] }
   );
 
-  // Sign in through the actual two-step form, not a bare fetch, so the flow
-  // itself is covered.
+  // Sign in through the actual form, not a bare fetch, so the flow itself is
+  // covered. Email and password go to the server together, in one request.
   await cdp.goto(`${APP}/login`, 2000);
   const setValue = async (sel, val) => `(() => {
       const el = document.querySelector(${JSON.stringify(sel)});
@@ -534,10 +534,12 @@ try {
   await cdp.json(`(()=>{document.querySelector('.signin-btn').click();return JSON.stringify(1)})()`);
   await sleep(900);
   check(
-    'the email step advances without asking the server (no user enumeration)',
+    'an email alone never reaches the server (no user enumeration), and the form says what is missing',
     await cdp.json(`JSON.stringify({
-      onPasswordStep: !!document.querySelector('#password'),
-      emailCarriedOver: document.querySelector('.signin-identity span')?.textContent === 'admin@e2e.local',
+      noAuthRequest: !performance.getEntriesByType('resource').some((e) => e.name.includes('/api/auth/login')),
+      saysEnterPassword: document.querySelector('.signin-error')?.textContent === 'Enter your password.',
+      errorInsideForm: !!document.querySelector('.signin-form .signin-error'),
+      passwordFocused: document.activeElement?.id === 'password',
     })`),
     cdp
   );
@@ -546,7 +548,7 @@ try {
   await cdp.json(`(()=>{document.querySelector('.signin-btn').click();return JSON.stringify(1)})()`);
   await sleep(2600);
   check(
-    'the two-step form signs in and lands on the dashboard',
+    'the form signs in and lands on the dashboard',
     await cdp.json(`JSON.stringify({
       onAdmin: location.pathname.startsWith('/admin'),
       shellRendered: !!document.querySelector('.admin-shell'),
@@ -568,7 +570,7 @@ try {
       await cdp.json(`(() => {
         const view = document.querySelector('main.view');
         return JSON.stringify({
-          title: document.querySelector('.topbar h1')?.textContent === ${JSON.stringify(expectedTitle)},
+          title: document.querySelector('main.view .page-head h1')?.textContent === ${JSON.stringify(expectedTitle)},
           hasContent: (view?.children.length ?? 0) > 0,
           notStuckLoading: !view?.querySelector('.spinner'),
           noErrorBanner: !view?.querySelector('.alert-error'),
@@ -625,8 +627,19 @@ try {
 
   // A person's request under the privacy notice: an administrator can correct
   // or remove their details from the customer drawer. Opened, never sent.
-  await cdp.goto(`${APP}/admin/customers`, 2600);
-  await cdp.json(`(()=>{document.querySelector('table.data tbody tr').click();return JSON.stringify(1)})()`);
+  await cdp.goto(`${APP}/admin/customers`, 1200);
+  // Wait for the first row rather than a fixed time: the list can take longer
+  // than a fixed pause on a busy machine, which made this step flaky.
+  await cdp.json(
+    `new Promise((resolve) => {
+      const started = Date.now();
+      const t = setInterval(() => {
+        const row = document.querySelector('table.data tbody tr');
+        if (row || Date.now() - started > 10000) { clearInterval(t); row?.click(); resolve(JSON.stringify(!!row)); }
+      }, 100);
+    })`,
+    true
+  );
   await sleep(1500);
   const customerButtons = await cdp.json(`(() => {
     const foot = document.querySelector('.drawer.open .drawer-foot');
@@ -686,26 +699,56 @@ try {
   });
   await sleep(600);
 
-  // The top bar clock and the picture beside it. The clock is asserted on
-  // shape rather than value - the test cannot know the machine's locale, but a
-  // clock stuck on a placeholder, or one line silently missing, would show up
-  // here. The picture opens the same account panel as the sidebar chip.
+  // The top bar holds tools only: the sidebar toggle, search, the legend,
+  // theme, sign out and the picture - which opens the same account panel as
+  // the sidebar's account row. The page's title is in the page.
   check(
-    'the top bar shows a clock and opens the account panel from the picture',
+    'the top bar holds the tools, and the picture opens the account panel',
     await cdp.json(`(async () => {
-      const clock = document.querySelector('.topbar .shell-clock');
+      const bar = document.querySelector('.topbar');
       const before = !!document.querySelector('.drawer.open');
+      const tools = {
+        toggle: !!bar.querySelector('[aria-label="Toggle sidebar"]'),
+        search: !!bar.querySelector('.topbar-search'),
+        legend: !!bar.querySelector('[title="Legend"]'),
+        signOut: !!bar.querySelector('[aria-label="Sign out"]'),
+        noTitleInBar: !bar.querySelector('h1'),
+      };
       document.querySelector('.topbar .shell-avatar').click();
       await new Promise((r) => setTimeout(r, 1500));
       return JSON.stringify({
-        hasTime: /[0-9]{1,2}[:.][0-9]{2}/.test(clock?.querySelector('strong')?.textContent ?? ''),
-        hasDate: (clock?.querySelector('span')?.textContent ?? '').length > 8,
-        machineReadable: !Number.isNaN(Date.parse(clock?.getAttribute('datetime') ?? '')),
+        ...tools,
         noDrawerBefore: !before,
         pictureOpensAccount: !!document.querySelector('.drawer.open .drawer-head h2')?.textContent,
       });
     })()`, true),
     cdp
+  );
+
+  // Search (Ctrl+J): a pack code typed in goes straight to its lookup.
+  await cdp.json(`(window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true })), '1')`);
+  await sleep(400);
+  const paletteOpen = await cdp.json(`JSON.stringify(!!document.querySelector('.cmdk input'))`);
+  await cdp.json(`(() => {
+    const el = document.querySelector('.cmdk input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'amx25-abc123-k7');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return '1';
+  })()`);
+  await sleep(200);
+  const offered = await cdp.json(`JSON.stringify(document.querySelector('.cmdk-item.is-active')?.textContent ?? '')`);
+  await cdp.json(`(document.querySelector('.cmdk input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })), '1')`);
+  await sleep(1200);
+  check(
+    'search (Ctrl+J) opens, offers a typed pack code, and Enter looks it up',
+    await cdp.json(`JSON.stringify({
+      opened: ${paletteOpen},
+      offersLookup: ${JSON.stringify(offered)} === 'Look up AMX25-ABC123-K7',
+      closed: !document.querySelector('.cmdk'),
+      onLookup: location.pathname === '/admin/lookup' && new URLSearchParams(location.search).get('code') === 'AMX25-ABC123-K7',
+    })`),
+    cdp,
+    { allowStatuses: [404] }
   );
 
   await cdp.send('Input.dispatchKeyEvent', {
@@ -769,7 +812,7 @@ try {
   await cdp.goto(`${APP}/admin/products`, 2600);
   await cdp.json(`(()=>{[...document.querySelectorAll('table.data tbody tr')][0].click();return JSON.stringify(1)})()`);
   await sleep(1800);
-  await cdp.json(`(()=>{[...document.querySelectorAll('.drawer.open button')].find(b=>b.textContent.includes('View codes'))?.click();return JSON.stringify(1)})()`);
+  await cdp.json(`(()=>{[...document.querySelectorAll('.drawer.open button')].find(b=>(b.getAttribute('aria-label') ?? '').startsWith('Show the codes'))?.click();return JSON.stringify(1)})()`);
   await sleep(1600);
   await cdp.json(`(()=>{document.querySelector('.drawer.open button[aria-label^="View the QR"]').click();return JSON.stringify(1)})()`);
   await sleep(1400);
@@ -800,7 +843,7 @@ try {
     cdp
   );
 
-  await cdp.json(`(()=>{[...document.querySelectorAll('.drawer.open button')].find(b=>b.textContent.includes('View PDF'))?.click();return JSON.stringify(1)})()`);
+  await cdp.json(`(()=>{[...document.querySelectorAll('.drawer.open button')].find(b=>(b.getAttribute('aria-label') ?? '').startsWith('View leaflet v'))?.click();return JSON.stringify(1)})()`);
   await sleep(2500);
   await shot('viewer-pdf');
   const frames = (await cdp.send('Page.getFrameTree')).frameTree.childFrames ?? [];
@@ -929,7 +972,7 @@ try {
   const before = await cdp.json(
     `JSON.stringify({ hidden: !document.querySelector('.sidebar').classList.contains('open') })`
   );
-  await cdp.json(`(()=>{document.querySelector('.menu-btn').click();return JSON.stringify(1)})()`);
+  await cdp.json(`(()=>{document.querySelector('.topbar [aria-label="Toggle sidebar"]').click();return JSON.stringify(1)})()`);
   await sleep(600);
   const after = await cdp.json(
     `JSON.stringify({ opened: document.querySelector('.sidebar').classList.contains('open') })`

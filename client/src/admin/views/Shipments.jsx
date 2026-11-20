@@ -52,17 +52,18 @@ export default function Shipments() {
           strip - see the note in Products.jsx. The count moved up here with
           it, out of the card's title, so the two share one line instead of
           taking a row each. */}
-      <Toolbar>
-        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} shipments</span>
-        <Spacer />
-        {canWrite && (
-          <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload, toast)}>
-            New shipment
-          </button>
-        )}
-      </Toolbar>
-
       <TableCard
+        toolbar={
+          <Toolbar>
+            <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} shipments</span>
+            <Spacer />
+            {canWrite && (
+              <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload, toast)}>
+                New shipment
+              </button>
+            )}
+          </Toolbar>
+        }
         footer={
           data && (
             <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />

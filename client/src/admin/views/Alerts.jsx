@@ -41,33 +41,34 @@ export default function Alerts() {
 
   return (
     <>
-      <Toolbar>
-        <Select
-          label="Filter by status"
-          allLabel="All statuses"
-          value={filters.status}
-          onChange={(status) => set({ status })}
-          options={['open', 'investigating', 'resolved', 'dismissed']}
-        />
-        <Select
-          label="Filter by severity"
-          allLabel="All severities"
-          value={filters.severity}
-          onChange={(severity) => set({ severity })}
-          options={['critical', 'high', 'medium', 'low']}
-        />
-        <Select
-          label="Filter by type"
-          allLabel="All types"
-          value={filters.type}
-          onChange={(type) => set({ type })}
-          options={TYPES}
-        />
-        <Spacer />
-        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} matching</span>
-      </Toolbar>
-
       <TableCard
+        toolbar={
+          <Toolbar>
+            <Select
+              label="Filter by status"
+              allLabel="All statuses"
+              value={filters.status}
+              onChange={(status) => set({ status })}
+              options={['open', 'investigating', 'resolved', 'dismissed']}
+            />
+            <Select
+              label="Filter by severity"
+              allLabel="All severities"
+              value={filters.severity}
+              onChange={(severity) => set({ severity })}
+              options={['critical', 'high', 'medium', 'low']}
+            />
+            <Select
+              label="Filter by type"
+              allLabel="All types"
+              value={filters.type}
+              onChange={(type) => set({ type })}
+              options={TYPES}
+            />
+            <Spacer />
+            <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} matching</span>
+          </Toolbar>
+        }
         title="Queue"
         footer={
           data && (

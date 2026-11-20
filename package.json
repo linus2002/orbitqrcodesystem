@@ -31,6 +31,7 @@
     "studio:schema": "node scripts/gen-studio-schema.js"
   },
   "dependencies": {
+    "@fontsource/geist": "^5.3.0",
     "@fontsource/poppins": "^5.3.0",
     "@sanity/client": "^8.7.0",
     "@vercel/functions": "^3.9.11",

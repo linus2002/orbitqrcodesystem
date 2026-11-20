@@ -2,9 +2,13 @@
  * Overview: the screen a security analyst opens first each morning.
  *
  * Ordered by decision value, not data availability:
- *   1. is anything on fire right now      (urgent tiles)
- *   2. what does normal look like today   (volume + flag rate)
- *   3. where is it happening              (trend, geography, worst batches)
+ *   1. is anything on fire right now      (the four figures)
+ *   2. what does normal look like today   (volume, and how much was flagged)
+ *   3. where is it happening              (places, worst batches, latest flags)
+ *
+ * Laid out like the rest of the dashboard (after Studio Admin): figure cards
+ * with an icon and a change pill, then cards with a title and a line under
+ * it. The legend for the badges and colours is in the top bar now.
  */
 import { useNavigate } from 'react-router-dom';
 
@@ -12,10 +16,8 @@ import { useApi, usePermission } from '../../lib/hooks.jsx';
 import { fmtNumber, fmtRelative, humanise } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
 import { TrendChart, BarList } from '../components/Charts.jsx';
-import {
-  Card, TableCard, Table, Tiles, Toolbar, Spacer, Loading, ErrorNote, ResultBadge, StatusBadge,
-} from '../components/ui.jsx';
-import { LegendButton } from '../components/Legend.jsx';
+import { Card, TableCard, Table, Tiles, Loading, ErrorNote, ResultBadge, StatusBadge } from '../components/ui.jsx';
+import { Icon } from '../../components/Icons.jsx';
 
 const DAYS = 30;
 
@@ -26,7 +28,7 @@ export default function Dashboard() {
 
   useHeader(
     'Overview',
-    `Last ${DAYS} days. Pilot and sandbox batches are excluded from every figure on this page.`
+    `The last ${DAYS} days. Pilot and sandbox batches are left out of every figure here.`
   );
 
   const { data, error, loading } = useApi('/api/admin/overview', { query: { days: DAYS } });
@@ -43,65 +45,100 @@ export default function Dashboard() {
   if (error) return <ErrorNote error={error} />;
 
   const o = data.overview;
+  const flaggedShare = o.scans.total ? (o.scans.flagged / o.scans.total) * 100 : 0;
 
   return (
     <>
-      {/* What the badges, colours and icons across the dashboard mean. Here,
-          on the first screen, because this is where a new user starts. */}
-      <Toolbar>
-        <Spacer />
-        <LegendButton />
-      </Toolbar>
-
       {/* The flag rate is the number the team actually watches: raw counts
           rise with traffic, so the rate is what says whether things are
-          getting worse. Tiles leading to a section the viewer cannot open are
-          omitted rather than shown-and-dead. */}
+          getting worse. Cards leading to a section the viewer cannot open
+          are left out rather than shown and dead. */}
       <Tiles
         items={[
           {
-            // The headline figure, so it carries the filled tile.
             label: 'Checks',
+            icon: 'activity',
             value: fmtNumber(o.scans.total),
-            meta: `${fmtNumber(o.scans.today)} today · ${fmtNumber(o.scans.previousTotal)} previous ${DAYS} days`,
+            meta: `${fmtNumber(o.scans.today)} today · ${fmtNumber(o.scans.previousTotal)} the ${DAYS} days before`,
             change: o.scans.changePct,
             changeGood: 'up',
             to: canScans ? '/admin/scans' : undefined,
-            tone: 'blue',
           },
           {
             label: 'Flagged',
+            icon: 'flag',
             value: fmtNumber(o.scans.flagged),
             // A rise here is bad news, which is why changeGood is inverted.
-            meta: `${o.scans.flagRatePerThousand} per 1,000 · ${fmtNumber(o.scans.previousFlagged)} previous ${DAYS} days`,
+            meta: `${o.scans.flagRatePerThousand} per 1,000 checks`,
             change: o.scans.flaggedChangePct,
             changeGood: 'down',
-            tone: 'red',
             to: canScans ? '/admin/scans?result=flagged' : undefined,
           },
           canAlerts && {
             label: 'Needs attention',
+            icon: 'bell',
             value: fmtNumber(o.alerts.open + o.alerts.investigating),
             meta: `${fmtNumber(o.alerts.urgent)} high or critical`,
-            tone: 'violet',
             to: '/admin/alerts',
           },
           {
             label: 'Units serialized',
+            icon: 'layers',
             value: fmtNumber(o.codes.total),
             meta: `${fmtNumber(o.codes.verified)} verified by a patient`,
-            tone: 'green',
             to: '/admin/batches',
           },
         ]}
       />
 
-      <Card title="Verification volume" className="chart-card">
-        <TrendChart series={data.trend} />
+      {/* The volume, and beside it what it adds up to: how many checks, and
+          how much of that was flagged - the bar makes the share visible. */}
+      <Card
+        title="Verification volume"
+        description={`Genuine and flagged checks per day, the last ${DAYS} days.`}
+        className="chart-card"
+      >
+        <div className="volume">
+          <div className="volume-chart">
+            <TrendChart series={data.trend} />
+          </div>
+          <div className="volume-summary">
+            <div className="volume-big">
+              <strong>{fmtNumber(o.scans.total)}</strong>
+              <span>checks</span>
+            </div>
+            <p className="volume-note">
+              Every pack checked in the last {DAYS} days, {fmtNumber(o.scans.today)} of them today.
+            </p>
+            <div className="volume-box">
+              <span className="volume-box-k">Flagged</span>
+              <div className="volume-big">
+                <strong>{fmtNumber(o.scans.flagged)}</strong>
+                <span>checks</span>
+              </div>
+              <p className="volume-note">
+                {flaggedShare.toFixed(1)}% of all checks: {o.scans.flagRatePerThousand} in every 1,000.
+              </p>
+              <div
+                className="volume-bar"
+                role="img"
+                aria-label={`${flaggedShare.toFixed(1)}% of checks were flagged`}
+              >
+                <i style={{ width: `${Math.min(100, flaggedShare)}%` }} />
+              </div>
+              <div className="volume-bar-k">
+                <span>
+                  <b>{fmtNumber(o.scans.flagged)}</b> flagged
+                </span>
+                <span>{fmtNumber(o.scans.total)} checks</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </Card>
 
       <div className="two-up">
-        <Card title="Where checks come from">
+        <Card title="Where checks come from" description="Checks by place; the red end is the flagged share.">
           <BarList
             rows={data.geo.map((g) => ({
               label: [g.region, g.country].filter(Boolean).join(', ') || 'Unknown',
@@ -111,7 +148,7 @@ export default function Dashboard() {
           />
         </Card>
 
-        <TableCard title="Batches with the most flags">
+        <TableCard title="Batches with the most flags" description="Open the batch list to act on one.">
           <Table
             rows={data.topBatches}
             onRowClick={() => navigate('/admin/batches')}
@@ -139,9 +176,11 @@ export default function Dashboard() {
       {canScans && recent.data && (
         <TableCard
           title="Most recent flagged checks"
+          description="The latest checks that came back flagged, newest first."
           actions={
-            <button className="btn btn-sm" onClick={() => navigate('/admin/scans')}>
+            <button className="btn btn-sm" onClick={() => navigate('/admin/scans?result=flagged')}>
               View all
+              <Icon name="chev-right" />
             </button>
           }
         >

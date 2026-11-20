@@ -24,8 +24,11 @@ export function HeaderProvider({ children }) {
 /** Rendered once by the shell. */
 export function PageHeader() {
   const { title, subtitle } = useContext(HeaderContext);
+  // The first thing in the page, large: what this screen is and what it is
+  // for. (It used to sit in the top bar; the bar now holds only tools.)
+  if (!title) return null;
   return (
-    <div className="grow">
+    <div className="page-head">
       <h1>{title}</h1>
       {subtitle && <p className="sub">{subtitle}</p>}
     </div>

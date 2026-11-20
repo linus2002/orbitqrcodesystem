@@ -42,36 +42,37 @@ export default function Scans() {
 
   return (
     <>
-      <Toolbar>
-        <Select
-          label="Filter by result"
-          allLabel="All results"
-          value={filters.result}
-          onChange={(result) => setFilters((f) => ({ ...f, result, page: 1 }))}
-          options={['genuine', 'flagged', 'invalid']}
-        />
-        <Select
-          label="Filter by channel"
-          allLabel="All channels"
-          value={filters.channel}
-          onChange={(channel) => setFilters((f) => ({ ...f, channel, page: 1 }))}
-          options={['web', 'sms', 'api']}
-        />
-        <label className="row text-sm">
-          <input
-            type="checkbox"
-            checked={filters.includeTest}
-            onChange={(e) => setFilters((f) => ({ ...f, includeTest: e.target.checked, page: 1 }))}
-          />{' '}
-          Include pilot scans
-        </label>
-        <Spacer />
-        <a className="btn btn-sm" href={`/api/admin/scans.csv?${exportParams}`} download>
-          <Icon name="down" /> Export CSV
-        </a>
-      </Toolbar>
-
       <TableCard
+        toolbar={
+          <Toolbar>
+            <Select
+              label="Filter by result"
+              allLabel="All results"
+              value={filters.result}
+              onChange={(result) => setFilters((f) => ({ ...f, result, page: 1 }))}
+              options={['genuine', 'flagged', 'invalid']}
+            />
+            <Select
+              label="Filter by channel"
+              allLabel="All channels"
+              value={filters.channel}
+              onChange={(channel) => setFilters((f) => ({ ...f, channel, page: 1 }))}
+              options={['web', 'sms', 'api']}
+            />
+            <label className="row text-sm">
+              <input
+                type="checkbox"
+                checked={filters.includeTest}
+                onChange={(e) => setFilters((f) => ({ ...f, includeTest: e.target.checked, page: 1 }))}
+              />{' '}
+              Include pilot scans
+            </label>
+            <Spacer />
+            <a className="btn btn-sm" href={`/api/admin/scans.csv?${exportParams}`} download>
+              <Icon name="down" /> Export CSV
+            </a>
+          </Toolbar>
+        }
         title={`${fmtNumber(data?.total ?? 0)} checks`}
         footer={
           data && (

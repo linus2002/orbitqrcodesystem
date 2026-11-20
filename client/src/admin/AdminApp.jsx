@@ -7,19 +7,25 @@
  * hand-typing /admin/scans as a regulator still gets a 403.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+
+// The dashboard's typeface (Geist, self-hosted - the CSP allows fonts from
+// this site only). Loaded with the dashboard's own chunk, so the patient
+// portal never downloads it.
+import '@fontsource/geist/latin-400.css';
+import '@fontsource/geist/latin-500.css';
+import '@fontsource/geist/latin-600.css';
 
 import { api } from '../lib/api.js';
 import { initials } from '../lib/format.js';
-import { useSession, useTheme } from '../lib/hooks.jsx';
+import { useBodyClass, useSession, useTheme } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
-import { Logo } from '../components/Logo.jsx';
 import BrandLoader from '../components/BrandLoader.jsx';
-import Clock from './components/Clock.jsx';
 import { DrawerProvider, useDrawer } from './components/Drawer.jsx';
 import { ViewerProvider } from './components/FileViewer.jsx';
 import { HeaderProvider, PageHeader, useHeader } from './components/PageHeader.jsx';
-import { NavContext } from './components/Legend.jsx';
+import { NavContext, LegendButton } from './components/Legend.jsx';
+import CommandPalette from './components/CommandPalette.jsx';
 import GuidedTour, { TourContext } from './components/GuidedTour.jsx';
 
 import Dashboard from './views/Dashboard.jsx';
@@ -64,6 +70,46 @@ export default function AdminApp() {
   const session = useSession();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  // The sidebar folded to its icons, on a wide screen; remembered.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('qrs.sidebar') === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
+  const [searching, setSearching] = useState(false);
+
+  // The dashboard's theme (admin-studio.css) hangs off this, on <body>, so it
+  // also reaches the drawers, viewer and tour rendered outside the shell.
+  useBodyClass('admin-body');
+
+  // Ctrl/Cmd+J opens search from anywhere in the dashboard.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setSearching(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const toggleSidebar = () => {
+    if (window.matchMedia('(max-width: 900px)').matches) {
+      setNavOpen((v) => !v);
+      return;
+    }
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem('qrs.sidebar', c ? 'open' : 'collapsed');
+      } catch {
+        /* private mode: not remembered */
+      }
+      return !c;
+    });
+  };
 
   // The dashboard is the first thing that needs to know who is signed in, so
   // it is what triggers the session lookup. The public portal never does.
@@ -137,25 +183,34 @@ export default function AdminApp() {
         {/* Outside the drawer, so a file opened from inside a drawer reaches it. */}
         <ViewerProvider>
         <DrawerProvider>
-          <div className="admin-shell">
+          <div className={`admin-shell${collapsed ? ' is-collapsed' : ''}`}>
             <Sidebar open={navOpen} routes={allowed} session={session} />
-  
+
             <div className="admin-main">
+              {/* The bar holds the tools, not the page's title: the title is
+                  the first thing in the page, large, under it. */}
               <header className="topbar">
                 <button
-                  className="icon-btn menu-btn"
+                  className="icon-btn icon-btn-bare"
                   type="button"
-                  onClick={() => setNavOpen((v) => !v)}
-                  aria-label="Open navigation"
-                  aria-expanded={navOpen}
+                  onClick={toggleSidebar}
+                  aria-label="Toggle sidebar"
+                  title="Toggle sidebar"
                 >
-                  <Icon name="menu" />
+                  <Icon name="sidebar" />
                 </button>
-                <PageHeader />
+                <span className="topbar-sep" aria-hidden="true" />
+                <button type="button" className="topbar-search" onClick={() => setSearching(true)}>
+                  <Icon name="search" />
+                  <span>Search</span>
+                  <kbd>Ctrl J</kbd>
+                </button>
+                <span className="grow" />
                 <ShellTools signOut={session.signOut} user={session.user} />
               </header>
-  
+
               <main className="view" aria-live="polite">
+                <PageHeader />
                 <Routes>
                   {ROUTES.map((r) => (
                     <Route
@@ -174,6 +229,7 @@ export default function AdminApp() {
       </NavContext.Provider>
     </HeaderProvider>
     {touring && <GuidedTour steps={tourSteps(session.user, allowed)} onClose={endTour} />}
+    <CommandPalette routes={allowed} open={searching} onClose={() => setSearching(false)} />
     </TourContext.Provider>
   );
 }
@@ -249,13 +305,11 @@ function Denied({ role, notFound = false }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Clock, theme, sign-out and your own picture, pinned to the right of the top
- * bar.
+ * The legend, theme, sign-out and your own picture, pinned to the right of
+ * the top bar, as icons.
  *
- * The two icon buttons are borderless: they sit beside a view's own action
- * buttons, and giving them the same boxed treatment would put three
- * equal-looking buttons in a row where only one is the thing the page wants
- * you to do.
+ * The icon buttons are borderless: the bar holds tools, and boxing them would
+ * make them look like the page's own actions.
  *
  * The picture is the same account button as the one in the sidebar foot, not a
  * second way in. It is duplicated here because the sidebar collapses off
@@ -269,8 +323,7 @@ function ShellTools({ signOut, user }) {
 
   return (
     <div className="shell-tools" data-tour="tools">
-      <Clock />
-      <span className="shell-tools-sep" aria-hidden="true" />
+      <LegendButton icon />
       <button
         className="icon-btn icon-btn-bare"
         type="button"
@@ -367,8 +420,12 @@ function Sidebar({ open, routes, session }) {
   return (
     <aside className={`sidebar${open ? ' open' : ''}`}>
       <div className="sidebar-head">
-        <Logo size="lg" text={false} />
+        <img className="sidebar-mark" src="/img/logo-mark-192.png" alt="" width="192" height="192" />
+        <span className="sidebar-name">Getmeds</span>
+        <span className="sidebar-sub">QR Shield</span>
       </div>
+
+      <QuickActions routes={routes} alerts={badges.alerts} />
 
       <nav className="nav" aria-label="Dashboard sections">
         {items.map((item, i) =>
@@ -379,6 +436,7 @@ function Sidebar({ open, routes, session }) {
           ) : (
             <NavLink
               key={item.route.path || 'index'}
+              title={item.route.label}
               data-tour={`nav-${item.route.path || 'overview'}`}
               to={`/admin/${item.route.path}`}
               end={item.route.path === ''}
@@ -403,6 +461,40 @@ function Sidebar({ open, routes, session }) {
   );
 }
 
+/**
+ * The sidebar's first row: the thing staff most often come to do - look up a
+ * pack code - as the filled button, and the alert queue beside it as an icon,
+ * with a dot when something waits.
+ */
+function QuickActions({ routes, alerts }) {
+  const navigate = useNavigate();
+  const canLookup = routes.some((r) => r.path === 'lookup');
+  const canAlerts = routes.some((r) => r.path === 'alerts');
+  if (!canLookup && !canAlerts) return null;
+  return (
+    <div className="sidebar-quick">
+      {canLookup && (
+        <button type="button" className="quick-main" onClick={() => navigate('/admin/lookup')} title="Look up a code">
+          <Icon name="plus-circle" />
+          <span>Look up a code</span>
+        </button>
+      )}
+      {canAlerts && (
+        <button
+          type="button"
+          className="quick-icon"
+          onClick={() => navigate('/admin/alerts')}
+          aria-label={alerts ? `Alerts: ${alerts} waiting` : 'Alerts'}
+          title="Alerts"
+        >
+          <Icon name="bell" />
+          {alerts > 0 && <span className="quick-dot" aria-hidden="true" />}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AccountChip({ user }) {
   const { open: openAccount, loading } = useOpenAccount(user);
 
@@ -413,8 +505,9 @@ function AccountChip({ user }) {
       </span>
       <span className="who">
         <b>{user.fullName}</b>
-        <span>{user.role}</span>
+        <span>{user.email}</span>
       </span>
+      <Icon name="more" className="user-chip-more" />
     </button>
   );
 }

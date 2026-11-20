@@ -585,26 +585,12 @@
 }
 
 /* ==========================================================================
-   Squarer, centred (the customer pages - body.page-white)
+   Centred (the customer pages - body.page-white)
    ========================================================================== */
 
-/* Corners: small and even. Pill buttons and 22px cards read as a toy on a
-   page about medicine safety; 6-10px reads as an institution. Scoped to the
-   customer pages - the dashboard keeps its own. */
-.page-white {
-  --r-sm: 6px;
-  --r: 8px;
-  --r-lg: 10px;
-  --r-xl: 12px;
-}
-.page-white .btn { border-radius: 8px; }
-.page-white .input,
-.page-white .select,
-.page-white .textarea,
-.page-white .input-code { border-radius: 8px; }
-.page-white .alert { border-radius: 8px; }
-.page-white .badge { border-radius: 6px; }
-.page-white .checker-line button { border-radius: 6px; }
+/* Corners: small and even everywhere now (app.css tokens, buttons, fields,
+   badges) - pills and 22px cards read as a toy on a page about medicine
+   safety; 6-10px reads as an institution. */
 
 /* One centred column: logo, heading, the card, the footer lines. The photo
    behind is dimmed evenly (app.css), since the column now crosses it. */

@@ -55,32 +55,33 @@ export default function Customers() {
 
   return (
     <>
-      <Toolbar>
-        <input
-          className="input input-inline"
-          type="search"
-          placeholder="Search name, number or email"
-          aria-label="Search customers"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setFilters((f) => ({ ...f, page: 1 }));
-          }}
-        />
-        <Select
-          label="Filter by who they are"
-          allLabel="Everyone"
-          value={filters.role}
-          onChange={(role) => setFilters({ page: 1, role })}
-          options={ROLES}
-        />
-        <Spacer />
-        <a className="btn btn-sm" href={`/api/admin/customers.csv?${exportParams}`} download>
-          <Icon name="down" /> Export CSV
-        </a>
-      </Toolbar>
-
       <TableCard
+        toolbar={
+          <Toolbar>
+            <input
+              className="input input-inline"
+              type="search"
+              placeholder="Search name, number or email"
+              aria-label="Search customers"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setFilters((f) => ({ ...f, page: 1 }));
+              }}
+            />
+            <Select
+              label="Filter by who they are"
+              allLabel="Everyone"
+              value={filters.role}
+              onChange={(role) => setFilters({ page: 1, role })}
+              options={ROLES}
+            />
+            <Spacer />
+            <a className="btn btn-sm" href={`/api/admin/customers.csv?${exportParams}`} download>
+              <Icon name="down" /> Export CSV
+            </a>
+          </Toolbar>
+        }
         title={`${fmtNumber(data?.total ?? 0)} people`}
         footer={
           data && (

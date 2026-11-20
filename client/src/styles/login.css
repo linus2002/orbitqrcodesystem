@@ -85,7 +85,7 @@
   grid-template-columns: minmax(0, 1fr);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 28px;
+  border-radius: 12px;
   overflow: hidden;
 }
 @media (min-width: 860px) {
@@ -100,7 +100,7 @@
   flex-direction: column;
   padding: 32px 32px 36px;
   background: var(--signin-panel);
-  border-radius: 28px;
+  border-radius: 10px;
   overflow: hidden;
 }
 @media (min-width: 860px) {
@@ -162,7 +162,7 @@
   position: relative;
   width: 230px;
   height: 230px;
-  border-radius: 56px;
+  border-radius: 28px;
   rotate: -12deg;
   background: linear-gradient(135deg, #8bd8f8 0%, #1ea0da 45%, #1c5cab 100%);
   box-shadow:
@@ -174,7 +174,7 @@
 .tile-main-plate {
   position: absolute;
   inset: 30px;
-  border-radius: 38px;
+  border-radius: 20px;
   overflow: hidden;
   background: linear-gradient(135deg, #ffffff, #e2f1fb);
   box-shadow:
@@ -208,7 +208,7 @@
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  border-radius: 20px;
+  border-radius: 10px;
   rotate: -10deg;
   font-size: 1.6rem;
   font-weight: 600;
@@ -238,7 +238,7 @@
   justify-content: center;
   width: 92px;
   height: 92px;
-  border-radius: 26px;
+  border-radius: 14px;
   rotate: 12deg;
   color: #2a78d6;
   background: linear-gradient(135deg, #ffffff, #d6e9fa);
@@ -253,7 +253,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  border-radius: 999px;
+  border-radius: 8px;
   rotate: 6deg;
   font-size: 0.82rem;
   font-weight: 600;
@@ -286,7 +286,7 @@
   justify-content: center;
   width: 50px;
   height: 50px;
-  border-radius: 16px;
+  border-radius: 10px;
   rotate: -8deg;
   color: #fff;
   background: linear-gradient(135deg, #f07a7a, #d03b3b);
@@ -424,7 +424,7 @@
   color: var(--ink);
   background: transparent;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 13px 24px;
 }
 .signin-input::placeholder { color: var(--ink-muted); }
@@ -446,24 +446,22 @@
 }
 .signin-note strong { font-weight: 500; color: var(--ink-2); }
 
-/* Primary action and the way back, sharing one pill. */
+/* One filled button, full width; the way back a plain link under it. Two
+   equal halves of one pill made "Back" look like a second answer to the
+   same question. */
 .signin-actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  gap: 10px;
   margin-top: auto;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
 }
 .signin-btn,
 .signin-back {
-  flex: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 13px 16px;
-  border-radius: 999px;
+  border-radius: 8px;
   font: 600 0.9rem var(--sans);
   white-space: nowrap;
   text-decoration: none;
@@ -478,6 +476,26 @@
 }
 .signin-btn:hover:not(:disabled) { filter: brightness(1.08); }
 .signin-btn:disabled { opacity: 0.65; cursor: default; }
+.signin-btn { width: 100%; }
+.signin-back {
+  justify-self: center;
+  padding: 8px 12px;
+  font-weight: 500; font-size: 0.86rem;
+  color: var(--ink-2);
+}
+.signin-back svg { width: 16px; height: 16px; }
+.signin-back:hover { color: var(--ink); background: var(--surface-3); }
+
+/* A failed sign-in, inside the form above the button. */
+.signin-error {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin: -12px 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--danger-tint); color: var(--danger-ink);
+  font-size: 0.86rem; line-height: 1.45;
+}
+.signin-error svg { width: 17px; height: 17px; flex: none; margin-top: 1px; }
 .signin-btn svg { width: 15px; height: 15px; }
 .signin-back { font-weight: 500; color: var(--ink-2); transition: color 0.15s; }
 .signin-back:hover { color: var(--ink); }

@@ -70,48 +70,49 @@ export default function Batches() {
 
   return (
     <>
-      <Toolbar>
-        {/* The count leads, as it does on every other listing screen. Sitting
-            after the "Include pilot batches" checkbox it read as part of that
-            label rather than as a total. */}
-        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} batches</span>
-        <input
-          className="input search"
-          type="search"
-          placeholder="Search batch or product"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setFilters((f) => ({ ...f, page: 1 }));
-          }}
-        />
-        <Select
-          label="Filter by status"
-          allLabel="All statuses"
-          value={filters.status}
-          onChange={(status) => setFilters((f) => ({ ...f, status, page: 1 }))}
-          options={STATUSES}
-        />
-        <label className="row text-sm">
-          <input
-            type="checkbox"
-            checked={filters.includeTest}
-            onChange={(e) => setFilters((f) => ({ ...f, includeTest: e.target.checked, page: 1 }))}
-          />{' '}
-          Include pilot batches
-        </label>
-        <Spacer />
-        {/* Actions sit with the rows they change, not in the page header
-            strip - see the note in Products.jsx. */}
-        <SpreadsheetTools entity="batches" label="batches" canWrite={canWrite} onImported={reload} />
-        {canWrite && (
-          <button className="btn btn-primary btn-sm" onClick={() => openNewBatch(drawer, reload)}>
-            New batch
-          </button>
-        )}
-      </Toolbar>
-
       <TableCard
+        toolbar={
+          <Toolbar>
+            {/* The count leads, as it does on every other listing screen. Sitting
+                after the "Include pilot batches" checkbox it read as part of that
+                label rather than as a total. */}
+            <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} batches</span>
+            <input
+              className="input search"
+              type="search"
+              placeholder="Search batch or product"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setFilters((f) => ({ ...f, page: 1 }));
+              }}
+            />
+            <Select
+              label="Filter by status"
+              allLabel="All statuses"
+              value={filters.status}
+              onChange={(status) => setFilters((f) => ({ ...f, status, page: 1 }))}
+              options={STATUSES}
+            />
+            <label className="row text-sm">
+              <input
+                type="checkbox"
+                checked={filters.includeTest}
+                onChange={(e) => setFilters((f) => ({ ...f, includeTest: e.target.checked, page: 1 }))}
+              />{' '}
+              Include pilot batches
+            </label>
+            <Spacer />
+            {/* Actions sit with the rows they change, not in the page header
+                strip - see the note in Products.jsx. */}
+            <SpreadsheetTools entity="batches" label="batches" canWrite={canWrite} onImported={reload} />
+            {canWrite && (
+              <button className="btn btn-primary btn-sm" onClick={() => openNewBatch(drawer, reload)}>
+                New batch
+              </button>
+            )}
+          </Toolbar>
+        }
         title="Production batches"
         footer={
           data && (

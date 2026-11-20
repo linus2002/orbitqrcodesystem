@@ -17,7 +17,7 @@ import { useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { api, ApiError } from '../lib/api.js';
-import { useBodyClass, useSession, useTheme, useToast } from '../lib/hooks.jsx';
+import { useBodyClass, useSession, useTheme } from '../lib/hooks.jsx';
 import { Icon } from '../components/Icons.jsx';
 import PasswordField from '../components/PasswordField.jsx';
 import SignInShowcase from './SignInShowcase.jsx';
@@ -40,9 +40,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const toast = useToast();
-  // Problems show as a toast in the top-right corner, not inside the card.
-  const fail = (message) => toast(message, 'error', { title: 'Sign-in failed' });
+  // What went wrong, said inside the form, right above the button just
+  // pressed - not in a toast in the far corner, where the eye is not.
+  const [error, setError] = useState(null);
+  const fail = (message) => setError(message);
 
   const passwordRef = useRef(null);
 
@@ -50,6 +51,7 @@ export default function LoginPage() {
 
   async function submit(e) {
     e.preventDefault();
+    setError(null);
 
     if (!EMAIL_RE.test(email.trim())) {
       fail('Enter a valid email address.');
@@ -58,6 +60,7 @@ export default function LoginPage() {
     }
     if (!password) {
       fail('Enter your password.');
+      passwordRef.current?.focus();
       return;
     }
 
@@ -110,8 +113,7 @@ export default function LoginPage() {
             <span>Getmeds</span>
           </div>
 
-          <p className="signin-welcome">Welcome back</p>
-          <h1 className="signin-title">Sign in now</h1>
+          <h1 className="signin-title">Sign in</h1>
 
           <form className="signin-form" onSubmit={submit} noValidate>
             <label className="signin-label" htmlFor="email">
@@ -128,7 +130,10 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
+                setError(null);
               }}
+              aria-invalid={error && !EMAIL_RE.test(email.trim()) ? 'true' : undefined}
+              aria-describedby={error ? 'signinError' : undefined}
               autoFocus
             />
 
@@ -144,13 +149,23 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
+                setError(null);
               }}
+              aria-describedby={error ? 'signinError' : undefined}
             />
 
             <p className="signin-note">
               Forgot the password? <strong>Ask your administrator.</strong>
             </p>
 
+            {error && (
+              <div className="signin-error" id="signinError" role="alert">
+                <Icon name="alert" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* One filled button; the way back is a plain link under it. */}
             <div className="signin-actions">
               <button className="signin-btn" type="submit" disabled={busy}>
                 {busy ? (
@@ -162,7 +177,7 @@ export default function LoginPage() {
                 )}
               </button>
               <a className="signin-back" href="/">
-                Back to portal
+                <Icon name="back" /> Back to the portal
               </a>
             </div>
           </form>

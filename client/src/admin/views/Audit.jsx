@@ -54,19 +54,20 @@ export default function Audit() {
 
   return (
     <>
-      <Toolbar>
-        <Select
-          label="Filter by action"
-          allLabel="All activity"
-          value={filters.action}
-          onChange={(action) => setFilters({ page: 1, action })}
-          options={ACTION_GROUPS}
-        />
-        <Spacer />
-        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} entries</span>
-      </Toolbar>
-
       <TableCard
+        toolbar={
+          <Toolbar>
+            <Select
+              label="Filter by action"
+              allLabel="All activity"
+              value={filters.action}
+              onChange={(action) => setFilters({ page: 1, action })}
+              options={ACTION_GROUPS}
+            />
+            <Spacer />
+            <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} entries</span>
+          </Toolbar>
+        }
         title="Activity"
         footer={
           data && (

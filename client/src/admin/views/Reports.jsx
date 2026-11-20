@@ -31,19 +31,20 @@ export default function Reports() {
 
   return (
     <>
-      <Toolbar>
-        <Select
-          label="Filter by status"
-          allLabel="All"
-          value={filters.status}
-          onChange={(status) => setFilters({ page: 1, status })}
-          options={['new', 'reviewing', 'closed']}
-        />
-        <Spacer />
-        <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} reports</span>
-      </Toolbar>
-
       <TableCard
+        toolbar={
+          <Toolbar>
+            <Select
+              label="Filter by status"
+              allLabel="All"
+              value={filters.status}
+              onChange={(status) => setFilters({ page: 1, status })}
+              options={['new', 'reviewing', 'closed']}
+            />
+            <Spacer />
+            <span className="text-sm text-muted">{fmtNumber(data?.total ?? 0)} reports</span>
+          </Toolbar>
+        }
         title="Reports"
         footer={
           data && (

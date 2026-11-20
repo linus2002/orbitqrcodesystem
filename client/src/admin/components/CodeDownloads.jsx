@@ -14,7 +14,7 @@ import { Icon } from '../../components/Icons.jsx';
  * Every QR of a batch as one ZIP of print files (SVG or PNG), named in packing
  * order, with a codes.csv inside. Exported for the batch screen too.
  */
-export function QrZipButtons({ batch }) {
+export function QrZipButtons({ batch, compact = false }) {
   const toast = useToast();
   const [busy, setBusy] = useState(null);
   async function get(format) {
@@ -30,8 +30,18 @@ export function QrZipButtons({ batch }) {
     }
   }
   return ['svg', 'png'].map((format) => (
-    <button key={format} type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => get(format)}>
-      <Icon name="download" /> {busy === format ? 'Preparing...' : `QRs (${format.toUpperCase()})`}
+    <button
+      key={format}
+      type="button"
+      className={compact ? 'btn btn-sm btn-quiet' : 'btn btn-sm'}
+      disabled={busy !== null}
+      onClick={() => get(format)}
+      // Compact (the product panel): the format alone, the rest said on hover.
+      title={compact ? `Every QR of ${batch.batch_number} as ${format.toUpperCase()} files (ZIP)` : undefined}
+      aria-label={compact ? `Download every QR of ${batch.batch_number} as ${format.toUpperCase()} (ZIP)` : undefined}
+    >
+      <Icon name={compact ? 'qr' : 'download'} />
+      {busy === format ? (compact ? '...' : 'Preparing...') : compact ? format.toUpperCase() : `QRs (${format.toUpperCase()})`}
     </button>
   ));
 }

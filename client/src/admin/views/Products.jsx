@@ -6,7 +6,7 @@
  */
 import { useState } from 'react';
 
-import { api, upload, download } from '../../lib/api.js';
+import { api, upload } from '../../lib/api.js';
 import { useApi, useDebounced, usePermission, useToast } from '../../lib/hooks.jsx';
 import { fmtDate, fmtNumber } from '../../lib/format.js';
 import { useHeader } from '../components/PageHeader.jsx';
@@ -16,7 +16,7 @@ import { QrZipButtons, openCodeQr } from '../components/CodeDownloads.jsx';
 import SpreadsheetTools from '../components/SpreadsheetTools.jsx';
 import { Icon } from '../../components/Icons.jsx';
 import {
-  TableCard, Table, Toolbar, Spacer, KV, Timeline, TimelineItem, StatusBadge, ErrorNote, Pager,
+  TableCard, Table, Toolbar, Spacer, KV, StatusBadge, ErrorNote, Pager,
 } from '../components/ui.jsx';
 
 export default function Products() {
@@ -43,22 +43,23 @@ export default function Products() {
         out, the clock), which read as one undifferentiated row of buttons
         where only some had anything to do with the page.
       */}
-      <Toolbar>
-        {count !== undefined && (
-          <span className="text-sm text-muted">
-            {fmtNumber(count)} {count === 1 ? 'product' : 'products'}
-          </span>
-        )}
-        <Spacer />
-        <SpreadsheetTools entity="products" label="products" canWrite={canWrite} onImported={reload} />
-        {canWrite && (
-          <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
-            New product
-          </button>
-        )}
-      </Toolbar>
-
-      <TableCard>
+      <TableCard
+        toolbar={
+          <Toolbar>
+            {count !== undefined && (
+              <span className="text-sm text-muted">
+                {fmtNumber(count)} {count === 1 ? 'product' : 'products'}
+              </span>
+            )}
+            <Spacer />
+            <SpreadsheetTools entity="products" label="products" canWrite={canWrite} onImported={reload} />
+            {canWrite && (
+              <button className="btn btn-primary btn-sm" onClick={() => openNew(drawer, reload)}>
+                New product
+              </button>
+            )}
+          </Toolbar>
+        }>
         <Table
           loading={loading}
           rows={data?.items}
@@ -107,115 +108,170 @@ async function openProduct(id, drawer, reload, canWrite) {
   const p = await api(`/api/admin/products/${id}`);
   drawer.open({
     title: p.name,
-    subtitle: `${p.sku} - ${p.strength ?? ''}`,
-    headerImage: '/img/productmodalbg.webp',
-    body: (
-      <>
-        <KV
-          rows={[
-            ['SKU', <span className="mono">{p.sku}</span>],
-            ['Generic name', p.generic_name ?? '-'],
-            ['Strength', p.strength ?? '-'],
-            ['Form', p.dosage_form ?? '-'],
-            ['Pack size', p.pack_size ?? '-'],
-            ['Manufacturer', p.manufacturer],
-            ['Category', p.category ?? '-'],
-            ['Status', <StatusBadge status={p.status} />],
-          ]}
-        />
+    subtitle: [p.strength, p.dosage_form].filter(Boolean).join(' · ') || p.sku,
+    body: <ProductPanel product={p} canWrite={canWrite} drawer={drawer} reload={reload} />,
+  });
+}
 
+const plural = (n, one, many = `${one}s`) => `${fmtNumber(n)} ${n === 1 ? one : many}`;
+
+/**
+ * One product, at a glance: its picture and identity, its specification as
+ * an icon grid, three counts, then its leaflet and its batches - each batch
+ * one row, with its codes' actions as icons (named on hover and to screen
+ * readers). What used to be paragraphs of explanation is a hover on the (i).
+ */
+function ProductPanel({ product: p, canWrite, drawer, reload }) {
+  const codes = p.batches.reduce((n, b) => n + (b.codes_issued || 0), 0);
+  const latest = p.leaflets[0];
+  const specs = [
+    ['pill', 'Generic name', p.generic_name],
+    ['activity', 'Strength', p.strength],
+    ['box', 'Form', p.dosage_form],
+    ['layers', 'Pack size', p.pack_size],
+    ['building', 'Manufacturer', p.manufacturer],
+    ['tag', 'Category', p.category],
+  ].filter(([, , v]) => v);
+
+  return (
+    <div className="pp">
+      <div className="pp-hero">
         <ProductImage product={p} canWrite={canWrite} reload={reload} />
+        <div className="pp-id">
+          <span className="pp-sku mono" title="SKU - the first part of every code for this product">
+            {p.sku}
+          </span>
+          <div className="row row-wrap">
+            <StatusBadge status={p.status} />
+            {p.category && <span className="pp-chip">{p.category}</span>}
+          </div>
+        </div>
+      </div>
 
+      <dl className="pp-specs">
+        {specs.map(([icon, label, value]) => (
+          <div key={label}>
+            <dt>
+              <Icon name={icon} />
+              {label}
+            </dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="pp-stats">
         <div>
-          <h3 className="mb-8">Leaflets</h3>
-          {p.leaflets.length ? (
-            <LeafletVersions product={p} />
-          ) : (
-            <p className="text-muted text-sm">
-              No leaflet published. Patients will see no dosing information on a genuine result.
-            </p>
-          )}
+          <Icon name="box" />
+          <strong>{fmtNumber(p.batches.length)}</strong>
+          <span>{p.batches.length === 1 ? 'batch' : 'batches'}</span>
+        </div>
+        <div>
+          <Icon name="qr" />
+          <strong>{fmtNumber(codes)}</strong>
+          <span>{codes === 1 ? 'pack code' : 'pack codes'}</span>
+        </div>
+        <div className={latest ? undefined : 'is-warn'}>
+          <Icon name={latest ? 'log' : 'alert'} />
+          <strong>{latest ? `v${latest.version}` : 'None'}</strong>
+          <span>leaflet</span>
+        </div>
+      </div>
+
+      <section className="pp-section">
+        <header>
+          <h3>
+            <Icon name="log" /> Leaflet
+          </h3>
           {canWrite && (
-            <div className="row row-wrap mt-8">
-              <button className="btn btn-sm" onClick={() => openPublishLeaflet(p, drawer, reload)}>
-                {p.leaflets.length ? 'Publish new version' : 'Publish leaflet'}
+            <div className="pp-actions">
+              <button
+                type="button"
+                className="btn btn-sm btn-quiet"
+                onClick={() => openPublishLeaflet(p, drawer, reload)}
+                title={p.leaflets.length ? 'Publish a new version' : 'Publish a leaflet'}
+              >
+                <Icon name="upload" /> {p.leaflets.length ? 'New version' : 'Publish'}
               </button>
-              <button className="btn btn-sm" onClick={() => openUseLeaflet(p, drawer, reload)}>
-                Use another product&apos;s leaflet
+              <button
+                type="button"
+                className="btn btn-sm btn-quiet pp-icon"
+                onClick={() => openUseLeaflet(p, drawer, reload)}
+                title="Use another product's leaflet"
+                aria-label="Use another product's leaflet"
+              >
+                <Icon name="copy" />
               </button>
             </div>
           )}
-        </div>
+        </header>
+        {p.leaflets.length ? (
+          <LeafletVersions product={p} />
+        ) : (
+          <p className="pp-empty is-warn">
+            <Icon name="alert" /> None yet: a genuine result shows no dosing information.
+          </p>
+        )}
+      </section>
 
-        <div>
-          <h3 className="mb-8">Batches</h3>
-          {p.batches.length ? (
-            <Timeline>
-              {p.batches.map((b) => (
-                <TimelineItem
-                  key={b.id}
-                  tone={b.status === 'recalled' ? 'flagged' : 'genuine'}
-                  title={
-                    <>
-                      <span className="mono">{b.batch_number}</span> <StatusBadge status={b.status} />
-                    </>
-                  }
-                  meta={`${fmtNumber(b.quantity)} units · expires ${fmtDate(b.expiry_date)}`}
-                />
-              ))}
-            </Timeline>
-          ) : (
-            <p className="text-muted text-sm">No batches yet.</p>
-          )}
-        </div>
-
-        <ProductCodes product={p} />
-      </>
-    ),
-  });
+      <BatchRows product={p} />
+    </div>
+  );
 }
 
 /**
- * Every leaflet version, newest first; a version published as a PDF opens it
- * in the file viewer, without leaving the product.
+ * Every leaflet version, newest first, one line each; a version published as
+ * a PDF opens in the file viewer, without leaving the product.
  */
 function LeafletVersions({ product }) {
   const viewer = useViewer();
-  return product.leaflets.map((l) => {
-    const q = new URLSearchParams({ version: l.version });
-    if (l.language !== 'en') q.set('lang', l.language);
-    const pdf = `/api/product/${encodeURIComponent(product.sku)}/leaflet.pdf?${q}`;
-    return (
-      <div className="tl-body row row-wrap" key={l.id}>
-        <span>
-          v{l.version} ({l.language}) <span className="meta">from {fmtDate(l.effective_from)}</span>
-        </span>
-        {l.file_id && (
-          <button
-            type="button"
-            className="btn btn-sm btn-quiet"
-            onClick={() =>
-              viewer.open({
-                kind: 'pdf',
-                title: `${product.name} leaflet v${l.version} (${l.language})`,
-                subtitle: product.sku,
-                src: pdf,
-                downloads: [{ label: 'PDF', url: pdf, filename: `${product.sku}-leaflet-v${l.version}.pdf` }],
-              })
-            }
-          >
-            <Icon name="eye" /> View PDF
-          </button>
-        )}
-      </div>
-    );
-  });
+  return (
+    <ul className="pp-list">
+      {product.leaflets.map((l, i) => {
+        const q = new URLSearchParams({ version: l.version });
+        if (l.language !== 'en') q.set('lang', l.language);
+        const pdf = `/api/product/${encodeURIComponent(product.sku)}/leaflet.pdf?${q}`;
+        return (
+          <li key={l.id}>
+            <span className="pp-list-main">
+              <strong>v{l.version}</strong>
+              <span className="pp-chip">{l.language.toUpperCase()}</span>
+              {i === 0 && <span className="pp-chip is-on">Current</span>}
+            </span>
+            <span className="pp-meta">
+              <Icon name="calendar" /> {fmtDate(l.effective_from)}
+            </span>
+            {l.file_id && (
+              <button
+                type="button"
+                className="btn btn-sm btn-quiet pp-icon"
+                title="View the PDF"
+                aria-label={`View leaflet v${l.version} (${l.language})`}
+                onClick={() =>
+                  viewer.open({
+                    kind: 'pdf',
+                    title: `${product.name} leaflet v${l.version} (${l.language})`,
+                    subtitle: product.sku,
+                    src: pdf,
+                    downloads: [{ label: 'PDF', url: pdf, filename: `${product.sku}-leaflet-v${l.version}.pdf` }],
+                  })
+                }
+              >
+                <Icon name="eye" />
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /**
- * The product's picture: shown, and for someone who may edit products,
- * replaced or removed. JPEG, PNG or WebP up to 2 MB; the server checks the
- * bytes, not just the type the browser reports.
+ * The product's picture, as the panel's thumbnail: tap to view it large; for
+ * someone who may edit products, small icons to add, replace or remove it.
+ * JPEG, PNG or WebP up to 2 MB; the server checks the bytes, not just the
+ * type the browser reports.
  */
 function ProductImage({ product, canWrite, reload }) {
   const [url, setUrl] = useState(product.image_url ?? null);
@@ -259,16 +315,12 @@ function ProductImage({ product, canWrite, reload }) {
     }
   }
 
-  if (!url && !canWrite) return null;
-
   return (
-    <div>
-      <h3 className="mb-8">Picture</h3>
+    <div className="pp-pic-wrap">
       {url ? (
         <button
           type="button"
-          className="btn-reset"
-          style={{ cursor: 'zoom-in', padding: 0, border: 0, background: 'none' }}
+          className="pp-pic"
           onClick={() =>
             viewer.open({
               kind: 'image',
@@ -279,21 +331,23 @@ function ProductImage({ product, canWrite, reload }) {
             })
           }
           aria-label={`View the picture of ${product.name}`}
+          title="View the picture"
         >
-          <img
-            src={url}
-            alt={product.name}
-            style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, objectFit: 'contain', display: 'block' }}
-          />
+          <img src={url} alt="" />
         </button>
       ) : (
-        <p className="text-muted text-sm">No picture yet.</p>
+        <span className="pp-pic is-empty" title="No picture yet">
+          <Icon name="image" />
+        </span>
       )}
-      <ErrorNote error={error} />
       {canWrite && (
-        <div className="row row-wrap mt-8">
-          <label className={`btn btn-sm${busy ? ' disabled' : ''}`}>
-            {busy ? 'Saving...' : url ? 'Replace picture' : 'Add picture'}
+        <div className="pp-pic-tools">
+          <label
+            className={`pp-pic-tool${busy ? ' is-busy' : ''}`}
+            title={url ? 'Replace the picture' : 'Add a picture'}
+            aria-label={url ? 'Replace the picture' : 'Add a picture'}
+          >
+            <Icon name={busy ? 'more' : 'upload'} />
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
@@ -306,75 +360,115 @@ function ProductImage({ product, canWrite, reload }) {
             />
           </label>
           {url && (
-            <button type="button" className="btn btn-sm" disabled={busy} onClick={remove}>
-              Remove picture
+            <button
+              type="button"
+              className="pp-pic-tool"
+              disabled={busy}
+              onClick={remove}
+              title="Remove the picture"
+              aria-label="Remove the picture"
+            >
+              <Icon name="x" />
             </button>
           )}
         </div>
       )}
+      {error && <p className="field-error pp-pic-error">{error.message}</p>}
     </div>
   );
 }
 
 /**
- * The pack codes of this product, batch by batch.
- *
- * A code belongs to a batch, and this is the one screen where an admin can
- * see the codes printed on this product's packs without leaving the product:
- * each batch's codes, each with its QR, and the CSV that goes to the
- * packaging line. Hidden from a role without codes:read (the regulator).
+ * The product's batches and their pack codes, one row per batch: number and
+ * state, units / expiry / codes as icon facts, and the codes' actions (list,
+ * CSV, QR files) as icons on the right. One list where there were two - the
+ * batches, and the same batches again under "Pack codes". The code actions
+ * are hidden from a role without codes:read (the regulator).
  */
-function ProductCodes({ product }) {
+function BatchRows({ product }) {
   const canRead = usePermission('codes:read');
   const canExport = usePermission('codes:export');
   const [open, setOpen] = useState(null);
 
-  if (!canRead) return null;
-  const withCodes = product.batches.filter((b) => b.codes_issued > 0);
-
   return (
-    <div>
-      <h3 className="mb-8">Pack codes</h3>
-      {!withCodes.length ? (
-        <p className="text-muted text-sm">
-          No codes yet. Codes are created per batch: create a batch for this product under
-          Batches &amp; codes, then issue its codes. Each pack then gets one unique code, and the
-          code is what the customer scans or types.
+    <section className="pp-section">
+      <header>
+        <h3>
+          <Icon name="box" /> Batches &amp; pack codes
+        </h3>
+        <span
+          className="pp-hint"
+          tabIndex={0}
+          title="Codes are made per batch, one per pack, under Batches & codes. Until a batch is released, every scan of its codes says do not use. Label sheets are printed from Batches & codes."
+          aria-label="About batches and pack codes: codes are made per batch, one per pack. Until a batch is released, every scan of its codes says do not use."
+        >
+          <Icon name="info" />
+        </span>
+      </header>
+      {!product.batches.length ? (
+        <p className="pp-empty">
+          <Icon name="info" /> No batches yet. Create one under Batches &amp; codes.
         </p>
       ) : (
-        <div className="stack-sm">
-          {withCodes.map((b) => (
-            <div key={b.id}>
-              <div className="row row-wrap">
-                <span className="mono">{b.batch_number}</span>
-                <StatusBadge status={b.status} />
-                <span className="text-sm text-muted">{fmtNumber(b.codes_issued)} codes</span>
-                <button
-                  className="btn btn-sm"
-                  type="button"
-                  onClick={() => setOpen(open === b.id ? null : b.id)}
-                >
-                  {open === b.id ? 'Hide codes' : 'View codes'}
-                </button>
-                {canExport && (
-                  <>
-                    <a className="btn btn-sm" href={`/api/admin/batches/${b.id}/codes.csv`} download>
-                      <Icon name="down" /> CSV
-                    </a>
-                    <QrZipButtons batch={b} />
-                  </>
-                )}
-              </div>
-              {open === b.id && <BatchCodeList batchId={b.id} batchNumber={b.batch_number} />}
-            </div>
-          ))}
-          <p className="text-sm text-muted">
-            Until a batch is released, every scan of its codes says do not use. Label sheets are
-            printed from Batches &amp; codes.
-          </p>
-        </div>
+        <ul className="pp-list pp-batches">
+          {product.batches.map((b) => {
+            const hasCodes = canRead && b.codes_issued > 0;
+            return (
+              <li key={b.id}>
+                <div className="pp-batch">
+                  <span className="pp-list-main">
+                    <strong className="mono">{b.batch_number}</strong>
+                    <StatusBadge status={b.status} />
+                  </span>
+                  <span className="pp-facts">
+                    <span title="Units planned">
+                      <Icon name="layers" /> {plural(b.quantity, 'unit')}
+                    </span>
+                    <span title="Expires">
+                      <Icon name="calendar" /> {fmtDate(b.expiry_date)}
+                    </span>
+                    {canRead && (
+                      <span title="Pack codes issued">
+                        <Icon name="qr" /> {plural(b.codes_issued || 0, 'code')}
+                      </span>
+                    )}
+                  </span>
+                  {hasCodes && (
+                    <span className="pp-actions">
+                      <button
+                        type="button"
+                        className={`btn btn-sm btn-quiet pp-icon${open === b.id ? ' is-on' : ''}`}
+                        onClick={() => setOpen(open === b.id ? null : b.id)}
+                        title={open === b.id ? 'Hide the codes' : 'Show the codes'}
+                        aria-label={`${open === b.id ? 'Hide' : 'Show'} the codes of ${b.batch_number}`}
+                        aria-expanded={open === b.id}
+                      >
+                        <Icon name="eye" />
+                      </button>
+                      {canExport && (
+                        <>
+                          <a
+                            className="btn btn-sm btn-quiet"
+                            href={`/api/admin/batches/${b.id}/codes.csv`}
+                            download
+                            title={`The code list of ${b.batch_number}, for the packaging line (CSV)`}
+                            aria-label={`Download the code list of ${b.batch_number} (CSV)`}
+                          >
+                            <Icon name="download" /> CSV
+                          </a>
+                          <QrZipButtons batch={b} compact />
+                        </>
+                      )}
+                    </span>
+                  )}
+                </div>
+                {open === b.id && <BatchCodeList batchId={b.id} batchNumber={b.batch_number} />}
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -429,8 +523,9 @@ function BatchCodeList({ batchId, batchNumber }) {
                   type="button"
                   onClick={() => copy(c.code)}
                   aria-label={`Copy ${c.code}`}
+                  title="Copy the code"
                 >
-                  Copy
+                  <Icon name="copy" />
                 </button>
               </span>
             ),
@@ -456,32 +551,11 @@ function BatchCodeList({ batchId, batchNumber }) {
                   className="btn btn-sm btn-quiet"
                   onClick={() => openCodeQr(viewer, c, { batchNumber })}
                   aria-label={`View the QR for ${c.code}`}
+                  // The viewer has the SVG and PNG downloads, so the row needs
+                  // only this one control.
+                  title="View the QR, and download it as SVG or PNG"
                 >
-                  <Icon name="qr" /> View
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-quiet"
-                  onClick={() =>
-                    download(`/api/admin/codes/${c.id}/qr.svg?download=1`, { filename: `${c.code}.svg` }).catch(
-                      (err) => toast(err.message, 'error')
-                    )
-                  }
-                  aria-label={`Download the QR for ${c.code} as SVG`}
-                >
-                  <Icon name="download" /> SVG
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-quiet"
-                  onClick={() =>
-                    download(`/api/admin/codes/${c.id}/qr.png?download=1`, { filename: `${c.code}.png` }).catch(
-                      (err) => toast(err.message, 'error')
-                    )
-                  }
-                  aria-label={`Download the QR for ${c.code} as PNG`}
-                >
-                  <Icon name="download" /> PNG
+                  <Icon name="qr" />
                 </button>
               </span>
             ),

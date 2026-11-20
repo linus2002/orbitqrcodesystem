@@ -132,10 +132,23 @@ export default function GuidedTour({ steps, onClose }) {
         <p id="tour-text">{step.text}</p>
 
         <div className="tour-foot">
-          <div className="tour-dots" aria-label={`Step ${index + 1} of ${steps.length}`}>
-            {steps.map((s, i) => (
-              <span key={s.id} className={i === index ? 'on' : i < index ? 'done' : undefined} />
-            ))}
+          {/* One line that fills, not a dozen loose dots: dots read as
+              that many separate things; a line reads as one tour with an
+              end - and the count says exactly how far. */}
+          <div className="tour-progress">
+            <span className="tour-count">
+              Step {index + 1} of {steps.length}
+            </span>
+            <span
+              className="tour-bar"
+              role="progressbar"
+              aria-label="Tour progress"
+              aria-valuemin={1}
+              aria-valuemax={steps.length}
+              aria-valuenow={index + 1}
+            >
+              <i style={{ width: `${((index + 1) / steps.length) * 100}%` }} />
+            </span>
           </div>
           {!last && (
             <button type="button" className="tour-skip" onClick={finish}>

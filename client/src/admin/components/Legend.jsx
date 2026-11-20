@@ -461,8 +461,8 @@ function Legend({ nav, permissions }) {
   );
 }
 
-/** The button that opens the legend. */
-export function LegendButton() {
+/** The button that opens the legend: labelled, or (in the top bar) an icon. */
+export function LegendButton({ icon = false }) {
   const { open } = useDrawer();
   const nav = useContext(NavContext);
   const session = useSession();
@@ -470,8 +470,10 @@ export function LegendButton() {
 
   return (
     <button
-      className="btn btn-sm"
+      className={icon ? 'icon-btn icon-btn-bare' : 'btn btn-sm'}
       type="button"
+      aria-label={icon ? 'Legend: what the badges, colours and icons mean' : undefined}
+      title={icon ? 'Legend' : undefined}
       onClick={() =>
         open({
           title: 'Legend',
@@ -481,7 +483,7 @@ export function LegendButton() {
       }
     >
       <Icon name="help" />
-      Legend
+      {!icon && 'Legend'}
     </button>
   );
 }

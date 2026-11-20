@@ -32,6 +32,7 @@ import './styles/app.css';
 import './styles/portal.css';
 import './styles/login.css';
 import './styles/admin.css';
+import './styles/admin-studio.css';
 
 // Applied before the first paint so there is no flash of the wrong theme.
 applyStoredTheme();

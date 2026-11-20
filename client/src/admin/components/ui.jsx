@@ -16,15 +16,24 @@ import BrandLoader from '../../components/BrandLoader.jsx';
 // Containers
 // ---------------------------------------------------------------------------
 
-export function Card({ title, actions, children, footer, className = '' }) {
+/** The heading row of a card: title and a line under it, actions on the right. */
+function CardHead({ title, description, actions }) {
+  if (!title && !description && !actions) return null;
+  return (
+    <div className="card-head">
+      <div className="card-titles">
+        {title && <h2>{title}</h2>}
+        {description && <p className="card-desc">{description}</p>}
+      </div>
+      {actions && <div className="row row-wrap card-actions">{actions}</div>}
+    </div>
+  );
+}
+
+export function Card({ title, description, actions, children, footer, className = '' }) {
   return (
     <section className={`card ${className}`}>
-      {(title || actions) && (
-        <div className="card-head">
-          <h2>{title}</h2>
-          <div className="row row-wrap">{actions}</div>
-        </div>
-      )}
+      <CardHead title={title} description={description} actions={actions} />
       {children}
       {footer}
     </section>
@@ -32,28 +41,19 @@ export function Card({ title, actions, children, footer, className = '' }) {
 }
 
 /**
- * A table with its heading ABOVE the card rather than inside it.
+ * A table in one card, top to bottom: its title and a line about it, its
+ * filters (`toolbar`), the table, the pager. The header row of the table is
+ * plain, so the card's own title is the only heading above it.
  *
- * A data table already has a header row of its own - a blue bar with the
- * column names - so a `Card` title sits awkwardly right on top of it, reading
- * as a second header for the same thing. Putting the heading outside leaves
- * the blue bar as the top edge of the card and the heading as a label for it.
- *
- * Same props as `Card`, so the two are interchangeable at a call site.
+ * Same props as `Card`, plus `toolbar`, so the two are interchangeable.
  */
-export function TableCard({ title, actions, children, footer, className = '' }) {
+export function TableCard({ title, description, actions, toolbar, children, footer, className = '' }) {
   return (
-    <section className={`table-section ${className}`}>
-      {(title || actions) && (
-        <div className="section-head">
-          {title && <h2>{title}</h2>}
-          <div className="row row-wrap">{actions}</div>
-        </div>
-      )}
-      <div className="card">
-        {children}
-        {footer}
-      </div>
+    <section className={`card table-card ${className}`}>
+      <CardHead title={title} description={description} actions={actions} />
+      {toolbar && <div className="card-toolbar">{toolbar}</div>}
+      {children}
+      {footer}
     </section>
   );
 }
@@ -104,7 +104,8 @@ export function ErrorNote({ error }) {
  *   change?: number|null,        percentage against the previous period
  *   changeGood?: 'up'|'down',    which direction is the good news
  *   to?: string,                 where the corner arrow goes
- *   tone?: 'blue'|'red'|'violet'|'green'   which gradient the card carries
+ *   icon?: string,               the small icon chip above the label
+ *   tone?: 'blue'|'red'|'violet'|'green'   (kept for callers; the cards are neutral now)
  * }>} props.items
  */
 export function Tiles({ items }) {
@@ -117,7 +118,7 @@ export function Tiles({ items }) {
   );
 }
 
-function Tile({ label, value, meta, change, changeGood = 'up', to, tone = 'blue' }) {
+function Tile({ label, value, meta, change, changeGood = 'up', to, icon }) {
   const hasChange = typeof change === 'number' && Number.isFinite(change);
   const rising = hasChange && change > 0;
   /*
@@ -127,36 +128,39 @@ function Tile({ label, value, meta, change, changeGood = 'up', to, tone = 'blue'
    */
   const welcome = hasChange && (rising ? changeGood === 'up' : changeGood === 'down');
 
+  // A neutral card: an icon chip, the label, the figure with its change as a
+  // pill (dark when the change is good news, red when it is not), and a line
+  // under it. The corner arrow opens the section behind the number.
   return (
-    <div className={`tile tone-${tone}`}>
-      {/*
-        The shape sits behind the content as a lighter facet of the same
-        gradient, the way the reference does. Decorative, so it is hidden from
-        assistive tech and never carries meaning on its own.
-      */}
-      <span className="tile-shape" aria-hidden="true" />
-
+    <div className="tile">
       <div className="tile-top">
-        <span className="k">{label}</span>
+        {icon && (
+          <span className="tile-icon" aria-hidden="true">
+            <Icon name={icon} />
+          </span>
+        )}
         {to && (
-          <Link className="tile-link" to={to} aria-label={`Open ${label}`}>
-            <Icon name="arrow-right" />
+          <Link className="tile-link" to={to} aria-label={`Open ${label}`} title={`Open ${label}`}>
+            <Icon name="up-right" />
           </Link>
         )}
       </div>
 
-      <div className="tile-figure">
-        <div className="tile-value-row">
-          <span className="v">{value}</span>
-          {hasChange && change !== 0 && (
-            <span className={`tile-change${welcome ? ' is-good' : ' is-bad'}`}>
-              {rising ? '↗' : '↘'} {rising ? '+' : ''}
-              {change}%
-            </span>
-          )}
-        </div>
-        {meta && <div className="m">{meta}</div>}
+      <span className="k">{label}</span>
+      <div className="tile-value-row">
+        <span className="v">{value}</span>
+        {hasChange && change !== 0 && (
+          <span
+            className={`tile-change${welcome ? ' is-good' : ' is-bad'}`}
+            title={`${rising ? 'Up' : 'Down'} ${Math.abs(change)}% on the previous period`}
+          >
+            <Icon name={rising ? 'trend-up' : 'trend-down'} />
+            {rising ? '+' : ''}
+            {change}%
+          </span>
+        )}
       </div>
+      {meta && <div className="m">{meta}</div>}
     </div>
   );
 }
@@ -228,14 +232,47 @@ export function Pager({ page, pageSize, total, onPage }) {
   return (
     <div className="pager">
       <span>
-        {fmtNumber(from)}-{fmtNumber(to)} of {fmtNumber(total)}
+        Showing {fmtNumber(from)}-{fmtNumber(to)} of {fmtNumber(total)}
       </span>
       <span className="btns">
-        <button className="btn btn-sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-          Previous
+        <span className="pager-page">
+          Page {fmtNumber(page)} of {fmtNumber(pages)}
+        </span>
+        <button
+          className="btn btn-sm pager-btn"
+          disabled={page <= 1}
+          onClick={() => onPage(1)}
+          aria-label="First page"
+          title="First page"
+        >
+          <Icon name="chevs-left" />
         </button>
-        <button className="btn btn-sm" disabled={page >= pages} onClick={() => onPage(page + 1)}>
-          Next
+        <button
+          className="btn btn-sm pager-btn"
+          disabled={page <= 1}
+          onClick={() => onPage(page - 1)}
+          aria-label="Previous page"
+          title="Previous page"
+        >
+          <Icon name="chev-left" />
+        </button>
+        <button
+          className="btn btn-sm pager-btn"
+          disabled={page >= pages}
+          onClick={() => onPage(page + 1)}
+          aria-label="Next page"
+          title="Next page"
+        >
+          <Icon name="chev-right" />
+        </button>
+        <button
+          className="btn btn-sm pager-btn"
+          disabled={page >= pages}
+          onClick={() => onPage(pages)}
+          aria-label="Last page"
+          title="Last page"
+        >
+          <Icon name="chevs-right" />
         </button>
       </span>
     </div>
