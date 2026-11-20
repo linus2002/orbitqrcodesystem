@@ -652,6 +652,11 @@ router.post('/batches/:id/transition', requirePermission('batches:write'), async
   res.json(await serialization.transition(Number(req.params.id), to, { actor: req.user, req, reason: reason ?? null }));
 });
 
+/** A pilot batch goes live: its checks count from now on. (One way only.) */
+router.post('/batches/:id/make-live', requirePermission('batches:write'), async (req, res) => {
+  res.json(await serialization.makeLive(Number(req.params.id), { actor: req.user, req }));
+});
+
 router.get('/batches/:id/codes', requirePermission('codes:read'), async (req, res) => {
   res.json(
     await serialization.listCodes(Number(req.params.id), {

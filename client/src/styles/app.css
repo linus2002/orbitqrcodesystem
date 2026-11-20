@@ -886,3 +886,43 @@ table.data .badge {
   0%, 100% { transform: scale(1); }
   50%      { transform: scale(1.05); }
 }
+
+/* --------------------------------------------------------------------------
+   Cookie notice (components/CookieNotice.jsx)
+   A small bar on the public pages: one line, the details a tap away, one
+   button. Above the page, below the check sheet and dialogs.
+   -------------------------------------------------------------------------- */
+.cookie-notice {
+  position: fixed; z-index: 150;
+  left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+  margin-inline: auto; max-width: 640px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 12px 12px 14px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  animation: cookie-in 0.25s ease-out;
+}
+.cookie-notice p { flex: 1; margin: 0; font-size: 0.84rem; line-height: 1.45; color: var(--ink-2); }
+.cookie-notice-icon { width: 22px; height: 22px; flex: none; color: var(--ink-muted); }
+.cookie-notice-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; font-weight: 600; color: var(--ink); text-decoration: underline;
+}
+.cookie-notice-ok { flex: none; min-width: 64px; }
+/* Room under the page, so the bar never covers the last button. */
+body.has-cookie-notice { padding-bottom: 96px; }
+@media (max-width: 520px) {
+  .cookie-notice { flex-wrap: wrap; }
+  .cookie-notice p { flex-basis: calc(100% - 40px); }
+  .cookie-notice-ok { width: 100%; }
+  body.has-cookie-notice { padding-bottom: 150px; }
+}
+@keyframes cookie-in { from { transform: translateY(16px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cookie-notice { animation: none; } }
+
+/* The cookie list inside the privacy notice. */
+.cookie-table { width: 100%; border-collapse: collapse; margin: 8px 0 10px; font-size: 0.84rem; }
+.cookie-table th { text-align: left; font-weight: 600; color: var(--ink); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); }
+.cookie-table td { padding: 8px 8px 8px 0; vertical-align: top; color: var(--ink-2); border-bottom: 1px solid var(--line); line-height: 1.45; }
+.cookie-table td:last-child, .cookie-table th:last-child { white-space: nowrap; padding-right: 0; }

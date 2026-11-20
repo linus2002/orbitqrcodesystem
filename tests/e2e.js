@@ -327,6 +327,37 @@ try {
     cdp
   );
 
+  // The cookie notice: shown on a first visit, its details open at the cookie
+  // list, OK puts it away for good on this device.
+  const firstVisit = await cdp.json(`JSON.stringify({
+    shown: !!document.querySelector('.cookie-notice'),
+    oneButton: document.querySelectorAll('.cookie-notice button.btn').length === 1,
+  })`);
+  await cdp.json(`(document.querySelector('.cookie-notice-link').click(), '1')`);
+  await sleep(900);
+  const details = await cdp.json(`JSON.stringify({
+    open: !!document.querySelector('dialog.policy-dialog[open] #policy-cookies'),
+    listsTheCookies: ['qrs_checker', 'qrs_session', 'qrs_csrf'].every((c) =>
+      document.querySelector('dialog[open] .cookie-table')?.textContent.includes(c)),
+  })`);
+  await cdp.json(`(document.querySelector('dialog.policy-dialog[open]').close(), '1')`);
+  await sleep(300);
+  await cdp.json(`(document.querySelector('.cookie-notice-ok').click(), '1')`);
+  await sleep(300);
+  const goneNow = await cdp.json(`JSON.stringify(!document.querySelector('.cookie-notice'))`);
+  await cdp.goto(`${APP}/`, 2000);
+  check(
+    'a cookie notice shows once: its details list every cookie, and OK puts it away for good',
+    {
+      ...firstVisit,
+      detailsOpenAtCookies: details.open,
+      listsTheCookies: details.listsTheCookies,
+      goneAfterOk: goneNow,
+      goneAfterReload: await cdp.json(`JSON.stringify(!document.querySelector('.cookie-notice'))`),
+    },
+    cdp
+  );
+
   // Fill the form the way a person would - through React's own inputs, so
   // the page's validation and submit path are what is exercised, not a fetch.
   // Setting .value directly bypasses React, hence the native setter + event.

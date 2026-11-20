@@ -13,17 +13,27 @@ import { useEffect, useRef } from 'react';
 import { Icon } from '../components/Icons.jsx';
 
 // 2026-09-28: where each pack was bought, and the phone's location.
-export const POLICY_VERSION = '2026-09-28';
+// 2026-11-20: the cookies this site sets, and why (see CookieNotice).
+export const POLICY_VERSION = '2026-11-20';
 
-export default function PrivacyPolicy({ open, onClose, supportPhone }) {
+/**
+ * @param {object} props
+ * @param {'cookies'} [props.section]  open scrolled to that part (the cookie
+ *   notice's "Cookie details" link opens it at the cookies)
+ * @param {boolean} [props.standalone] opened on its own, not from the details
+ *   form - so it does not end with "by ticking the box"
+ */
+export default function PrivacyPolicy({ open, onClose, supportPhone, section, standalone = false }) {
   const ref = useRef(null);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
+    if (open && !dialog.open) {
+      dialog.showModal();
+      if (section) dialog.querySelector(`#policy-${section}`)?.scrollIntoView({ block: 'start' });
+    } else if (!open && dialog.open) dialog.close();
+  }, [open, section]);
 
   return (
     <dialog
@@ -98,9 +108,50 @@ export default function PrivacyPolicy({ open, onClose, supportPhone }) {
           database on its own cannot be used to pose as you.
         </p>
 
-        <p className="mt-16">
-          <strong>By ticking the box, you agree to the above.</strong>
+        <h3 id="policy-cookies">Cookies</h3>
+        <p>
+          This site sets only the cookies it needs to work. None are for advertising or tracking,
+          and none are shared with anyone else.
         </p>
+        <table className="cookie-table">
+          <thead>
+            <tr>
+              <th scope="col">Cookie</th>
+              <th scope="col">What it is for</th>
+              <th scope="col">Kept for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="mono">qrs_checker</td>
+              <td>
+                Remembers that this phone has already given its details, so you are asked only
+                once. Set only after you agree to this notice.
+              </td>
+              <td>180 days</td>
+            </tr>
+            <tr>
+              <td className="mono">qrs_session</td>
+              <td>Keeps Getmeds staff signed in to the dashboard. Never set for patients.</td>
+              <td>8 hours</td>
+            </tr>
+            <tr>
+              <td className="mono">qrs_csrf</td>
+              <td>Protects staff actions from being forged by another website. Staff only.</td>
+              <td>8 hours</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          You can delete them in your browser settings at any time. Deleting <span className="mono">qrs_checker</span> only
+          means you will be asked for your details again.
+        </p>
+
+        {!standalone && (
+          <p className="mt-16">
+            <strong>By ticking the box, you agree to the above.</strong>
+          </p>
+        )}
 
         <button className="btn btn-primary btn-block mt-16" type="button" onClick={onClose}>
           Close

@@ -74,6 +74,24 @@ export default function Scans() {
           </Toolbar>
         }
         title={`${fmtNumber(data?.total ?? 0)} checks`}
+        // Pilot batches' checks are left out by default. Say how many, with
+        // the way to see them - otherwise a check just made on a pilot batch
+        // (a sample carton) looks like it never happened.
+        description={
+          data?.hiddenTest > 0 ? (
+            <span className="row row-wrap">
+              <Icon name="info" />
+              {fmtNumber(data.hiddenTest)} {data.hiddenTest === 1 ? 'check' : 'checks'} on pilot batches hidden.
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setFilters((f) => ({ ...f, includeTest: true, page: 1 }))}
+              >
+                Show {data.hiddenTest === 1 ? 'it' : 'them'}
+              </button>
+            </span>
+          ) : undefined
+        }
         footer={
           data && (
             <Pager
@@ -105,7 +123,16 @@ export default function Scans() {
                   <span className="text-muted">not in registry</span>
                 ),
             },
-            { label: 'Result', render: (r) => <ResultBadge result={r.result} /> },
+            {
+              label: 'Result',
+              render: (r) => (
+                <span className="row">
+                  <ResultBadge result={r.result} />
+                  {/* Shown only once pilot checks are let in: which rows they are. */}
+                  {r.is_test === 1 && <span className="badge badge-neutral">pilot</span>}
+                </span>
+              ),
+            },
             { label: 'Reason', render: (r) => <span className="text-sm">{humanise(r.reason)}</span> },
             { label: 'Channel', render: (r) => r.channel },
             {

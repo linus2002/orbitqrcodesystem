@@ -276,7 +276,12 @@ export async function listScans({ page, pageSize, result, reason, channel, batch
     },
   });
 
-  return { items, total, ...meta };
+  // How many checks the pilot filter is hiding, so the log can say so rather
+  // than look empty: a pilot batch's scans are real scans of real packs to
+  // the person who just made one and came looking for it.
+  const hiddenTest = includeTest ? 0 : await db.count('scan', { ...where, is_test: 1 });
+
+  return { items, total, hiddenTest, ...meta };
 }
 
 /**

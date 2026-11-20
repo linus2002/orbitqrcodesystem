@@ -393,6 +393,36 @@ export async function transition(batchId, to, { actor, req, reason = null } = {}
   return await db.get('batch', batchId);
 }
 
+/**
+ * Take a pilot batch live: from now on its checks count in the scan log,
+ * the overview and the reports, like any other batch's.
+ *
+ * A pilot batch is set up as one (isTest) at creation, and until now there
+ * was no way out - so a batch made "to try it" that then went to print for
+ * real (the Venapto carton) kept every real scan of it out of the figures.
+ *
+ * One way only: turning a live batch into a pilot would quietly drop real
+ * checks from the reports, which is not a thing to make one click easy.
+ * Checks made while it was a pilot stay pilot checks - that is what they
+ * were. A patient's answer is the same either way.
+ */
+export async function makeLive(batchId, { actor, req } = {}) {
+  const batch = await db.get('batch', batchId);
+  if (!batch) throw notFound('Batch not found');
+  if (batch.is_test !== 1) throw badRequest('This batch is already live.');
+  await db.update('batch', batch, { is_test: 0 });
+  await audit.record({
+    actor,
+    req,
+    action: 'batch.made_live',
+    entityType: 'batch',
+    entityId: batchId,
+    detail: { batchNumber: batch.batch_number },
+  });
+  logger.info('batch made live', { batch: batch.batch_number });
+  return await db.get('batch', batchId);
+}
+
 /** Per-batch code statistics for the dashboard. */
 export async function batchStats(batchId) {
   // Every count in one request, computed by the Lake rather than by fetching

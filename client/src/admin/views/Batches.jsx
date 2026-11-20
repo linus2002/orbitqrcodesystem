@@ -347,6 +347,31 @@ function BatchActions({ batch, drawer, reload }) {
     }
   }
 
+  // A pilot batch's checks are left out of the scan log, overview and
+  // reports. Once its packs are real, this is the way out (one way only).
+  async function makeLive() {
+    if (
+      !window.confirm(
+        `Make batch ${batch.batch_number} live?\n\n` +
+          'From now on its checks count in the scan log, the overview and the reports, like any ' +
+          'other batch. Checks already made stay pilot checks. Patients see the same answer either ' +
+          'way.\n\nThis cannot be undone from the dashboard.'
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/admin/batches/${batch.id}/make-live`, { method: 'POST' });
+      toast(`Batch ${batch.batch_number} is live.`, 'success');
+      drawer.close();
+      reload();
+    } catch (err) {
+      toast(err.message, 'error');
+      setBusy(false);
+    }
+  }
+
   async function transition(to) {
     let reason = null;
     if (to === 'recalled') {
@@ -381,6 +406,11 @@ function BatchActions({ batch, drawer, reload }) {
           {a.label}
         </button>
       ))}
+      {batch.is_test === 1 && (
+        <button className="btn btn-sm" disabled={busy} onClick={makeLive} title="Count this batch's checks from now on">
+          Make it live
+        </button>
+      )}
       {removable && (
         <button className="btn btn-sm btn-danger" disabled={busy} onClick={remove}>
           Remove batch

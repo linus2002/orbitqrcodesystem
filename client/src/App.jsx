@@ -16,6 +16,7 @@ import PortalPage from './portal/PortalPage.jsx';
 import LeafletPage from './portal/LeafletPage.jsx';
 import LoginPage from './login/LoginPage.jsx';
 import NotFound from './components/NotFound.jsx';
+import CookieNotice from './components/CookieNotice.jsx';
 
 const AdminApp = lazy(() => import('./admin/AdminApp.jsx'));
 
@@ -51,6 +52,8 @@ export default function App() {
         />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      {/* What this site stores, once per device; not inside the dashboard. */}
+      <CookieNotice />
     </>
   );
 }
